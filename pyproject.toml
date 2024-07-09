@@ -1,0 +1,36 @@
+[tool.poetry]
+name = "splatnlp"
+version = "0.1.0"
+description = ""
+authors = ["Cesar E Garza <cesar@cegarza.com>"]
+readme = "README.md"
+packages = [
+    { include = "splatnlp", from = "src" },
+]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+scikit-learn = "^1.5.1"
+numpy = "^2.0.0"
+pandas = "^2.2.2"
+tqdm = "^4.66.4"
+requests = "^2.32.3"
+dask = {extras = ["complete"], version = "^2024.7.0"}
+gensim = "^4.3.2"
+
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.4.2"
+isort = "^5.13.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 80
+target-version = ['py310']
+
+[tool.isort]
+profile = "black"
+line_length = 80
