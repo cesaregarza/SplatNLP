@@ -18,6 +18,8 @@ requests = "^2.32.3"
 dask = {extras = ["complete"], version = "^2024.7.0"}
 gensim = "^4.3.2"
 orjson = "^3.10.6"
+sqlalchemy = "^2.0.31"
+psutil = "^6.0.0"
 
 
 [tool.poetry.group.dev.dependencies]

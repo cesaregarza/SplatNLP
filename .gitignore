@@ -1,1 +1,22 @@
+# Python-related files
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environment
 .python-version
+venv/
+env/
+
+# Database files
+*.db
+*.sqlite3
+
+# Other common Python-related files to ignore
+.pytest_cache/
+.coverage
+.tox/
+.mypy_cache/
+
+# Notebooks
+test*.ipynb

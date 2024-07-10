@@ -16,12 +16,31 @@ def pull_all(db: sqlite3.Connection) -> None:
 
     zip_file = zipfile.ZipFile(io.BytesIO(response.content))
 
-    for filename in zip_file.namelist():
+    # Drop the existing table if it exists
+    db.execute("DROP TABLE IF EXISTS StatInkBattleResults")
+
+    for i, filename in enumerate(zip_file.namelist()[1:]):
         with zip_file.open(filename) as file:
             df = pd.read_csv(file)
-            df.to_sql(
-                "StatInkBattleResults", db, if_exists="append", index=False
-            )
+
+            # For the first file, create the table with the id column
+            if i == 0:
+                df["id"] = range(1, len(df) + 1)
+                df.to_sql(
+                    "StatInkBattleResults",
+                    db,
+                    index=False,
+                    dtype={"id": "INTEGER PRIMARY KEY AUTOINCREMENT"},
+                )
+            else:
+                # For subsequent files, append to the existing table
+                last_id = db.execute(
+                    "SELECT MAX(id) FROM StatInkBattleResults"
+                ).fetchone()[0]
+                df["id"] = range(last_id + 1, last_id + len(df) + 1)
+                df.to_sql(
+                    "StatInkBattleResults", db, if_exists="append", index=False
+                )
 
     db.commit()
 
