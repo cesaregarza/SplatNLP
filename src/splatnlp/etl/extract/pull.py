@@ -1,55 +1,43 @@
 import io
-import sqlite3
+import os
 import zipfile
 from datetime import datetime
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import requests
 
 BASE_URL = "https://dl-stats.stats.ink/splatoon-3/battle-results-csv/"
 
 
-def pull_all(db: sqlite3.Connection) -> None:
+def pull_all() -> pd.DataFrame:
     URL = BASE_URL + "battle-results-csv.zip"
     response = requests.get(URL)
     response.raise_for_status()
 
     zip_file = zipfile.ZipFile(io.BytesIO(response.content))
 
-    # Drop the existing table if it exists
-    db.execute("DROP TABLE IF EXISTS StatInkBattleResults")
-
-    for i, filename in enumerate(zip_file.namelist()[1:]):
+    dfs = []
+    for filename in zip_file.namelist()[1:]:
         with zip_file.open(filename) as file:
             df = pd.read_csv(file)
+            dfs.append(df)
 
-            # For the first file, create the table with the id column
-            if i == 0:
-                df["id"] = range(1, len(df) + 1)
-                df.to_sql(
-                    "StatInkBattleResults",
-                    db,
-                    index=False,
-                    dtype={"id": "INTEGER PRIMARY KEY AUTOINCREMENT"},
-                )
-            else:
-                # For subsequent files, append to the existing table
-                last_id = db.execute(
-                    "SELECT MAX(id) FROM StatInkBattleResults"
-                ).fetchone()[0]
-                df["id"] = range(last_id + 1, last_id + len(df) + 1)
-                df.to_sql(
-                    "StatInkBattleResults", db, if_exists="append", index=False
-                )
-
-    db.commit()
+    return pd.concat(dfs, ignore_index=True)
 
 
-def update_db(db: sqlite3.Connection) -> None:
-    cursor = db.cursor()
-    cursor.execute("SELECT MAX(period) FROM StatInkBattleResults")
-    last_period = cursor.fetchone()[0]
+def update_data(base_path: str) -> pd.DataFrame:
+    metadata_path = os.path.join(base_path, "metadata.txt")
+    try:
+        with open(metadata_path, "r") as f:
+            last_period = f.read().strip()
+    except FileNotFoundError:
+        df = pull_all()
+        return df
+
     parsed_period: datetime = pd.to_datetime(last_period)
+    new_dfs = []
 
     while True:
         parsed_period += pd.DateOffset(days=1)
@@ -64,7 +52,34 @@ def update_db(db: sqlite3.Connection) -> None:
             break
         response.raise_for_status()
 
-        df = pd.read_csv(io.StringIO(response.text))
-        df.to_sql("StatInkBattleResults", db, if_exists="append", index=False)
+        new_df = pd.read_csv(io.StringIO(response.text))
+        new_dfs.append(new_df)
 
-    db.commit()
+    if new_dfs:
+        return pd.concat(new_dfs, ignore_index=True)
+    else:
+        return pd.DataFrame()
+
+
+def save_data(df: pd.DataFrame, base_path: str) -> None:
+    if not df.empty:
+        table = pa.Table.from_pandas(df)
+        pq.write_to_dataset(
+            table,
+            root_path=os.path.join(base_path, "statink"),
+            partition_cols=["weapon"],
+        )
+
+        max_date = df["period"].max()
+        with open(os.path.join(base_path, "metadata.txt"), "w") as f:
+            f.write(str(max_date))
+
+
+def main(base_path: str):
+    df = update_data(base_path)
+    save_data(df, base_path)
+
+
+if __name__ == "__main__":
+    base_path = "data/"
+    main(base_path)

@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 import requests
 
 API_REF_URL = "https://stat.ink/api/v3/weapon"
@@ -5,6 +7,7 @@ TRANSLATION_URL = "https://splat.top/api/game_translation"
 FINAL_REF_URL = "https://splat.top/api/weapon_info"
 
 
+@lru_cache(maxsize=None)
 def generate_maps() -> tuple[dict[str, str], dict[str, str]]:
     api_ref = requests.get(API_REF_URL).json()
     translation = requests.get(TRANSLATION_URL).json()
@@ -30,7 +33,7 @@ def generate_maps() -> tuple[dict[str, str], dict[str, str]]:
 
     key_to_id = {
         weapon["key"]: reference_kits.get(
-            ref_to_id.get(name_to_ref.get(weapon["name"], ""), ""), ""
+            ref_to_id.get(name_to_ref.get(weapon["name"]["en_US"], ""), ""), ""
         )
         for weapon in api_ref
     }

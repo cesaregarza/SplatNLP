@@ -20,3 +20,6 @@ env/
 
 # Notebooks
 test*.ipynb
+
+# Data
+data/
