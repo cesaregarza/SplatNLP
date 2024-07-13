@@ -3,6 +3,7 @@ import logging
 import os
 import zipfile
 from datetime import datetime
+from typing import Literal, overload
 
 import pandas as pd
 import pyarrow as pa
@@ -101,9 +102,20 @@ def save_data(df: pd.DataFrame, base_path: str) -> None:
         logger.info("No data to save.")
 
 
-def main(base_path: str):
+@overload
+def main(base_path: str, return_df: Literal[False]) -> None: ...
+
+
+@overload
+def main(base_path: str, return_df: Literal[True]) -> pd.DataFrame: ...
+
+
+def main(base_path: str, return_df: bool = False) -> pd.DataFrame | None:
     logger.info("Starting main function")
     df = update_data(base_path)
+    if return_df:
+        return df
+
     save_data(df, base_path)
     logger.info("Main function completed")
 
