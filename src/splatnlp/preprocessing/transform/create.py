@@ -5,7 +5,6 @@ import xxhash
 
 from splatnlp.preprocessing.transform.parse import generate_maps
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
