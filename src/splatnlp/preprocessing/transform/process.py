@@ -37,23 +37,29 @@ def process_abilities(df: pd.DataFrame) -> pd.DataFrame:
     cols = []
     for main_ability in MAIN_ONLY_ABILITIES:
         logger.debug(f"Processing main ability: {main_ability}")
-        cols.append(
-            abilities_df[main_ability]
-            .gt(0)
-            .map({True: f"{main_ability} ", False: ""})
-            .rename(main_ability)
-        )
+        try:
+            cols.append(
+                abilities_df[main_ability]
+                .gt(0)
+                .map({True: f"{main_ability} ", False: ""})
+                .rename(main_ability)
+            )
+        except KeyError:
+            cols.append(pd.Series("", index=df.index, name=main_ability))
 
     for ability in STANDARD_ABILITIES:
         logger.debug(f"Processing standard ability: {ability}")
         for threshold in BUCKET_THRESHOLDS:
             tag = f"{ability}_{threshold}"
-            cols.append(
-                abilities_df[ability]
-                .ge(threshold)
-                .map({True: f"{tag} ", False: ""})
-                .rename(tag)
-            )
+            try:
+                cols.append(
+                    abilities_df[ability]
+                    .ge(threshold)
+                    .map({True: f"{tag} ", False: ""})
+                    .rename(tag)
+                )
+            except KeyError:
+                cols.append(pd.Series("", index=df.index, name=tag))
 
     ability_col = (
         pd.concat(cols, axis=1).sum(axis=1).str.strip().rename("ability_tags")
