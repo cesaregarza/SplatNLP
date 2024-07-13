@@ -55,7 +55,17 @@ def process_abilities(df: pd.DataFrame) -> pd.DataFrame:
                 .rename(tag)
             )
 
-    result_df = pd.concat([df, *cols], axis=1)
+    ability_col = (
+        pd.concat(cols, axis=1).sum(axis=1).str.strip().rename("ability_tags")
+    )
+    result_df = pd.concat([df, ability_col], axis=1)
+
+    result_df["ability_tags"] = (
+        result_df["ability_tags"]
+        .add(" weapon_id_")
+        .add(result_df["weapon_id"].astype(str))
+    )
+
     logger.info(
         f"Finished processing abilities. Final DataFrame shape: %s",
         str(result_df.shape),

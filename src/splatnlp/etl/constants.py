@@ -29,3 +29,19 @@ STANDARD_ABILITIES = [
     "swim_speed_up",
 ]
 BUCKET_THRESHOLDS = [3, 10, 20, 30, 40, 50, 57]
+REMOVE_COLUMNS = [
+    "kill-assist",
+    "kill",
+    "assist",
+    "death",
+    "special",
+    "inked",
+    "abilities",
+    "player_no",
+    "lobby",
+    "mode",
+    "win",
+    "weapon",
+    "ability_hash",
+    "team",
+]
