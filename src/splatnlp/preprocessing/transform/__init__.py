@@ -2,10 +2,13 @@ import logging
 
 import pandas as pd
 
-from splatnlp.etl.transform.create import add_columns, create_weapon_df
-from splatnlp.etl.transform.process import process_abilities
-from splatnlp.etl.transform.remove import remove
-from splatnlp.etl.transform.sample import sample
+from splatnlp.preprocessing.transform.create import (
+    add_columns,
+    create_weapon_df,
+)
+from splatnlp.preprocessing.transform.process import process_abilities
+from splatnlp.preprocessing.transform.remove import remove
+from splatnlp.preprocessing.transform.sample import sample
 
 logger = logging.getLogger(__name__)
 

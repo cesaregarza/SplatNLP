@@ -3,7 +3,7 @@ import logging
 import orjson
 import pandas as pd
 
-from splatnlp.etl.constants import (
+from splatnlp.preprocessing.constants import (
     BUCKET_THRESHOLDS,
     MAIN_ONLY_ABILITIES,
     STANDARD_ABILITIES,

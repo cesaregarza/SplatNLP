@@ -3,7 +3,7 @@ import logging
 import pandas as pd
 import xxhash
 
-from splatnlp.etl.extract.parse import generate_maps
+from splatnlp.preprocessing.extract.parse import generate_maps
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

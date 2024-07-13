@@ -2,7 +2,7 @@ import logging
 
 import pandas as pd
 
-from splatnlp.etl.constants import REMOVE_COLUMNS
+from splatnlp.preprocessing.constants import REMOVE_COLUMNS
 
 logger = logging.getLogger(__name__)
 
