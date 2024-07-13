@@ -5,10 +5,25 @@ import requests
 API_REF_URL = "https://stat.ink/api/v3/weapon"
 TRANSLATION_URL = "https://splat.top/api/game_translation"
 FINAL_REF_URL = "https://splat.top/api/weapon_info"
+BASE_IMAGE_URL = (
+    "https://splat-top.nyc3.cdn.digitaloceanspaces.com/assets/weapon_flat/"
+    "Path_Wst_%s.png"
+)
 
 
 @lru_cache(maxsize=None)
-def generate_maps() -> tuple[dict[str, str], dict[str, str]]:
+def generate_maps() -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    """Generate mappings for weapon data.
+
+    This function fetches data from various APIs and generates three mappings:
+    1. key_to_id: Maps stat.ink weapon keys to their corresponding IDs.
+    2. id_to_name: Maps weapon IDs to their names.
+    3. id_to_url: Maps weapon IDs to their image URLs.
+
+    Returns:
+        tuple[dict[str, str], dict[str, str], dict[str, str]]: A tuple
+        containing three dictionaries: key_to_id, id_to_name, and id_to_url.
+    """
     api_ref = requests.get(API_REF_URL).json()
     translation = requests.get(TRANSLATION_URL).json()
     final_ref = requests.get(FINAL_REF_URL).json()
@@ -44,4 +59,9 @@ def generate_maps() -> tuple[dict[str, str], dict[str, str]]:
         if value in ref_to_id
     }
 
-    return key_to_id, id_to_name
+    id_to_url = {
+        key: BASE_IMAGE_URL % (value["class"] + "_" + value["kit"])
+        for key, value in final_ref.items()
+    }
+
+    return key_to_id, id_to_name, id_to_url

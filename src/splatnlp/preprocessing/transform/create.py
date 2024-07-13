@@ -47,7 +47,7 @@ def create_weapon_df(df: pd.DataFrame) -> pd.DataFrame:
 
 def add_columns(df: pd.DataFrame) -> pd.DataFrame:
     logger.info("Starting add_columns function")
-    key_to_id, _ = generate_maps()
+    key_to_id, _, _ = generate_maps()
     df["weapon_id"] = df["weapon"].map(key_to_id)
 
     # Drop rows with missing abilities
