@@ -1,11 +1,10 @@
 import logging
 
 import numpy as np
-import pandas as pd
 from gensim.models import Doc2Vec
 from sklearn.manifold import TSNE
 
-from splatnlp.preprocessing.transform.parse import generate_maps
+from splatnlp.preprocessing.transform.parse import get_all_ids
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +30,12 @@ def reduce_dimensions(
     Returns:
         np.ndarray: The reduced vectors.
     """
-    _, id_to_name, _ = generate_maps()
-
     logger.info("Starting reduce_dimensions function")
     logger.debug(f"Input model: {model}")
 
     logger.info("Extracting vectors from model")
-    vectors = model.dv.vectors
+    ids = get_all_ids()
+    vectors = {weapon_id: model.dv[weapon_id] for weapon_id in ids}
 
     logger.info("Reducing dimensions with t-SNE")
     reduced_vectors = TSNE(
