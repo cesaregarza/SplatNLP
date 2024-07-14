@@ -65,3 +65,18 @@ def generate_maps() -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
     }
 
     return key_to_id, id_to_name, id_to_url
+
+
+@lru_cache(maxsize=None)
+def get_all_ids() -> list[str]:
+    """Get all weapon IDs.
+
+    Returns:
+        list[str]: A list of all weapon IDs.
+    """
+    weapon_ref = requests.get(FINAL_REF_URL).json()
+    return list(
+        {
+            k: v for k, v in weapon_ref.items() if k == str(v["reference_id"])
+        }.keys()
+    )
