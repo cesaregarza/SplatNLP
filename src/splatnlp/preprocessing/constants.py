@@ -28,7 +28,7 @@ STANDARD_ABILITIES = [
     "sub_resistance_up",
     "swim_speed_up",
 ]
-BUCKET_THRESHOLDS = [3, 10, 20, 30, 40, 50, 57]
+BUCKET_THRESHOLDS = [3, 6, 12, 15, 21, 29, 38, 51, 57]
 REMOVE_COLUMNS = [
     "kill-assist",
     "kill",
@@ -45,3 +45,5 @@ REMOVE_COLUMNS = [
     "ability_hash",
     "team",
 ]
+MASK = "<MASK>"
+PAD = "<PAD>"
