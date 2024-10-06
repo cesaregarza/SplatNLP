@@ -1,29 +1,29 @@
 import pandas as pd
 from torch.utils.data import DataLoader
 
-from splatnlp.preprocessing.constants import MASK, PAD
+from splatnlp.preprocessing.constants import PAD
 from splatnlp.preprocessing.datasets.dataset import (
-    MaskedSetDataset,
+    SetDataset,
     create_collate_fn,
 )
 
 
 def generate_tokenized_datasets(
-    tokenized_abilities: pd.Series,
+    df: pd.DataFrame,
     frac: float = 0.1,
     random_state: int | None = None,
     validation_size: float = 0.1,
     test_size: float = 0.2,
-) -> tuple[list[list[int]], list[list[int]], list[list[int]]]:
-    """Generate train, validation, and test datasets from tokenized ability
-    tags.
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Generate train, validation, and test datasets from a DataFrame containing
+    tokenized ability tags and weapon IDs.
 
-    This function samples a fraction of the input tokenized dataset and splits
-    it into train, validation, and test sets.
+    This function samples a fraction of the input dataset and splits it into
+    train, validation, and test sets.
 
     Args:
-        tokenized_abilities (pd.Series): The list of tokenized ability tags,
-            where each item is a list of integer IDs representing ability tags.
+        df (pd.DataFrame): The DataFrame containing 'ability_tags' and
+            'weapon_id' columns.
         frac (float, optional): The fraction of the dataset to sample. Defaults
             to 0.1.
         random_state (int, optional): The random state for sampling. If None,
@@ -34,57 +34,53 @@ def generate_tokenized_datasets(
             for testing. Defaults to 0.2.
 
     Returns:
-        tuple[list[list[int]], list[list[int]], list[list[int]]]::
-            - list[list[int]]: The training dataset.
-            - list[list[int]]: The validation dataset.
-            - list[list[int]]: The test dataset.
-            Each dataset is a list of lists, where each inner list contains
-            integer IDs representing tokenized ability tags.
+        tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+            - pd.DataFrame: The training dataset.
+            - pd.DataFrame: The validation dataset.
+            - pd.DataFrame: The test dataset.
+            Each dataset is a DataFrame containing 'ability_tags' and
+            'weapon_id' columns.
     """
     # Sample the dataset
     if random_state is not None:
-        sampled_abilities = tokenized_abilities.sample(
-            frac=frac, random_state=random_state
-        )
+        sampled_df = df.sample(frac=frac, random_state=random_state)
     else:
-        sampled_abilities = tokenized_abilities.sample(frac=frac)
+        sampled_df = df.sample(frac=frac)
 
     # Split the dataset
-    total_size = len(sampled_abilities)
+    total_size = len(sampled_df)
     train_size = int(total_size * (1 - validation_size - test_size))
     validation_size = int(total_size * validation_size)
-    train_X = sampled_abilities.iloc[:train_size].tolist()
-    validation_X = sampled_abilities.iloc[
-        train_size : train_size + validation_size
-    ].tolist()
-    test_X = sampled_abilities.iloc[train_size + validation_size :].tolist()
-    return train_X, validation_X, test_X
+
+    train_df = sampled_df.iloc[:train_size]
+    validation_df = sampled_df.iloc[train_size : train_size + validation_size]
+    test_df = sampled_df.iloc[train_size + validation_size :]
+
+    return train_df, validation_df, test_df
 
 
 def generate_dataloaders(
-    train_set: list[list[int]],
-    validation_set: list[list[int]],
-    test_set: list[list[int]],
+    train_set: pd.DataFrame,
+    validation_set: pd.DataFrame,
+    test_set: pd.DataFrame,
     vocab_size: int,
-    mask_token_id: int,
     pad_token_id: int,
-    num_masks_per_set: int = 5,
+    num_instances_per_set: int = 5,
     skew_factor: float = 1.2,
     **kwargs,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
     """Generate DataLoaders for train, validation, and test sets.
 
     Args:
-        train_set (list[list[int]]): The training dataset.
-        validation_set (list[list[int]]): The validation dataset.
-        test_set (list[list[int]]): The test dataset.
+        train_set (pd.DataFrame): The training dataset.
+        validation_set (pd.DataFrame): The validation dataset.
+        test_set (pd.DataFrame): The test dataset.
         vocab_size (int): The size of the vocabulary.
-        mask_token_id (int): The ID of the mask token.
         pad_token_id (int): The ID of the padding token.
-        num_masks_per_set (int, optional): Number of masked instances to
+        num_instances_per_set (int, optional): Number of instances to
             generate per set. Defaults to 5.
-        skew_factor (float, optional): Factor to control the skew of the mask
-            distribution. Defaults to 1.2.
+        skew_factor (float, optional): Factor to control the skew of the
+            removal distribution. Defaults to 1.2.
         **kwargs: Additional keyword arguments for DataLoader.
 
     Returns:
@@ -111,11 +107,10 @@ def generate_dataloaders(
     for dataset in [train_set, validation_set, test_set]:
         dataloaders.append(
             DataLoader(
-                MaskedSetDataset(
-                    sets=dataset,
+                SetDataset(
+                    df=dataset,
                     vocab_size=vocab_size,
-                    mask_token_id=mask_token_id,
-                    num_masks_per_set=num_masks_per_set,
+                    num_instances_per_set=num_instances_per_set,
                     skew_factor=skew_factor,
                 ),
                 collate_fn=collate_fn,

@@ -238,6 +238,7 @@ class PoolingMultiheadAttention(nn.Module):
             use_layer_norm=use_layer_norm,
             dropout=dropout,
         )
+        self.out_proj = nn.Linear(embed_dim, embed_dim)
 
     def forward(
         self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None
@@ -254,40 +255,16 @@ class PoolingMultiheadAttention(nn.Module):
         """
         batch_size = x.size(0)
         seed_vectors = self.seed_vectors.unsqueeze(0).expand(batch_size, -1, -1)
-        out = self.mab(seed_vectors, x, key_padding_mask=key_padding_mask)
+        x = self.mab(seed_vectors, x, key_padding_mask=key_padding_mask)
+        out = self.out_proj(x)
         return out
 
 
 class SetTransformer(nn.Module):
-    """Set Transformer model.
-
-    This module implements a Set Transformer, which is a neural network
-    architecture designed to process sets of varying sizes.
-
-    Args:
-        input_dim (int): The dimension of the input features.
-        num_outputs (int): The number of outputs (set elements) to produce.
-        embed_dim (int, optional): The embedding dimension. Defaults to 128.
-        num_heads (int, optional): The number of attention heads. Defaults to 4.
-        num_inducing_points (int, optional): The number of inducing points for
-            the Induced Set Attention Blocks. Defaults to 32.
-        use_layer_norm (bool, optional): Whether to use layer normalization.
-            Defaults to False.
-        dropout (float, optional): Dropout rate. Defaults to 0.0.
-
-    Attributes:
-        input_proj (nn.Module): Input projection layer.
-        enc_layer1 (InducedSetAttentionBlock): First encoder layer.
-        enc_layer2 (InducedSetAttentionBlock): Second encoder layer.
-        dec_layer1 (PoolingMultiheadAttention): First decoder layer.
-        dec_layer2 (SelfAttentionBlock): Second decoder layer.
-        dec_layer3 (SelfAttentionBlock): Third decoder layer.
-    """
-
     def __init__(
         self,
         input_dim: int,
-        num_outputs: int,
+        num_seeds: int,
         embed_dim: int = 128,
         num_heads: int = 4,
         num_inducing_points: int = 32,
@@ -321,7 +298,7 @@ class SetTransformer(nn.Module):
         self.dec_layer1 = PoolingMultiheadAttention(
             embed_dim=embed_dim,
             num_heads=num_heads,
-            num_seeds=num_outputs,
+            num_seeds=num_seeds,
             use_layer_norm=use_layer_norm,
             dropout=dropout,
         )
@@ -341,109 +318,102 @@ class SetTransformer(nn.Module):
     def forward(
         self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
-        """Forward pass of the SetTransformer.
-
-        Args:
-            x (torch.Tensor): The input tensor.
-            key_padding_mask (Optional[torch.Tensor], optional): The key
-                padding mask. Defaults to None.
-
-        Returns:
-            torch.Tensor: The output tensor after set transformation.
-        """
         x = self.input_proj(x)
-        x = self.enc_layer1(x, key_padding_mask=key_padding_mask)
-        x = self.enc_layer2(x, key_padding_mask=key_padding_mask)
+        x = self.enc_layer1(x, key_padding_mask=key_padding_mask) + x
+        x = self.enc_layer2(x, key_padding_mask=key_padding_mask) + x
         x = self.dec_layer1(x, key_padding_mask=key_padding_mask)
-        # Assuming `x` no longer contains padding after dec_layer1
-        x = self.dec_layer2(x)
-        x = self.dec_layer3(x)
+        x = self.dec_layer2(x) + x
+        x = self.dec_layer3(x) + x
         return x
 
 
 class SetTransformerLayer(nn.Module):
-    """A single layer of the Set Transformer.
-
-    This module implements a single layer of the Set Transformer, which can be
-    either an Induced Set Attention Block or a Self-Attention Block, followed
-    by a feedforward network and layer normalization.
-
-    Args:
-        embed_dim (int): The embedding dimension of the input.
-        num_heads (int): The number of attention heads.
-        num_inducing_points (int, optional): The number of inducing points for
-            the Induced Set Attention Block. Defaults to None.
-        use_layer_norm (bool, optional): Whether to use layer normalization.
-            Defaults to False.
-        dropout (float, optional): Dropout rate. Defaults to 0.0.
-        is_induced (bool, optional): Whether to use Induced Set Attention Block.
-            Defaults to False.
-
-    Attributes:
-        transformer_block (nn.Module): Either InducedSetAttentionBlock or
-            SelfAttentionBlock.
-        feedforward (nn.Sequential): The feedforward network.
-        layer_norm (nn.LayerNorm): Layer normalization.
-    """
-
     def __init__(
         self,
         embed_dim: int,
         num_heads: int,
-        num_inducing_points: int = None,
-        use_layer_norm: bool = False,
-        dropout: float = 0.0,
-        is_induced: bool = False,
+        num_inducing_points: int,
+        use_layer_norm: bool = True,
+        dropout: float = 0.1,
     ):
         super().__init__()
-        if is_induced and num_inducing_points is not None:
-            self.transformer_block = InducedSetAttentionBlock(
-                embed_dim=embed_dim,
-                num_heads=num_heads,
-                num_inducing_points=num_inducing_points,
-                use_layer_norm=use_layer_norm,
-                dropout=dropout,
-            )
-        else:
-            self.transformer_block = SelfAttentionBlock(
-                embed_dim=embed_dim,
-                num_heads=num_heads,
-                use_layer_norm=use_layer_norm,
-                dropout=dropout,
-            )
+        self.set_transformer = SetTransformer(
+            input_dim=embed_dim,
+            num_seeds=num_inducing_points,
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            num_inducing_points=num_inducing_points,
+            use_layer_norm=use_layer_norm,
+            dropout=dropout,
+        )
+
+        # Cross-attention layer to project back to original sequence length
+        self.cross_attention = MultiheadAttentionBlock(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            use_layer_norm=use_layer_norm,
+            dropout=dropout,
+        )
+
         self.feedforward = nn.Sequential(
             nn.Linear(embed_dim, embed_dim * 4),
             nn.GELU(),
             nn.Linear(embed_dim * 4, embed_dim),
         )
-        self.layer_norm = nn.LayerNorm(embed_dim)
+        self.use_layer_norm = use_layer_norm
+        if use_layer_norm:
+            self.layer_norm1 = nn.LayerNorm(embed_dim)
+            self.layer_norm2 = nn.LayerNorm(embed_dim)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(
         self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
-        x = self.transformer_block(x, key_padding_mask=key_padding_mask)
+        # Apply SetTransformer
+        set_transformer_output = self.set_transformer(
+            x, key_padding_mask=key_padding_mask
+        )
+
+        # Project SetTransformer output back to input sequence length via cross-attention
+        projected_output = self.cross_attention(
+            query=x,
+            key=set_transformer_output,
+            key_padding_mask=None,
+        )
+
+        # First residual connection and layer norm
+        x = x + self.dropout(projected_output)
+        if self.use_layer_norm:
+            x = self.layer_norm1(x)
+
+        # Feedforward network
         ff_output = self.feedforward(x)
-        x = x + ff_output
-        x = self.layer_norm(x)
+
+        # Second residual connection and layer norm
+        x = x + self.dropout(ff_output)
+        if self.use_layer_norm:
+            x = self.layer_norm2(x)
+
         return x
 
 
 class SetCompletionModel(nn.Module):
     """A Set Completion Model using Set Transformer architecture.
 
-    This model takes a set of tokens as input, processes them through a stack of
-    Set Transformer layers, and outputs a fixed-size representation for set
-    completion tasks.
+    This model takes a set of tokens and a single weapon token as input,
+    processes them through a stack of Set Transformer layers, and outputs a
+    fixed-size representation for set completion tasks.
 
     The architecture consists of:
-    1. An embedding layer to convert token IDs to dense vectors
+    1. Two embedding layers: one for ability tokens and one for weapon tokens
     2. An optional input projection layer if embedding_dim != hidden_dim
     3. A stack of SetTransformerLayers with InducedSetAttentionBlocks
     4. A masked mean pooling operation to aggregate set information
     5. An output layer to produce the final representation
 
     Args:
-        vocab_size (int): Size of the vocabulary
+        vocab_size (int): Size of the ability token vocabulary
+        weapon_vocab_size (int): Size of the weapon token vocabulary
         embedding_dim (int): Dimension of the token embeddings
         hidden_dim (int): Dimension of the hidden layers in the transformer
         output_dim (int): Dimension of the output representation
@@ -459,6 +429,7 @@ class SetCompletionModel(nn.Module):
     def __init__(
         self,
         vocab_size: int,
+        weapon_vocab_size: int,
         embedding_dim: int,
         hidden_dim: int,
         output_dim: int,
@@ -470,10 +441,14 @@ class SetCompletionModel(nn.Module):
         pad_token_id: int = None,
     ):
         super().__init__()
-        self.embedding = nn.Embedding(
+        self.ability_embedding = nn.Embedding(
             num_embeddings=vocab_size,
             embedding_dim=embedding_dim,
             padding_idx=pad_token_id,
+        )
+        self.weapon_embedding = nn.Embedding(
+            num_embeddings=weapon_vocab_size,
+            embedding_dim=embedding_dim,
         )
 
         if embedding_dim != hidden_dim:
@@ -490,7 +465,6 @@ class SetCompletionModel(nn.Module):
                     num_inducing_points=num_inducing_points,
                     use_layer_norm=use_layer_norm,
                     dropout=dropout,
-                    is_induced=True,
                 )
             )
         self.transformer_layers = nn.ModuleList(layers)
@@ -525,21 +499,16 @@ class SetCompletionModel(nn.Module):
         return x_mean
 
     def forward(
-        self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None
+        self,
+        ability_tokens: torch.Tensor,
+        weapon_token: torch.Tensor,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        """
-        Forward pass of the SetCompletionModel.
-
-        Args:
-            x (torch.Tensor): Input tensor of token IDs, shape (batch_size,
-                seq_length)
-            key_padding_mask (Optional[torch.Tensor]): Boolean mask for padded
-                positions
-
-        Returns:
-            torch.Tensor: Output representation, shape (batch_size, output_dim)
-        """
-        embeddings = self.embedding(x)
+        ability_embeddings = self.ability_embedding(ability_tokens)
+        weapon_embeddings = self.weapon_embedding(weapon_token).expand_as(
+            ability_embeddings
+        )
+        embeddings = ability_embeddings + weapon_embeddings
         x = self.input_proj(embeddings)
         for layer in self.transformer_layers:
             x = layer(x, key_padding_mask=key_padding_mask)
