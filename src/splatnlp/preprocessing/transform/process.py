@@ -32,6 +32,8 @@ def process_abilities(df: pd.DataFrame) -> pd.DataFrame:
         .astype(int)
     )
     abilities_df.index = df.index
+    only_full_index = abilities_df.sum(axis=1).loc[lambda x: x == 57].index
+    abilities_df = abilities_df.loc[only_full_index]
     logger.debug(f"Processed abilities DataFrame shape: {abilities_df.shape}")
 
     cols = []
@@ -64,7 +66,9 @@ def process_abilities(df: pd.DataFrame) -> pd.DataFrame:
     ability_col = (
         pd.concat(cols, axis=1).sum(axis=1).str.strip().rename("ability_tags")
     )
-    result_df = pd.concat([df, ability_col], axis=1)
+    result_df = pd.concat([df, ability_col], axis=1).dropna(
+        subset=["ability_tags"]
+    )
 
     result_df["ability_tags"] = (
         result_df["ability_tags"]

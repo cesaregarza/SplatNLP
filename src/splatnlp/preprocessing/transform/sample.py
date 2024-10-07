@@ -47,8 +47,8 @@ def sample(
     df = df.groupby("ability_hash").head(max_player_entries)
     logger.debug(f"DataFrame shape after grouping by ability_hash: {df.shape}")
 
-    win_df = df[df["win"]]
-    loss_df = df[~df["win"]]
+    win_df = df[df["win"].astype(bool)]
+    loss_df = df[~df["win"].astype(bool)]
     logger.debug(f"Win DataFrame shape: {win_df.shape}")
     logger.debug(f"Loss DataFrame shape: {loss_df.shape}")
 

@@ -1,6 +1,7 @@
 import io
 import logging
 import os
+import sqlite3
 import zipfile
 from datetime import datetime
 from typing import Literal, overload
@@ -86,31 +87,25 @@ def update_data(base_path: str) -> pd.DataFrame:
 
 def save_data(df: pd.DataFrame, base_path: str) -> None:
     logger.info("Starting to save data")
-    csv_path = os.path.join(base_path, "statink", "data.csv")
-    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+    db_path = os.path.join(base_path, "statink", "data.sqlite")
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
-    if os.path.exists(csv_path):
-        logger.info("Existing data found. Appending new data.")
-        existing_df = pd.read_csv(csv_path)
-        combined_df = pd.concat(
-            [existing_df, df], ignore_index=True
-        ).drop_duplicates()
-    else:
-        logger.info("No existing data found. Creating new file.")
-        combined_df = df
+    conn = sqlite3.connect(db_path)
 
-    if not combined_df.empty:
-        combined_df.to_csv(csv_path, index=False)
-        logger.debug(f"Data saved to {csv_path}")
+    if not df.empty:
+        df.to_sql("data", conn, if_exists="append", index=False)
+        logger.debug(f"Data appended to {db_path}")
 
         metadata_path = os.path.join(base_path, "metadata.txt")
         os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
-        max_date = combined_df["period"].max()
+        max_date = df["period"].max()
         with open(metadata_path, "w") as f:
             f.write(str(max_date))
         logger.debug(f"Metadata updated with max date: {max_date}")
     else:
         logger.info("No data to save.")
+
+    conn.close()
 
 
 @overload
@@ -124,12 +119,6 @@ def main(base_path: str, return_df: Literal[True]) -> pd.DataFrame: ...
 def main(base_path: str, return_df: bool = False) -> pd.DataFrame | None:
     logger.info("Starting main function")
     df = update_data(base_path)
-
-    csv_path = os.path.join(base_path, "statink", "data.csv")
-    if os.path.exists(csv_path):
-        logger.info("Existing data found. Merging with new data.")
-        existing_df = pd.read_csv(csv_path)
-        df = pd.concat([existing_df, df], ignore_index=True).drop_duplicates()
 
     if return_df:
         return df

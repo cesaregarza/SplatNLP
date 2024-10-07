@@ -30,7 +30,7 @@ def create_weapon_df(df: pd.DataFrame) -> pd.DataFrame:
             )
             player_dfs.append(player_df)
 
-    columns_to_keep = ["lobby", "mode", "win"]
+    columns_to_keep = ["game-ver", "lobby", "mode", "win"]
     logger.debug(f"Columns to keep: {columns_to_keep}")
 
     concatenated_df = pd.concat(player_dfs)

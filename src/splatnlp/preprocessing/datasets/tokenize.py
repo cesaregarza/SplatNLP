@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 import pandas as pd
 
@@ -9,6 +10,8 @@ logger = logging.getLogger(__name__)
 
 def tokenize(
     df: pd.DataFrame,
+    ability_to_id: Optional[dict[str, int]] = None,
+    weapon_to_id: Optional[dict[str, int]] = None,
 ) -> tuple[pd.DataFrame, dict[str, int], dict[str, int]]:
     """Tokenize the ability tags and weapon IDs in a DataFrame.
 
@@ -19,6 +22,12 @@ def tokenize(
     Args:
         df (pd.DataFrame): The DataFrame containing 'ability_tags' and
             'weapon_id' columns to tokenize.
+        ability_to_id (Optional[dict[str, int]]): Pre-initialized mapping of
+            ability tags to their corresponding integer IDs. If None, a new
+            mapping will be created.
+        weapon_to_id (Optional[dict[str, int]]): Pre-initialized mapping of
+            weapon IDs to their corresponding integer IDs. If None, a new
+            mapping will be created.
 
     Returns:
         tuple[pd.DataFrame, dict[str, int], dict[int, int]]: A tuple containing:
@@ -34,12 +43,30 @@ def tokenize(
     exploded_abilities = df["ability_tags"].str.split(" ").str[:-1].explode()
     unique_abilities = exploded_abilities.unique()
 
-    ability_to_id = {ability: i for i, ability in enumerate(unique_abilities)}
+    if ability_to_id is None:
+        ability_to_id = {}
+    else:
+        ability_to_id.pop(PAD, None)
+
+    for ability in unique_abilities:
+        if ability not in ability_to_id:
+            ability_to_id[ability] = len(ability_to_id)
+
     ability_to_id[PAD] = len(ability_to_id)
 
-    weapon_to_id = {
-        weapon: i for i, weapon in enumerate(df["weapon_id"].unique())
-    }
+    if weapon_to_id is None:
+        weapon_to_id = {}
+    else:
+        new_weapon_to_id = {}
+        for key, _ in weapon_to_id.items():
+            new_key = key.split("_")[-1]
+            new_weapon_to_id[new_key] = weapon_to_id[key]
+
+        weapon_to_id = new_weapon_to_id
+
+    for weapon in df["weapon_id"].unique():
+        if weapon not in weapon_to_id:
+            weapon_to_id[weapon] = len(weapon_to_id)
 
     logger.debug("Mapping ability tags to integer IDs and grouping to lists")
     ability_tags_ids = (
