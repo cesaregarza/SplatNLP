@@ -28,6 +28,7 @@ class SetDataset(Dataset):
         self.vocab_size = vocab_size
         self.num_instances_per_set = num_instances_per_set
         self.skew_factor = skew_factor
+        self.distribution_cache = {}
 
     def __len__(self):
         return len(self.ability_tags) * self.num_instances_per_set
@@ -36,14 +37,19 @@ class SetDataset(Dataset):
         """Generate a random number of removals with a slight preference for
         higher values.
         """
-        # Create a triangular distribution
-        x = np.arange(1, max_removals + 1)
-        distribution = x / x.sum()
+        if max_removals in self.distribution_cache:
+            distribution = self.distribution_cache[max_removals]
+        else:
+            # Create a triangular distribution
+            x = np.arange(1, max_removals + 1)
+            distribution = x / x.sum()
 
-        distribution = distribution**self.skew_factor
-        distribution /= distribution.sum()
+            distribution = distribution**self.skew_factor
+            distribution /= distribution.sum()
 
-        return np.random.choice(x, p=distribution)
+            self.distribution_cache[max_removals] = distribution
+
+        return np.random.choice(np.arange(1, max_removals + 1), p=distribution)
 
     def __getitem__(
         self, idx

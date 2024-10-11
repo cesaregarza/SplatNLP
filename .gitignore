@@ -24,3 +24,11 @@ test*.ipynb
 # Data
 data/
 test_data/
+saved_models/
+.vscode/
+*.png
+*.zip
+*.html
+*.csv
+*.html
+*.pth
