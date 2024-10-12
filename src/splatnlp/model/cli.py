@@ -7,6 +7,7 @@ import boto3
 import orjson
 import pandas as pd
 import torch
+from torch.cuda.amp import GradScaler, autocast
 
 from splatnlp.model.config import TrainingConfig
 from splatnlp.model.evaluation import test_model
@@ -173,6 +174,18 @@ def main():
         default=2,
         help="Number of epochs with no improvement after which learning rate will be reduced",
     )
+    parser.add_argument(
+        "--use_mixed_precision",
+        type=bool,
+        default=False,
+        help="Enable mixed precision training for H100 GPUs",
+    )
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=4,
+        help="Number of worker processes for data loading",
+    )
 
     args = parser.parse_args()
 
@@ -209,6 +222,7 @@ def main():
         vocab_size=len(vocab),
         pad_token_id=vocab[PAD],
         batch_size=args.batch_size,
+        num_workers=args.num_workers,
     )
 
     if args.verbose:
@@ -245,8 +259,15 @@ def main():
         print("Starting model training...")
 
     # Train model
+    scaler = GradScaler() if args.use_mixed_precision else None
     metrics_history, trained_model = train_model(
-        model, train_dl, val_dl, config, vocab, verbose=args.verbose
+        model,
+        train_dl,
+        val_dl,
+        config,
+        vocab,
+        verbose=args.verbose,
+        scaler=scaler,
     )
 
     if args.verbose:
@@ -287,6 +308,7 @@ def main():
         "use_layer_norm": args.use_layer_norm,
         "dropout": args.dropout,
         "pad_token_id": vocab[PAD],
+        "use_mixed_precision": args.use_mixed_precision,
     }
     with open(os.path.join(args.output_dir, "model_params.json"), "w") as f:
         orjson.dumps(model_params, f)

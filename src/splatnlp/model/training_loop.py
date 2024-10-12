@@ -2,6 +2,7 @@ import time
 
 import numpy as np
 import torch
+from torch.cuda.amp import GradScaler, autocast
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 
@@ -44,6 +45,7 @@ def train_model(
     vocab: dict[str, int],
     pad_token: str = PAD,
     verbose: bool = True,
+    scaler: GradScaler = None,
 ) -> tuple[dict[str, dict[str, list[float]]], torch.nn.Module]:
     device = torch.device(config.device)
     model.to(device)
@@ -95,6 +97,7 @@ def train_model(
             vocab,
             pad_token,
             verbose,
+            scaler,
         )
         val_metrics = validate(
             model, val_dl, criterion, config, vocab, pad_token, verbose
@@ -146,6 +149,7 @@ def train_epoch(
     vocab: dict[str, int],
     pad_token: str = PAD,
     verbose: bool = True,
+    scaler: GradScaler = None,
 ) -> dict[str, float]:
     model.train()
     device = torch.device(config.device)
@@ -174,20 +178,39 @@ def train_epoch(
         key_padding_mask = (batch_inputs == vocab[pad_token]).to(device)
 
         optimizer.zero_grad()
-        outputs = model(
-            batch_inputs, batch_weapons, key_padding_mask=key_padding_mask
-        )
-        target_multi_hot = create_multi_hot_targets(
-            batch_targets, vocab, device
-        )
 
-        loss = criterion(outputs, target_multi_hot)
-        loss.backward()
+        if scaler:
+            with autocast():
+                outputs = model(
+                    batch_inputs,
+                    batch_weapons,
+                    key_padding_mask=key_padding_mask,
+                )
+                target_multi_hot = create_multi_hot_targets(
+                    batch_targets, vocab, device
+                )
+                loss = criterion(outputs, target_multi_hot)
 
-        torch.nn.utils.clip_grad_norm_(
-            model.parameters(), max_norm=config.clip_grad_norm
-        )
-        optimizer.step()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(), max_norm=config.clip_grad_norm
+            )
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            outputs = model(
+                batch_inputs, batch_weapons, key_padding_mask=key_padding_mask
+            )
+            target_multi_hot = create_multi_hot_targets(
+                batch_targets, vocab, device
+            )
+            loss = criterion(outputs, target_multi_hot)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(), max_norm=config.clip_grad_norm
+            )
+            optimizer.step()
 
         epoch_metrics["loss"] += loss.item()
         preds = (torch.sigmoid(outputs) >= 0.5).float()
