@@ -1,13 +1,18 @@
 import argparse
+import io
 import os
+import sqlite3
 
+import boto3
 import orjson
 import pandas as pd
 import torch
 
 from splatnlp.model.config import TrainingConfig
+from splatnlp.model.evaluation import test_model
 from splatnlp.model.models import SetCompletionModel
 from splatnlp.model.training_loop import train_model
+from splatnlp.preprocessing.constants import PAD
 from splatnlp.preprocessing.datasets.generate_datasets import (
     generate_dataloaders,
     generate_tokenized_datasets,
@@ -15,8 +20,30 @@ from splatnlp.preprocessing.datasets.generate_datasets import (
 
 
 def load_vocab(vocab_path):
-    with open(vocab_path, "rb") as f:
-        return orjson.loads(f.read())
+    if vocab_path.startswith("s3://"):
+        s3 = boto3.client("s3")
+        bucket, key = vocab_path[5:].split("/", 1)
+        response = s3.get_object(Bucket=bucket, Key=key)
+        return orjson.loads(response["Body"].read())
+    else:
+        with open(vocab_path, "rb") as f:
+            return orjson.loads(f.read())
+
+
+def load_data(data_path, table_name=None):
+    if data_path.startswith("s3://"):
+        s3 = boto3.client("s3")
+        bucket, key = data_path[5:].split("/", 1)
+        response = s3.get_object(Bucket=bucket, Key=key)
+        return pd.read_csv(io.BytesIO(response["Body"].read()))
+    elif data_path.endswith(".db") or data_path.endswith(".sqlite"):
+        conn = sqlite3.connect(data_path)
+        if table_name:
+            return pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
+        else:
+            return pd.read_sql_query("SELECT * FROM data", conn)
+    else:
+        return pd.read_csv(data_path, sep="\t")
 
 
 def main():
@@ -25,13 +52,19 @@ def main():
         "--data_path",
         type=str,
         required=True,
-        help="Path to the tokenized dataset",
+        help="Path to the tokenized dataset (local file, S3 path, or SQLite DB)",
     )
     parser.add_argument(
         "--vocab_path",
         type=str,
         required=True,
-        help="Path to the vocabulary JSON file",
+        help="Path to the vocabulary JSON file (local file or S3 path)",
+    )
+    parser.add_argument(
+        "--weapon_vocab_path",
+        type=str,
+        required=True,
+        help="Path to the weapon vocabulary JSON file (local file or S3 path)",
     )
     parser.add_argument(
         "--output_dir",
@@ -42,23 +75,17 @@ def main():
     parser.add_argument(
         "--embedding_dim",
         type=int,
-        default=128,
+        default=32,
         help="Dimension of token embeddings",
     )
     parser.add_argument(
         "--hidden_dim", type=int, default=256, help="Dimension of hidden layers"
     )
     parser.add_argument(
-        "--output_dim",
-        type=int,
-        default=128,
-        help="Dimension of output representation",
-    )
-    parser.add_argument(
         "--num_layers", type=int, default=2, help="Number of transformer layers"
     )
     parser.add_argument(
-        "--num_heads", type=int, default=4, help="Number of attention heads"
+        "--num_heads", type=int, default=8, help="Number of attention heads"
     )
     parser.add_argument(
         "--num_inducing_points",
@@ -67,13 +94,16 @@ def main():
         help="Number of inducing points",
     )
     parser.add_argument(
-        "--use_layer_norm", action="store_true", help="Use layer normalization"
+        "--use_layer_norm",
+        type=bool,
+        default=False,
+        help="Use layer normalization",
     )
     parser.add_argument(
-        "--dropout", type=float, default=0.1, help="Dropout rate"
+        "--dropout", type=float, default=0.3, help="Dropout rate"
     )
     parser.add_argument(
-        "--learning_rate", type=float, default=0.001, help="Learning rate"
+        "--learning_rate", type=float, default=0.0001, help="Learning rate"
     )
     parser.add_argument(
         "--weight_decay", type=float, default=0.01, help="Weight decay"
@@ -94,67 +124,155 @@ def main():
         default=1.0,
         help="Fraction of the dataset to use for training",
     )
+    parser.add_argument(
+        "--table_name",
+        type=str,
+        help="Table name for SQLite database (optional)",
+    )
+    parser.add_argument(
+        "--verbose",
+        type=bool,
+        default=False,
+        help="Enable verbose output",
+    )
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=3,
+        help="Number of epochs with no improvement after which training will be stopped",
+    )
+    parser.add_argument(
+        "--clip_grad_norm",
+        type=float,
+        default=1.0,
+        help="Maximum norm of gradients for gradient clipping",
+    )
+    parser.add_argument(
+        "--scheduler_factor",
+        type=float,
+        default=0.1,
+        help="Factor by which the learning rate will be reduced",
+    )
+    parser.add_argument(
+        "--scheduler_patience",
+        type=int,
+        default=2,
+        help="Number of epochs with no improvement after which learning rate will be reduced",
+    )
 
     args = parser.parse_args()
 
+    if args.verbose:
+        print("Loading data and vocabulary...")
+
     # Load data and vocabulary
-    df = pd.read_csv(args.data_path)
+    df = load_data(args.data_path, args.table_name)
+    df["ability_tags"] = df["ability_tags"].apply(orjson.loads)
     vocab = load_vocab(args.vocab_path)
+    weapon_vocab = load_vocab(args.weapon_vocab_path)
+
+    if args.verbose:
+        print("Generating datasets...")
 
     # Generate datasets
     train_df, val_df, test_df = generate_tokenized_datasets(
         df, frac=args.fraction
     )
 
+    if args.verbose:
+        print("Generating dataloaders...")
+
     # Generate dataloaders
-    train_dl, val_dl, _ = generate_dataloaders(
+    train_dl, val_dl, test_dl = generate_dataloaders(
         train_df,
         val_df,
         test_df,
         vocab_size=len(vocab),
-        pad_token_id=vocab["<PAD>"],
+        pad_token_id=vocab[PAD],
         batch_size=args.batch_size,
     )
+
+    if args.verbose:
+        print("Creating model...")
 
     # Create model
     model = SetCompletionModel(
         vocab_size=len(vocab),
-        weapon_vocab_size=len(
-            vocab
-        ),  # Assuming weapon vocab is the same as ability vocab
+        weapon_vocab_size=len(weapon_vocab),
         embedding_dim=args.embedding_dim,
         hidden_dim=args.hidden_dim,
-        output_dim=args.output_dim,
+        output_dim=len(vocab),
         num_layers=args.num_layers,
         num_heads=args.num_heads,
         num_inducing_points=args.num_inducing_points,
         use_layer_norm=args.use_layer_norm,
         dropout=args.dropout,
-        pad_token_id=vocab["<PAD>"],
+        pad_token_id=vocab[PAD],
     )
 
     # Create training config
     config = TrainingConfig(
+        num_epochs=args.num_epochs,
+        patience=args.patience,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
-        num_epochs=args.num_epochs,
+        clip_grad_norm=args.clip_grad_norm,
+        scheduler_factor=args.scheduler_factor,
+        scheduler_patience=args.scheduler_patience,
         device=args.device,
     )
 
+    if args.verbose:
+        print("Starting model training...")
+
     # Train model
     metrics_history, trained_model = train_model(
-        model, train_dl, val_dl, config, vocab
+        model, train_dl, val_dl, config, vocab, verbose=args.verbose
     )
 
-    # Save model and metrics
+    if args.verbose:
+        print("Evaluating model...")
+
+    test_model(
+        model=model,
+        test_dl=test_dl,
+        config=config,
+        vocab=vocab,
+        pad_token=PAD,
+        verbose=args.verbose,
+    )
+
+    if args.verbose:
+        print("Saving model, metrics, and parameters...")
+
+    # Save model, metrics, and parameters
     os.makedirs(args.output_dir, exist_ok=True)
     torch.save(
         trained_model.state_dict(), os.path.join(args.output_dir, "model.pth")
     )
     with open(os.path.join(args.output_dir, "metrics_history.json"), "wb") as f:
-        f.write(orjson.dumps(metrics_history))
+        f.write(
+            orjson.dumps(metrics_history, option=orjson.OPT_SERIALIZE_NUMPY)
+        )
+    
+    # Save model parameters
+    model_params = {
+        "vocab_size": len(vocab),
+        "weapon_vocab_size": len(weapon_vocab),
+        "embedding_dim": args.embedding_dim,
+        "hidden_dim": args.hidden_dim,
+        "output_dim": len(vocab),
+        "num_layers": args.num_layers,
+        "num_heads": args.num_heads,
+        "num_inducing_points": args.num_inducing_points,
+        "use_layer_norm": args.use_layer_norm,
+        "dropout": args.dropout,
+        "pad_token_id": vocab[PAD],
+    }
+    with open(os.path.join(args.output_dir, "model_params.json"), "w") as f:
+        orjson.dumps(model_params, f)
 
-    print(f"Model and metrics saved in {args.output_dir}")
+    print(f"Model, metrics, and parameters saved in {args.output_dir}")
 
 
 if __name__ == "__main__":

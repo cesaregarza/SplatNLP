@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -78,7 +80,9 @@ def train_model(
     best_model = None
     best_val_f1 = 0
 
+    start_time = time.time()
     for epoch in range(config.num_epochs):
+        epoch_start_time = time.time()
         if verbose:
             print(f"Epoch {epoch + 1}/{config.num_epochs}")
 
@@ -99,12 +103,24 @@ def train_model(
         update_metrics_history(metrics_history, "train", train_metrics)
         update_metrics_history(metrics_history, "val", val_metrics)
 
+        epoch_time = time.time() - epoch_start_time
+        total_time = time.time() - start_time
+        avg_epoch_time = total_time / (epoch + 1)
+        estimated_time_left = avg_epoch_time * (config.num_epochs - epoch - 1)
+
         if verbose:
             print(
                 f"Train Loss: {train_metrics['loss']:.3f}, Train F1: {train_metrics['f1']:.3f}"
             )
             print(
                 f"Val Loss: {val_metrics['loss']:.3f}, Val F1: {val_metrics['f1']:.3f}"
+            )
+            print(f"Epoch time: {epoch_time:.2f}s")
+            print(f"Total time: {total_time:.2f}s")
+            minutes, seconds = divmod(estimated_time_left, 60)
+            hours, minutes = divmod(minutes, 60)
+            print(
+                f"Estimated time left: {hours:.0f}h {minutes:.0f}m {seconds:.0f}s"
             )
 
         if val_metrics["f1"] > best_val_f1:
@@ -215,7 +231,9 @@ def validate(
         else:
             val_iter = val_dl
 
-        for batch_inputs, batch_weapons, batch_targets, _ in val_iter:
+        for i, (batch_inputs, batch_weapons, batch_targets, _) in enumerate(
+            val_iter
+        ):
             batch_inputs, batch_weapons, batch_targets = (
                 batch_inputs.to(device),
                 batch_weapons.to(device),
@@ -239,7 +257,7 @@ def validate(
             all_preds.append(preds.cpu().numpy())
 
             if verbose:
-                update_progress_bar(val_iter, epoch_metrics, len(val_dl))
+                update_progress_bar(val_iter, epoch_metrics, i + 1)
 
     epoch_metrics["loss"] /= len(val_dl)
     update_epoch_metrics(

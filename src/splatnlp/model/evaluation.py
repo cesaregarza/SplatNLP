@@ -36,7 +36,9 @@ def test_model(
             test_iter = tqdm(test_dl, desc="Testing")
         else:
             test_iter = test_dl
-        for batch_inputs, batch_weapons, batch_targets, _ in test_iter:
+        for i, (batch_inputs, batch_weapons, batch_targets, _) in enumerate(
+            test_iter
+        ):
             batch_inputs, batch_weapons, batch_targets = (
                 batch_inputs.to(device),
                 batch_weapons.to(device),
@@ -60,7 +62,7 @@ def test_model(
             all_preds.append(preds.cpu().numpy())
 
             if verbose:
-                update_progress_bar(test_iter, test_metrics, len(test_dl))
+                update_progress_bar(test_iter, test_metrics, i + 1)
 
     test_metrics["loss"] /= len(test_dl)
     update_epoch_metrics(
