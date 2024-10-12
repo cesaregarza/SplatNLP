@@ -2,7 +2,6 @@ import numpy as np
 import torch
 from sklearn.metrics import (
     f1_score,
-    hamming_loss,
     precision_score,
     recall_score,
 )
@@ -35,7 +34,6 @@ def update_epoch_metrics(
     metrics["recall"] = recall_score(
         y_true, y_pred, average="micro", zero_division=0
     )
-    metrics["hamming"] = hamming_loss(y_true, y_pred)
 
 
 def update_progress_bar(
@@ -47,6 +45,5 @@ def update_progress_bar(
             "F1": f"{metrics['f1']:.3f}",
             "Precision": f"{metrics['precision']:.3f}",
             "Recall": f"{metrics['recall']:.3f}",
-            "Hamming": f"{metrics['hamming']:.3f}",
         }
     )
