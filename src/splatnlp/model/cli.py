@@ -20,22 +20,36 @@ from splatnlp.preprocessing.datasets.generate_datasets import (
 
 
 def load_vocab(vocab_path):
-    if vocab_path.startswith("s3://"):
-        s3 = boto3.client("s3")
-        bucket, key = vocab_path[5:].split("/", 1)
-        response = s3.get_object(Bucket=bucket, Key=key)
-        return orjson.loads(response["Body"].read())
+    if vocab_path.startswith(("http://", "https://", "s3://")):
+        if vocab_path.startswith("s3://"):
+            s3 = boto3.client("s3")
+            bucket, key = vocab_path[5:].split("/", 1)
+            response = s3.get_object(Bucket=bucket, Key=key)
+            content = response["Body"].read()
+        else:
+            import requests
+
+            response = requests.get(vocab_path)
+            content = response.content
+        return orjson.loads(content)
     else:
         with open(vocab_path, "rb") as f:
             return orjson.loads(f.read())
 
 
 def load_data(data_path, table_name=None):
-    if data_path.startswith("s3://"):
-        s3 = boto3.client("s3")
-        bucket, key = data_path[5:].split("/", 1)
-        response = s3.get_object(Bucket=bucket, Key=key)
-        return pd.read_csv(io.BytesIO(response["Body"].read()))
+    if data_path.startswith(("http://", "https://", "s3://")):
+        if data_path.startswith("s3://"):
+            s3 = boto3.client("s3")
+            bucket, key = data_path[5:].split("/", 1)
+            response = s3.get_object(Bucket=bucket, Key=key)
+            content = response["Body"].read()
+        else:
+            import requests
+
+            response = requests.get(data_path)
+            content = response.content
+        return pd.read_csv(io.BytesIO(content))
     elif data_path.endswith(".db") or data_path.endswith(".sqlite"):
         conn = sqlite3.connect(data_path)
         if table_name:
@@ -254,7 +268,7 @@ def main():
         f.write(
             orjson.dumps(metrics_history, option=orjson.OPT_SERIALIZE_NUMPY)
         )
-    
+
     # Save model parameters
     model_params = {
         "vocab_size": len(vocab),
