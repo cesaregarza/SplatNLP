@@ -49,7 +49,7 @@ def load_data(data_path, table_name=None):
 
             response = requests.get(data_path)
             content = response.content
-        return pd.read_csv(io.BytesIO(content))
+        return pd.read_csv(io.BytesIO(content), sep="\t")
     elif data_path.endswith(".db") or data_path.endswith(".sqlite"):
         conn = sqlite3.connect(data_path)
         if table_name:
