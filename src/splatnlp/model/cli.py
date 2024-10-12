@@ -49,7 +49,7 @@ def load_data(data_path, table_name=None):
 
             response = requests.get(data_path)
             content = response.content
-        return pd.read_csv(io.BytesIO(content), sep="\t")
+        return pd.read_csv(io.BytesIO(content), sep="\t", header=0)
     elif data_path.endswith(".db") or data_path.endswith(".sqlite"):
         conn = sqlite3.connect(data_path)
         if table_name:
@@ -181,6 +181,11 @@ def main():
 
     # Load data and vocabulary
     df = load_data(args.data_path, args.table_name)
+    if args.verbose:
+        print(f"Loaded {len(df)} rows from {args.data_path}")
+        print(f"Columns: {df.columns}")
+        print(f"Heads: {df.head()}")
+
     df["ability_tags"] = df["ability_tags"].apply(orjson.loads)
     vocab = load_vocab(args.vocab_path)
     weapon_vocab = load_vocab(args.weapon_vocab_path)
