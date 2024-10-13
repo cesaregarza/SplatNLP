@@ -186,6 +186,12 @@ def main():
         default=4,
         help="Number of worker processes for data loading",
     )
+    parser.add_argument(
+        "--metric_update_interval",
+        type=int,
+        default=1,
+        help="Interval for updating metrics during training and validation",
+    )
 
     args = parser.parse_args()
 
@@ -268,6 +274,7 @@ def main():
         vocab,
         verbose=args.verbose,
         scaler=scaler,
+        metric_update_interval=args.metric_update_interval,
     )
 
     if args.verbose:

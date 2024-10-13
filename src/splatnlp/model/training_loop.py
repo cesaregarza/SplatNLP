@@ -46,6 +46,7 @@ def train_model(
     pad_token: str = PAD,
     verbose: bool = True,
     scaler: GradScaler = None,
+    metric_update_interval: int = 1,
 ) -> tuple[dict[str, dict[str, list[float]]], torch.nn.Module]:
     device = torch.device(config.device)
     model.to(device)
@@ -98,9 +99,17 @@ def train_model(
             pad_token,
             verbose,
             scaler,
+            metric_update_interval,
         )
         val_metrics = validate(
-            model, val_dl, criterion, config, vocab, pad_token, verbose
+            model,
+            val_dl,
+            criterion,
+            config,
+            vocab,
+            pad_token,
+            verbose,
+            metric_update_interval,
         )
 
         update_metrics_history(metrics_history, "train", train_metrics)
@@ -150,6 +159,7 @@ def train_epoch(
     pad_token: str = PAD,
     verbose: bool = True,
     scaler: GradScaler = None,
+    metric_update_interval: int = 1,
 ) -> dict[str, float]:
     model.train()
     device = torch.device(config.device)
@@ -213,13 +223,14 @@ def train_epoch(
             optimizer.step()
 
         epoch_metrics["loss"] += loss.item()
-        preds = (torch.sigmoid(outputs) >= 0.5).float()
 
-        all_targets.append(target_multi_hot.cpu().numpy())
-        all_preds.append(preds.cpu().numpy())
+        if (i + 1) % metric_update_interval == 0:
+            preds = (torch.sigmoid(outputs) >= 0.5).float()
+            all_targets.append(target_multi_hot.cpu().numpy())
+            all_preds.append(preds.cpu().numpy())
 
-        if verbose:
-            update_progress_bar(train_iter, epoch_metrics, i + 1)
+            if verbose:
+                update_progress_bar(train_iter, epoch_metrics, i + 1)
 
     epoch_metrics["loss"] /= len(train_dl)
     update_epoch_metrics(
@@ -236,6 +247,7 @@ def validate(
     vocab: dict[str, int],
     pad_token: str = PAD,
     verbose: bool = True,
+    metric_update_interval: int = 1,
 ) -> dict[str, float]:
     model.eval()
     device = torch.device(config.device)
@@ -274,13 +286,13 @@ def validate(
             loss = criterion(outputs, target_multi_hot)
             epoch_metrics["loss"] += loss.item()
 
-            preds = (torch.sigmoid(outputs) >= 0.5).float()
+            if (i + 1) % metric_update_interval == 0:
+                preds = (torch.sigmoid(outputs) >= 0.5).float()
+                all_targets.append(target_multi_hot.cpu().numpy())
+                all_preds.append(preds.cpu().numpy())
 
-            all_targets.append(target_multi_hot.cpu().numpy())
-            all_preds.append(preds.cpu().numpy())
-
-            if verbose:
-                update_progress_bar(val_iter, epoch_metrics, i + 1)
+                if verbose:
+                    update_progress_bar(val_iter, epoch_metrics, i + 1)
 
     epoch_metrics["loss"] /= len(val_dl)
     update_epoch_metrics(

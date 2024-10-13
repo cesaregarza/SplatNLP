@@ -1,10 +1,6 @@
 import numpy as np
 import torch
-from sklearn.metrics import (
-    f1_score,
-    precision_score,
-    recall_score,
-)
+from sklearn.metrics import f1_score, precision_score, recall_score
 from tqdm import tqdm
 
 from splatnlp.preprocessing.constants import PAD
