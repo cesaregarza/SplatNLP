@@ -13,6 +13,7 @@ class SetDataset(Dataset):
         vocab_size: int,
         num_instances_per_set: int = 5,
         skew_factor: float = 1.2,
+        null_token: int | None = None,
     ):
         """
         Args:
@@ -22,18 +23,26 @@ class SetDataset(Dataset):
             skew_factor: Adjust this value to control the skew of the
                 removal distribution. Higher values increase the probability of
                 generating more removals.
+            null_token: The token to use for generating from an empty set. If
+                None, will not generate empty sets. Defaults to None.
         """
         self.ability_tags = df["ability_tags"].tolist()
         self.weapon_ids = df["weapon_id"].tolist()
         self.vocab_size = vocab_size
-        self.num_instances_per_set = num_instances_per_set
+        self.raw_num_instances_per_set = num_instances_per_set
         self.skew_factor = skew_factor
+        self.null_token = null_token
+        self.uses_null_token = int(null_token is not None)
         self.distribution_cache = {}
 
-    def __len__(self):
+    @property
+    def num_instances_per_set(self) -> int:
+        return self.raw_num_instances_per_set + self.uses_null_token
+
+    def __len__(self) -> int:
         return len(self.ability_tags) * self.num_instances_per_set
 
-    def weighted_random_removals(self, max_removals):
+    def weighted_random_removals(self, max_removals: int) -> int:
         """Generate a random number of removals with a slight preference for
         higher values.
         """
@@ -52,11 +61,19 @@ class SetDataset(Dataset):
         return np.random.choice(np.arange(1, max_removals + 1), p=distribution)
 
     def __getitem__(
-        self, idx
+        self, idx: int
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         set_idx: int = idx // self.num_instances_per_set
+        instance_idx: int = idx % self.num_instances_per_set
         original_set = self.ability_tags[set_idx].copy()
         weapon_id = self.weapon_ids[set_idx]
+
+        if self.uses_null_token and instance_idx == 0:
+            input_tensor = torch.tensor([self.null_token], dtype=torch.long)
+            target_tensor = torch.tensor(original_set, dtype=torch.long)
+            weapon_tensor = torch.tensor([weapon_id], dtype=torch.long)
+            return input_tensor, weapon_tensor, target_tensor
+
         set_length = len(original_set)
         max_removals = max(1, set_length - 1)
 

@@ -67,6 +67,7 @@ def generate_dataloaders(
     pad_token_id: int,
     num_instances_per_set: int = 5,
     skew_factor: float = 1.2,
+    null_token_id: int | None = None,
     **kwargs,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
     """Generate DataLoaders for train, validation, and test sets.
@@ -81,6 +82,8 @@ def generate_dataloaders(
             generate per set. Defaults to 5.
         skew_factor (float, optional): Factor to control the skew of the
             removal distribution. Defaults to 1.2.
+        null_token_id (int | None, optional): The ID of the null token. If
+            None, empty sets are not generated. Defaults to None.
         **kwargs: Additional keyword arguments for DataLoader.
 
     Returns:
@@ -112,6 +115,7 @@ def generate_dataloaders(
                     vocab_size=vocab_size,
                     num_instances_per_set=num_instances_per_set,
                     skew_factor=skew_factor,
+                    null_token=null_token_id,
                 ),
                 collate_fn=collate_fn,
                 **dataloader_kwargs,
