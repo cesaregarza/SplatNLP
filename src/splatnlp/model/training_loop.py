@@ -224,7 +224,7 @@ def train_epoch(
 
         epoch_metrics["loss"] += loss.item()
 
-        if (i + 1) % metric_update_interval == 0:
+        if ((i + 1) % metric_update_interval == 0) or (i == len(train_dl) - 1):
             preds = (torch.sigmoid(outputs) >= 0.5).float()
             all_targets.append(target_multi_hot.cpu().numpy())
             all_preds.append(preds.cpu().numpy())
