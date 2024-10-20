@@ -333,8 +333,6 @@ class SetTransformerLayer(nn.Module):
         embed_dim: int,
         num_heads: int,
         num_inducing_points: int,
-        num_layers_mlp: int = 2,
-        mlp_hidden_dim: int | None = None,
         use_layer_norm: bool = True,
         dropout: float = 0.1,
     ):
@@ -357,24 +355,11 @@ class SetTransformerLayer(nn.Module):
             dropout=dropout,
         )
 
-        # MLP with configurable number of layers
-        if mlp_hidden_dim is None:
-            mlp_hidden_dim = embed_dim * 4
-
-        layers = []
-        for i in range(num_layers_mlp):
-            if i == 0:
-                layers.append(nn.Linear(embed_dim, mlp_hidden_dim))
-            elif i == num_layers_mlp - 1:
-                layers.append(nn.Linear(mlp_hidden_dim, embed_dim))
-            else:
-                layers.append(nn.Linear(mlp_hidden_dim, mlp_hidden_dim))
-
-            if i < num_layers_mlp - 1:  # No activation after the last layer
-                layers.append(nn.GELU())
-                layers.append(nn.Dropout(dropout))
-
-        self.feedforward = nn.Sequential(*layers)
+        self.feedforward = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim * 4),
+            nn.GELU(),
+            nn.Linear(embed_dim * 4, embed_dim),
+        )
 
         self.use_layer_norm = use_layer_norm
         if use_layer_norm:
@@ -450,7 +435,6 @@ class SetCompletionModel(nn.Module):
         hidden_dim: int,
         output_dim: int,
         num_layers: int = 2,
-        num_layers_mlp: int = 2,
         num_heads: int = 4,
         num_inducing_points: int = 32,
         use_layer_norm: bool = False,
@@ -482,7 +466,6 @@ class SetCompletionModel(nn.Module):
                     num_inducing_points=num_inducing_points,
                     use_layer_norm=use_layer_norm,
                     dropout=dropout,
-                    num_layers_mlp=num_layers_mlp,
                 )
             )
         self.transformer_layers = nn.ModuleList(layers)

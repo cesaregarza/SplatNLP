@@ -100,12 +100,6 @@ def main():
         "--num_layers", type=int, default=2, help="Number of transformer layers"
     )
     parser.add_argument(
-        "--num_layers_mlp",
-        type=int,
-        default=2,
-        help="Number of layers in the MLP of SetTransformerLayer",
-    )
-    parser.add_argument(
         "--num_heads", type=int, default=8, help="Number of attention heads"
     )
     parser.add_argument(
@@ -248,7 +242,6 @@ def main():
         hidden_dim=args.hidden_dim,
         output_dim=len(vocab),
         num_layers=args.num_layers,
-        num_layers_mlp=args.num_layers_mlp,
         num_heads=args.num_heads,
         num_inducing_points=args.num_inducing_points,
         use_layer_norm=args.use_layer_norm,
