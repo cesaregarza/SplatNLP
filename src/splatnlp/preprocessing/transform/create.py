@@ -3,12 +3,26 @@ import logging
 import pandas as pd
 import xxhash
 
-from splatnlp.preprocessing.transform.parse import generate_maps
+from splatnlp.preprocessing.transform.mappings import generate_maps
 
 logger = logging.getLogger(__name__)
 
 
 def create_weapon_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Create a weapon DataFrame by processing and combining player data from
+    both teams.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame containing game data.
+
+    Returns:
+        pd.DataFrame: A new DataFrame with individual player data and game
+            information.
+
+    This function processes the input DataFrame to extract individual player
+    data from both teams, combines it into a single DataFrame, and merges it
+    with relevant game information.
+    """
     logger.info("Starting create_weapon_df function")
     player_dfs = []
     for team in "AB":
@@ -46,6 +60,19 @@ def create_weapon_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Add new columns to the DataFrame including weapon_id, ability_hash, and
+    win.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame.
+
+    Returns:
+        pd.DataFrame: The DataFrame with new columns added.
+
+    This function adds weapon_id based on a mapping, computes an ability_hash,
+    and determines the win status for each row. It also drops rows with missing
+    abilities.
+    """
     logger.info("Starting add_columns function")
     key_to_id, _, _ = generate_maps()
     df["weapon_id"] = df["weapon"].map(key_to_id)
@@ -65,4 +92,15 @@ def add_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def compute_ability_to_id(abilities: str) -> int:
+    """Compute a hash value for the given abilities string.
+
+    Args:
+        abilities (str): A string representation of abilities.
+
+    Returns:
+        int: An integer hash value computed from the abilities string.
+
+    This function uses the xxhash algorithm to compute a 128-bit hash of the
+    input abilities string, and returns it as an integer.
+    """
     return xxhash.xxh128(abilities).intdigest()

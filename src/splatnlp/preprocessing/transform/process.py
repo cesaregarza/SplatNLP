@@ -5,10 +5,7 @@ import pandas as pd
 
 from splatnlp.preprocessing.constants import (
     BUCKET_THRESHOLDS,
-    BUFFER_DAYS_FOR_MAJOR_PATCH,
-    BUFFER_DAYS_FOR_MINOR_PATCH,
     MAIN_ONLY_ABILITIES,
-    SEASONS_WITHOUT_NEW_WEAPONS,
     STANDARD_ABILITIES,
 )
 
@@ -82,37 +79,5 @@ def process_abilities(df: pd.DataFrame) -> pd.DataFrame:
     logger.info(
         f"Finished processing abilities. Final DataFrame shape: %s",
         str(result_df.shape),
-    )
-    return result_df
-
-
-def remove_buffer_days(df: pd.DataFrame, date_df: pd.DataFrame) -> pd.DataFrame:
-    """Remove entries from a DataFrame that are within a buffer period of a
-    patch.
-
-    Args:
-        df (pd.DataFrame): The input DataFrame.
-        date_df (pd.DataFrame): The DataFrame containing the dates of patches.
-
-    Returns:
-        pd.DataFrame: The DataFrame with entries removed that are within a buffer
-            period of a patch.
-    """
-    logger.info("Starting to remove buffer days")
-    logger.debug(f"Initial DataFrame shape: {df.shape}")
-
-    buffer_days = (
-        date_df[date_df["major"]]["date"]
-        .sub(BUFFER_DAYS_FOR_MAJOR_PATCH, fill_value=pd.Timestamp.min)
-        .append(
-            date_df[date_df["minor"]]["date"].sub(
-                BUFFER_DAYS_FOR_MINOR_PATCH, fill_value=pd.Timestamp.min
-            )
-        )
-    )
-    result_df = df.loc[~df["period"].isin(buffer_days)]
-
-    logger.info(
-        f"Finished removing buffer days. Final DataFrame shape: {result_df.shape}"
     )
     return result_df

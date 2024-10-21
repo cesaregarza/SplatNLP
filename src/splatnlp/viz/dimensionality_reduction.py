@@ -4,7 +4,7 @@ import numpy as np
 from gensim.models import Doc2Vec
 from sklearn.manifold import TSNE
 
-from splatnlp.preprocessing.transform.parse import get_all_ids
+from splatnlp.preprocessing.transform.mappings import get_all_ids
 
 logger = logging.getLogger(__name__)
 

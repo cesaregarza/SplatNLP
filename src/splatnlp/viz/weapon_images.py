@@ -4,7 +4,7 @@ from io import BytesIO
 import requests
 from PIL import Image, UnidentifiedImageError
 
-from splatnlp.preprocessing.transform.parse import generate_maps
+from splatnlp.preprocessing.transform.mappings import generate_maps
 
 logger = logging.getLogger(__name__)
 
