@@ -15,28 +15,37 @@ numpy = "<1.29.0"
 pandas = "^2.2.2"
 tqdm = "^4.66.4"
 requests = "^2.32.3"
-gensim = "^4.3.2"
 orjson = "^3.10.6"
 sqlalchemy = "^2.0.31"
 psutil = "^6.0.0"
 xxhash = "^3.4.1"
 pyarrow = "^16.1.0"
 scipy = "1.12"
-pillow = "^10.4.0"
-plotly = "^5.22.0"
-nbformat = "^5.10.4"
-umap-learn = "^0.5.6"
 torch = "^2.3.1"
-matplotlib = "^3.9.2"
-seaborn = "^0.13.2"
 boto3 = "^1.35.39"
-iprogress = "^0.4"
-bokeh = "^3.6.0"
 
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.4.2"
 isort = "^5.13.2"
+matplotlib = "^3.9.2"
+pillow = "^10.4.0"
+iprogress = "^0.4"
+seaborn = "^0.13.2"
+plotly = "^5.22.0"
+bokeh = "^3.6.0"
+nbformat = "^5.10.4"
+umap-learn = "^0.5.6"
+
+[tool.poetry.group.serve.dependencies]
+fastapi = "^0.115.2"
+uvicorn = {extras = ["standard"], version = "^0.32.0"}
+gunicorn = "^23.0.0"
+
+[tool.poetry.group.embeddings.dependencies]
+gensim = "^4.3.2"
+
+
 
 [build-system]
 requires = ["poetry-core"]
