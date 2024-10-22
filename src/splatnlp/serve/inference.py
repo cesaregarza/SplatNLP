@@ -1,6 +1,11 @@
+import logging
+import time
+
 import numpy as np
 import torch
 from torch import nn
+
+logger = logging.getLogger(__name__)
 
 
 def inference(
@@ -12,6 +17,8 @@ def inference(
     weapon_vocab: dict[str, int],
     pad_token_id: int,
 ) -> list[tuple[str, float]]:
+    start_time = time.time()
+    logging.info("Starting inference")
     model.eval()
     input_tokens = torch.tensor(
         [vocab[token] for token in target], device="cpu"
@@ -30,7 +37,9 @@ def inference(
     if preds.ndim == 0:
         preds = np.array([preds])
 
-    return [(inv_vocab[i], float(pred)) for i, pred in enumerate(preds)]
+    out = [(inv_vocab[i], float(pred)) for i, pred in enumerate(preds)]
+    logging.info(f"Finished inference in {time.time() - start_time:.2f}s")
+    return out
 
 
 def normalized_entropy(preds: np.ndarray) -> float:

@@ -21,7 +21,6 @@ psutil = "^6.0.0"
 xxhash = "^3.4.1"
 pyarrow = "^16.1.0"
 scipy = "1.12"
-torch = "^2.3.1"
 boto3 = "^1.35.39"
 
 
@@ -36,16 +35,30 @@ plotly = "^5.22.0"
 bokeh = "^3.6.0"
 nbformat = "^5.10.4"
 umap-learn = "^0.5.6"
+torch = "^2.5.0"
 
 [tool.poetry.group.serve.dependencies]
 fastapi = "^0.115.2"
 uvicorn = {extras = ["standard"], version = "^0.32.0"}
 gunicorn = "^23.0.0"
+torch = {version = "^2.5.0+cpu", source = "pytorch-cpu"}
 
 [tool.poetry.group.embeddings.dependencies]
 gensim = "^4.3.2"
 
 
+
+
+[[tool.poetry.source]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"
+
+
+[[tool.poetry.source]]
+name = "pytorch-gpu"
+url = "https://download.pytorch.org/whl"
+priority = "explicit"
 
 [build-system]
 requires = ["poetry-core"]

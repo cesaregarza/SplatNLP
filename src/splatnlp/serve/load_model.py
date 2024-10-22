@@ -1,5 +1,5 @@
-import logging
 import io
+import logging
 import os
 
 import orjson
@@ -25,7 +25,9 @@ def load_model(model_url: str, model_params: dict) -> SetCompletionModel:
     logger.info(f"Model size: {len(response.content)} bytes")
     logger.info("Creating model")
     model = SetCompletionModel(**model_params)
-    model.load_state_dict(torch.load(response_data, map_location=torch.device("cpu")))
+    model.load_state_dict(
+        torch.load(response_data, map_location=torch.device("cpu"))
+    )
     model.eval()
     logger.info("Model loaded and ready for inference")
     return model
@@ -56,4 +58,12 @@ def load_from_env() -> tuple[dict, dict, int, SetCompletionModel]:
     weapon_vocab_url = os.getenv("WEAPON_VOCAB_URL")
     model_url = os.getenv("MODEL_URL")
     params_url = os.getenv("PARAMS_URL")
+    if not all([vocab_url, weapon_vocab_url, model_url, params_url]):
+        base_url = os.getenv("DO_SPACES_ML_ENDPOINT")
+        base_dir = os.getenv("DO_SPACES_ML_DIR")
+        base_path = f"{base_url}/{base_dir}"
+        vocab_url = vocab_url or f"{base_path}/vocab.json"
+        weapon_vocab_url = weapon_vocab_url or f"{base_path}/weapon_vocab.json"
+        model_url = model_url or f"{base_path}/model.pth"
+        params_url = params_url or f"{base_path}/model_params.json"
     return load(vocab_url, weapon_vocab_url, model_url, params_url)
