@@ -3,6 +3,7 @@ import logging
 from splatnlp.preprocessing.constants import (
     BUCKET_THRESHOLDS,
     MAIN_ONLY_ABILITIES,
+    NULL,
     STANDARD_ABILITIES,
 )
 
@@ -10,6 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 def tokenize_build(build: dict[str, int]) -> list[str]:
+    if not build:
+        return [NULL]
+
     total_ap = sum(build.values())
     if total_ap > 57:
         raise ValueError("Total ability points cannot exceed 57")

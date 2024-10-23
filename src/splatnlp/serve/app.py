@@ -1,8 +1,7 @@
 import logging
-import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -62,22 +61,6 @@ def infer(request: InferenceRequest) -> InferenceResponse:
     )
 
     return InferenceResponse(predictions=predictions)
-
-
-@app.get("/infer")
-def infer_get() -> InferenceResponse:
-    target = {
-        "swim_speed_up": 19,
-        "ninja_squid": 10,
-        "intensify_action": 9,
-        "stealth_jump": 10,
-        "special_saver": 3,
-        "quick_super_jump": 3,
-        "ink_resist_up": 3,
-    }
-    weapon_id = 50
-    request = InferenceRequest(target=target, weapon_id=weapon_id)
-    return infer(request)
 
 
 if __name__ == "__main__":
