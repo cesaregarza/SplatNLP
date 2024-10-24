@@ -16,7 +16,7 @@ def inference(
     inv_vocab: dict[int, str],
     weapon_vocab: dict[str, int],
     pad_token_id: int,
-) -> list[tuple[str, float]]:
+) -> tuple[list[tuple[str, float]], float]:
     start_time = time.time()
     logging.info("Starting inference")
     model.eval()
@@ -38,8 +38,9 @@ def inference(
         preds = np.array([preds])
 
     out = [(inv_vocab[i], float(pred)) for i, pred in enumerate(preds)]
-    logging.info(f"Finished inference in {time.time() - start_time:.2f}s")
-    return out
+    time_taken = time.time() - start_time
+    logging.info(f"Finished inference in {time_taken:.2f}s")
+    return out, time_taken
 
 
 def normalized_entropy(preds: np.ndarray) -> float:
