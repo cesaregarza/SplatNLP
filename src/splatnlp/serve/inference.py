@@ -19,6 +19,8 @@ def inference(
 ) -> tuple[list[tuple[str, float]], float]:
     start_time = time.time()
     logging.info("Starting inference")
+    logging.info(f"Target: {target}")
+    logging.info(f"Weapon ID: {weapon_id}")
     model.eval()
     input_tokens = torch.tensor(
         [vocab[token] for token in target], device="cpu"

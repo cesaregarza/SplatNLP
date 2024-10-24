@@ -46,7 +46,7 @@ class InferenceRequest(BaseModel):
 
 class InferenceResponse(BaseModel):
     predictions: list[tuple[str, float]]
-    model_info: dict
+    splatgpt_info: dict
     api_version: str = "0.1.0"
     inference_time: float
 
@@ -68,7 +68,7 @@ def infer(request: InferenceRequest) -> InferenceResponse:
 
     return InferenceResponse(
         predictions=predictions,
-        model_info=model_info,
+        splatgpt_info=model_info,
         api_version=VERSION,
         inference_time=time_taken,
     )
