@@ -1,34 +1,70 @@
-# Python-related files
+# Python
 __pycache__/
 *.py[cod]
+*$py.class
 *.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Virtual environment
-.python-version
+# Virtual Environment
 venv/
+ENV/
 env/
 
-# Database files
-*.db
-*.sqlite3
-
-# Other common Python-related files to ignore
-.pytest_cache/
-.coverage
-.tox/
-.mypy_cache/
-
-# Notebooks
-test*.ipynb
-
-# Data
-data/
-test_data/
-saved_models/
+# IDE
+.idea/
 .vscode/
-*.png
-*.zip
-*.html
+*.swp
+*.swo
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Data and Models
+data/
+models/
+saved_models/
+outputs/
+sae_outputs/
+sae_grid_search_outputs/
+test_data/
+*.db
 *.csv
-*.html
+*.json
 *.pth
+*.pt
+*.h5
+*.hdf5
+*.zip
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+.DS_Store
+.env
+.env.local
+
+# Project specific
+data.db
+null_token_abilities.*
+results.csv
+*.png
+*.svg
+*.gv
+*.html
