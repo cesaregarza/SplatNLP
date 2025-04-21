@@ -7,7 +7,7 @@ import boto3
 import orjson
 import pandas as pd
 import torch
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 
 from splatnlp.model.config import TrainingConfig
 from splatnlp.model.evaluation import test_model
@@ -97,7 +97,7 @@ def main():
         "--hidden_dim", type=int, default=256, help="Dimension of hidden layers"
     )
     parser.add_argument(
-        "--num_layers", type=int, default=2, help="Number of transformer layers"
+        "--num_layers", type=int, default=3, help="Number of transformer layers"
     )
     parser.add_argument(
         "--num_heads", type=int, default=8, help="Number of attention heads"

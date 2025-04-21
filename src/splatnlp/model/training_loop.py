@@ -2,7 +2,7 @@ import time
 
 import numpy as np
 import torch
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 
@@ -190,7 +190,7 @@ def train_epoch(
         optimizer.zero_grad()
 
         if scaler:
-            with autocast():
+            with autocast(device_type=config.device):
                 outputs = model(
                     batch_inputs,
                     batch_weapons,

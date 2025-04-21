@@ -12,13 +12,13 @@ from torch.cuda.amp import GradScaler
 from splatnlp.model.config import TrainingConfig
 from splatnlp.model.models import SetCompletionModel
 from splatnlp.model.training_loop import train_model
+from splatnlp.monosemanticity_train.models import ModifiedSetCompletionModel
+from splatnlp.monosemanticity_train.training_loop import train_autoencoder
 from splatnlp.preprocessing.constants import PAD
 from splatnlp.preprocessing.datasets.generate_datasets import (
     generate_dataloaders,
     generate_tokenized_datasets,
 )
-from splatnlp.research.models import ModifiedSetCompletionModel
-from splatnlp.research.training_loop import train_autoencoder
 
 
 def load_vocab(vocab_path):

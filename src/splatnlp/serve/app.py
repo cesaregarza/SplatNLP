@@ -66,12 +66,14 @@ def infer(request: InferenceRequest) -> InferenceResponse:
         pad_token_id=pad_token_id,
     )
 
-    return InferenceResponse(
+    response = InferenceResponse(
         predictions=predictions,
         splatgpt_info=model_info,
         api_version=VERSION,
         inference_time=time_taken,
     )
+    logger.info(f"Returning response: {response}")
+    return response
 
 
 @app.get("/infer")
