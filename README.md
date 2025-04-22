@@ -18,7 +18,7 @@ This project tackles this challenge through an end-to-end machine learning pipel
 
 For a comprehensive deep-dive into the problem definition, the novel model architecture (`SplatGPT`), methodology, data processing techniques, results, and insights, please read the accompanying blog post:
 
-**➡️ [Link to your detailed blog post here]** ⬅️
+[SplatGPT: Set-Based Deep Learning for Splatoon 3 Gear Completion](https://cegarza.com/introducing-splatgpt/)
 
 ---
 
@@ -53,7 +53,7 @@ SplatNLP/
 
 1.  **Clone the repository:**
     ```bash
-    git clone [your-repo-url]
+    git clone https://github.com/cesaregarza/SplatNLP
     cd SplatNLP
     ```
 2.  **Create and activate a virtual environment (recommended):**
@@ -66,7 +66,7 @@ SplatNLP/
     ```
 3.  **Install dependencies:**
     ```bash
-    pip install -r requirements.txt
+    poetry install
     ```
 4.  **(Optional) Set environment variables for serving:**
     The API server (`src/splatnlp/serve/app.py`) loads model artifacts from URLs specified by environment variables. See `src/splatnlp/serve/load_model.py` for details (e.g., `VOCAB_URL`, `MODEL_URL`, `PARAMS_URL`, `WEAPON_VOCAB_URL`, `INFO_URL` or `DO_SPACES_ML_ENDPOINT`/`DO_SPACES_ML_DIR`).
@@ -118,6 +118,8 @@ python src/splatnlp/monosemanticity_train/cli.py \
 
 **4. Run the API Server:**
 *(Requires model artifacts accessible via URLs configured through environment variables)*
+> NOTE: THIS HAS NO SECURITY MEASURES, IT IS DESIGNED TO BE USED IN A LOCAL ENVIRONMENT OR SILOED OFF IN A CONTAINERIZED ENVIRONMENT WITH STRICT NETWORKING POLICIES. DO NOT DEPLOY THIS IN A PRODUCTION ENVIRONMENT WITHOUT ADDING THE APPROPRIATE SECURITY MEASURES.
+
 ```bash
 # Ensure environment variables for model URLs are set
 uvicorn splatnlp.serve.app:app --host 0.0.0.0 --port 9000 --reload
@@ -152,13 +154,5 @@ curl -X POST "http://localhost:9000/infer" \
 
 ## License
 
-(Consider adding a license, e.g., MIT, Apache 2.0)
-```
-
-Remember to:
-
-1.  Replace `[your-repo-url]` with the actual URL of your repository.
-2.  Replace `[Link to your detailed blog post here]` with the correct URL.
-3.  Add a `requirements.txt` file to your repository root.
-4.  Consider adding a `LICENSE` file.
-5.  Adjust the example paths and parameters in the Usage section to be more representative if needed.
+This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
+See the [LICENSE](LICENSE) file for details.
