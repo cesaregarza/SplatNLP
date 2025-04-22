@@ -102,6 +102,7 @@ python src/splatnlp/model/cli.py \
 ```
 
 **3. Train a Sparse Autoencoder (SAE):**
+> NOTE: This is currently not really working as expected, but is included as I keep iterating on it and trying to improve it.
 ```bash
 # Example: Train an SAE on activations from a pretrained SetCompletionModel
 python src/splatnlp/monosemanticity_train/cli.py \
