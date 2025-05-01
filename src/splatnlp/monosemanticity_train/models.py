@@ -1,4 +1,5 @@
 from typing import Callable, Dict, List, Optional, Tuple, Union
+
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -12,8 +13,8 @@ class SparseAutoencoder(nn.Module):
         l1_coefficient: float = 1e-3,
         dead_neuron_threshold: float = 1e-6,
         dead_neuron_steps: int = 12500,
-        target_usage: float = 0.05,   # fraction of samples to fire
-        usage_coeff: float = 1e-3,    # penalty multiplier for usage KL
+        target_usage: float = 0.05,  # fraction of samples to fire
+        usage_coeff: float = 1e-3,  # penalty multiplier for usage KL
     ):
         super().__init__()
         self.input_dim = input_dim
@@ -46,7 +47,13 @@ class SparseAutoencoder(nn.Module):
         nn.init.zeros_(self.encoder.bias)
         nn.init.zeros_(self.decoder_bias)
         with torch.no_grad():
-            self.decoder.weight.data = F.normalize(self.decoder.weight.data, dim=0)
+            self.decoder.weight.data = F.normalize(
+                self.decoder.weight.data, dim=0
+            )
+
+    def set_kl_coeff(self, coeff: float) -> None:
+        """Update the usage/KL weight used inside `loss_fn`."""
+        self.usage_coeff = float(coeff)
 
     def forward(self, x: torch.Tensor):
         """
@@ -57,11 +64,16 @@ class SparseAutoencoder(nn.Module):
         h = F.relu(self.encoder(x_centered))
         # Normalize decoder weights
         normalized_decoder_weights = F.normalize(self.decoder.weight, dim=0)
-        reconstruction = F.linear(h, normalized_decoder_weights) + self.decoder_bias
+        reconstruction = (
+            F.linear(h, normalized_decoder_weights) + self.decoder_bias
+        )
         return reconstruction, h
 
     def compute_loss(
-        self, x: torch.Tensor, reconstruction: torch.Tensor, hidden: torch.Tensor
+        self,
+        x: torch.Tensor,
+        reconstruction: torch.Tensor,
+        hidden: torch.Tensor,
     ):
         """
         Returns (total_loss, metrics_dict)
@@ -99,11 +111,17 @@ class SparseAutoencoder(nn.Module):
         rho = self.target_usage
 
         # KL usage
-        kl_usage = rho * torch.log(rho / p) + (1 - rho) * torch.log((1 - rho) / (1 - p))
+        kl_usage = rho * torch.log(rho / p) + (1 - rho) * torch.log(
+            (1 - rho) / (1 - p)
+        )
         kl_loss = kl_usage.mean()
 
         # Weighted sum
-        total_loss = mse_loss + self.l1_coefficient * l1_loss + self.usage_coeff * kl_loss
+        total_loss = (
+            mse_loss
+            + self.l1_coefficient * l1_loss
+            + self.usage_coeff * kl_loss
+        )
 
         metrics = {
             "total": total_loss.item(),
@@ -113,7 +131,12 @@ class SparseAutoencoder(nn.Module):
         }
         return total_loss, metrics
 
-    def training_step(self, x: torch.Tensor, optimizer: torch.optim.Optimizer):
+    def training_step(
+        self,
+        x: torch.Tensor,
+        optimizer: torch.optim.Optimizer,
+        gradient_clip_val: float | None = None,
+    ):
         """
         Single training step for external loop.
         """
@@ -125,11 +148,16 @@ class SparseAutoencoder(nn.Module):
         # remove parallel gradients from decoder weight, if you're doing that
         self.remove_parallel_gradients()
 
+        if gradient_clip_val is not None:
+            torch.nn.utils.clip_grad_norm_(self.parameters(), gradient_clip_val)
+
         optimizer.step()
 
         # re-normalize decoder weights
         with torch.no_grad():
-            self.decoder.weight.data = F.normalize(self.decoder.weight.data, dim=0)
+            self.decoder.weight.data = F.normalize(
+                self.decoder.weight.data, dim=0
+            )
 
         return metrics
 
@@ -141,3 +169,13 @@ class SparseAutoencoder(nn.Module):
                 self.decoder.weight.grad * normalized_dict
             ).sum(0) * normalized_dict
             self.decoder.weight.grad -= parallel_component
+
+    # ------------------------------------------------------------------
+    # Convenience – returns a 1-D tensor with the indices of "dead" units
+    # ------------------------------------------------------------------
+    def get_dead_neurons(self, threshold: float = 1e-6) -> torch.Tensor:
+        """
+        Indices where the exponential-moving average of activations
+        is < `threshold`.  Returned on the same device as `usage_ema`.
+        """
+        return (self.usage_ema < threshold).nonzero(as_tuple=False).flatten()
