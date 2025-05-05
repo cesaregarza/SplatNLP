@@ -21,7 +21,7 @@ class SparseAutoencoder(nn.Module):
         dead_neuron_steps: int = 12500,
         target_usage: float = 0.05,
         usage_coeff: float = 1e-3,
-    ):
+    ) -> None:
         """Initialize the SparseAutoencoder model.
 
         Args:
@@ -76,7 +76,43 @@ class SparseAutoencoder(nn.Module):
         """Update the usage/KL weight used inside `loss_fn`."""
         self.usage_coeff = float(coeff)
 
-    def forward(self, x: torch.Tensor):
+    def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Encode the input tensor.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape [batch_size, input_dim]
+                or [batch_size * seq_len, input_dim].
+
+        Returns:
+            tuple: A tuple containing:
+                - h_pre: Pre-activation hidden layer activations of shape
+                    [batch_size, hidden_dim] or
+                    [batch_size * seq_len, hidden_dim].
+                - h_post: Post-activation hidden layer activations of shape
+                    [batch_size, hidden_dim] or
+                    [batch_size * seq_len, hidden_dim].
+        """
+        x_centered = x - self.decoder_bias
+        h_pre = self.encoder(x_centered)
+        h_post = F.relu(h_pre)
+        return h_pre, h_post
+
+    def decode(self, h: torch.Tensor) -> torch.Tensor:
+        """Decode the hidden activations.
+
+        Args:
+            h (torch.Tensor): Hidden activations of shape [batch_size, hidden_dim]
+                or [batch_size * seq_len, hidden_dim].
+
+        Returns:
+            torch.Tensor: Decoded tensor of shape [batch_size, input_dim]
+                or [batch_size * seq_len, input_dim].
+        """
+        with torch.no_grad():
+            normalized_decoder_weights = F.normalize(self.decoder.weight, dim=0)
+        return F.linear(h, normalized_decoder_weights) + self.decoder_bias
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Forward pass of the SparseAutoencoder.
 
         Args:
@@ -92,20 +128,16 @@ class SparseAutoencoder(nn.Module):
                     [batch_size, hidden_dim] or
                     [batch_size * seq_len, hidden_dim].
         """
-        x_centered = x - self.decoder_bias
-        h = F.relu(self.encoder(x_centered))
-        normalized_decoder_weights = F.normalize(self.decoder.weight, dim=0)
-        reconstruction = (
-            F.linear(h, normalized_decoder_weights) + self.decoder_bias
-        )
-        return reconstruction, h
+        _, h_post = self.encode(x)
+        reconstruction = self.decode(h_post)
+        return reconstruction, h_post
 
     def compute_loss(
         self,
         x: torch.Tensor,
         reconstruction: torch.Tensor,
         hidden: torch.Tensor,
-    ):
+    ) -> tuple[torch.Tensor, dict[str, float]]:
         """Compute total loss with sparsity penalties.
 
         Args:
@@ -164,7 +196,7 @@ class SparseAutoencoder(nn.Module):
         x: torch.Tensor,
         optimizer: torch.optim.Optimizer,
         gradient_clip_val: float | None = None,
-    ):
+    ) -> tuple[torch.Tensor, dict[str, float]]:
         """Perform one optimization step.
 
         Args:
@@ -194,7 +226,7 @@ class SparseAutoencoder(nn.Module):
 
         return metrics
 
-    def remove_parallel_gradients(self):
+    def remove_parallel_gradients(self) -> None:
         """Remove gradient components parallel to decoder dictionary vectors."""
         if self.decoder.weight.grad is not None:
             normalized_dict = F.normalize(self.decoder.weight.data, dim=0)
