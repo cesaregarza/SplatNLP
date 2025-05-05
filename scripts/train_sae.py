@@ -28,7 +28,10 @@ from splatnlp.monosemanticity_train.data_objects import (
     SAEConfig,
 )
 from splatnlp.monosemanticity_train.models import SparseAutoencoder
-from splatnlp.monosemanticity_train.sae_training import train_sae_model, evaluate_sae_model
+from splatnlp.monosemanticity_train.sae_training import (
+    evaluate_sae_model,
+    train_sae_model,
+)
 from splatnlp.monosemanticity_train.utils import (
     load_json_from_path,
     load_tokenized_data,
@@ -390,7 +393,9 @@ def main():
         train_df, val_df, test_df = generate_tokenized_datasets(
             df, frac=args.primary_data_fraction
         )
-        logger.info(f"Dataset sizes: Train={len(train_df)}, Val={len(val_df)}, Test={len(test_df)}")
+        logger.info(
+            f"Dataset sizes: Train={len(train_df)}, Val={len(val_df)}, Test={len(test_df)}"
+        )
 
         # USE args.primary_batch_size and args.num_workers
         # CAPTURE ALL THREE DATALOADERS
@@ -402,7 +407,7 @@ def main():
             pad_token_id=pad_token_id,
             batch_size=args.primary_batch_size,
             num_workers=args.num_workers,
-            shuffle=True, # Shuffle only train loader usually
+            shuffle=True,  # Shuffle only train loader usually
             pin_memory=True if device.type == "cuda" else False,
             persistent_workers=True if args.num_workers > 0 else False,
             # Pass shuffle=False for val/test if generate_dataloaders supports it
@@ -505,7 +510,7 @@ def main():
             hook,
             sae_config,
             train_loader,
-            val_loader,         # <--- Pass validation loader
+            val_loader,  # <--- Pass validation loader
             vocab,
             device,
             num_epochs=args.epochs,
@@ -520,17 +525,19 @@ def main():
             kl_warmup_steps=args.kl_warmup_steps,
             kl_period_steps=args.kl_period_steps,
             kl_floor=args.kl_floor,
-            gradient_clip_val=args.gradient_clip_val, # Pass gradient clipping value
+            gradient_clip_val=args.gradient_clip_val,  # Pass gradient clipping value
             # Add other args if needed by train_sae_model signature update
         )
-        final_sae_model_state = sae_model.state_dict() # Get state dict after successful train
+        final_sae_model_state = (
+            sae_model.state_dict()
+        )  # Get state dict after successful train
         training_successful = True
     except Exception as e:
         logger.exception(f"An error occurred during SAE training: {e}")
         # Save potentially partially trained model on failure
         sae_save_path = save_dir / "sae_model_FAILED.pth"
         try:
-            sae_model.cpu() # Move out of the failed CUDA context if needed
+            sae_model.cpu()  # Move out of the failed CUDA context if needed
             torch.cuda.empty_cache()
             torch.save(sae_model.state_dict(), sae_save_path)
             logger.info(f"Saved failed/partial SAE model to {sae_save_path}")
@@ -555,16 +562,28 @@ def main():
                     {
                         k: (
                             float(v)
-                            if isinstance(v, (torch.Tensor, np.number, int, float)) # Handle more types
-                            else (list(v) if isinstance(v, np.ndarray) else v) # Basic ndarray handling
+                            if isinstance(
+                                v, (torch.Tensor, np.number, int, float)
+                            )  # Handle more types
+                            else (
+                                list(v) if isinstance(v, np.ndarray) else v
+                            )  # Basic ndarray handling
                         )
                         for k, v in step_metrics.items()
                     }
                     for step_metrics in metrics_history
                 ]
                 # Use orjson for potentially better performance/handling of numpy types
-                with open(metrics_save_path, "wb") as f: # Open in binary write mode for orjson
-                     f.write(orjson.dumps(serializable_metrics, option=orjson.OPT_INDENT_2 | orjson.OPT_SERIALIZE_NUMPY))
+                with open(
+                    metrics_save_path, "wb"
+                ) as f:  # Open in binary write mode for orjson
+                    f.write(
+                        orjson.dumps(
+                            serializable_metrics,
+                            option=orjson.OPT_INDENT_2
+                            | orjson.OPT_SERIALIZE_NUMPY,
+                        )
+                    )
                 logger.info(f"Saved metrics history to {metrics_save_path}")
             except Exception as e:
                 logger.error(f"Failed to save metrics history: {e}")
@@ -574,12 +593,16 @@ def main():
         logger.info("Starting final evaluation on the test set...")
         # Reload the best state into the model, just in case
         sae_model.load_state_dict(final_sae_model_state)
-        sae_model.to(device) # Ensure model is on the correct device
-        primary_model.to(device) # Ensure primary model is also on the correct device
+        sae_model.to(device)  # Ensure model is on the correct device
+        primary_model.to(
+            device
+        )  # Ensure primary model is also on the correct device
 
         # Setup hook again for testing (or reuse if handle wasn't removed yet, but safer to re-setup)
         try:
-            test_hook, test_handle = setup_hook(primary_model, target=args.hook_target)
+            test_hook, test_handle = setup_hook(
+                primary_model, target=args.hook_target
+            )
 
             # Call the evaluation function (defined in the second script)
             test_metrics = evaluate_sae_model(
@@ -590,40 +613,58 @@ def main():
                 device=device,
                 sae_config=sae_config,
                 vocab=vocab,
-                description="Testing" # Add description for tqdm bar
+                description="Testing",  # Add description for tqdm bar
             )
 
             logger.info("--- Test Set Evaluation Results ---")
             for key, value in test_metrics.items():
-                 # Ensure value is serializable before logging/saving
-                 log_value = float(value) if isinstance(value, (torch.Tensor, np.number)) else value
-                 logger.info(f"  {key}: {log_value:.6f}" if isinstance(log_value, float) else f"  {key}: {log_value}")
-
+                # Ensure value is serializable before logging/saving
+                log_value = (
+                    float(value)
+                    if isinstance(value, (torch.Tensor, np.number))
+                    else value
+                )
+                logger.info(
+                    f"  {key}: {log_value:.6f}"
+                    if isinstance(log_value, float)
+                    else f"  {key}: {log_value}"
+                )
 
             # Save test metrics
             test_metrics_save_path = save_dir / "sae_test_metrics.json"
             try:
-                 # Serialize test metrics (ensure values are basic types)
-                 serializable_test_metrics = {
-                     k: (float(v) if isinstance(v, (torch.Tensor, np.number)) else v)
-                     for k, v in test_metrics.items()
-                 }
-                 with open(test_metrics_save_path, "wb") as f: # Use orjson
-                     f.write(orjson.dumps(serializable_test_metrics, option=orjson.OPT_INDENT_2 | orjson.OPT_SERIALIZE_NUMPY))
-                 logger.info(f"Saved test metrics to {test_metrics_save_path}")
+                # Serialize test metrics (ensure values are basic types)
+                serializable_test_metrics = {
+                    k: (
+                        float(v)
+                        if isinstance(v, (torch.Tensor, np.number))
+                        else v
+                    )
+                    for k, v in test_metrics.items()
+                }
+                with open(test_metrics_save_path, "wb") as f:  # Use orjson
+                    f.write(
+                        orjson.dumps(
+                            serializable_test_metrics,
+                            option=orjson.OPT_INDENT_2
+                            | orjson.OPT_SERIALIZE_NUMPY,
+                        )
+                    )
+                logger.info(f"Saved test metrics to {test_metrics_save_path}")
             except Exception as e:
                 logger.error(f"Failed to save test metrics: {e}")
 
         except Exception as e:
             logger.exception(f"An error occurred during final testing: {e}")
         finally:
-            if 'test_handle' in locals():
+            if "test_handle" in locals():
                 test_handle.remove()
                 logger.info("Test hook removed.")
 
     else:
-         logger.warning("Skipping final testing because training did not complete successfully.")
-
+        logger.warning(
+            "Skipping final testing because training did not complete successfully."
+        )
 
     logger.info("Script finished.")
 
