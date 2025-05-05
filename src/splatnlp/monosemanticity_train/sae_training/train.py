@@ -155,10 +155,8 @@ def train_sae_model(
             # 2) Only start SAE training if buffer has enough samples
             if len(act_buf) < steps_before_sae_train:
                 pbar_train.set_description(
-                    "Epoch %d Buffering %d/%d",
-                    epoch + 1,
-                    len(act_buf),
-                    steps_before_sae_train,
+                    f"Epoch {epoch+1} Buffering "
+                    f"{len(act_buf)}/{steps_before_sae_train}"
                 )
                 continue
 
