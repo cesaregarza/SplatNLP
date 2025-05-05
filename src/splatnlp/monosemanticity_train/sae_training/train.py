@@ -1,5 +1,4 @@
 import logging
-from typing import Any
 
 import torch
 from torch.optim import AdamW
@@ -52,7 +51,7 @@ def train_sae_model(
     log_interval: int = 500,
     gradient_clip_val: float = 1.0,
     verbose: bool = True,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, float | int | bool]]:
     """
     Main SAE training loop function. Performs:
     - Activation buffering from primary model forward passes
@@ -94,7 +93,7 @@ def train_sae_model(
     """
     global_step = 0
     sae_step = 0
-    metrics_history = []
+    metrics_history: list[dict[str, float | int | bool]] = []
 
     # Activation Buffer
     act_buf = ActivationBuffer(
@@ -359,7 +358,7 @@ def train_sae_model(
         dead = (usage < dead_thresh).sum()
         active = len(usage) - dead
 
-        epoch_summary = {
+        epoch_summary: dict[str, float | int | bool] = {
             "epoch": epoch + 1,
             "sae_step": sae_step,
             "global_step": global_step,
