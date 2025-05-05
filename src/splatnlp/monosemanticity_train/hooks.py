@@ -192,7 +192,7 @@ def register_hooks(
     neuron_value: float | None = None,
     bypass: bool = False,
     no_change: bool = False,
-) -> None:
+) -> tuple[SetCompletionHook, torch.utils.hooks.RemovableHandle]:
     hook = SetCompletionHook(
         sae_model,
         neuron_number=neuron_number,
@@ -200,6 +200,6 @@ def register_hooks(
         bypass=bypass,
         no_change=no_change,
     )
-    primary_model.output_layer.register_forward_pre_hook(hook)
+    handle = primary_model.output_layer.register_forward_pre_hook(hook)
     logger.info("Registered SetCompletionHook with %s", hook.mode_str)
-    return hook
+    return hook, handle
