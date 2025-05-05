@@ -4,11 +4,8 @@ import torch
 import tqdm
 from torch import nn
 
-from splatnlp.monosemanticity_train.data_objects import (
-    ActivationHook,
-    SAEConfig,
-)
-from splatnlp.monosemanticity_train.models import SparseAutoencoder
+from splatnlp.monosemantic_sae.data_objects import ActivationHook, SAEConfig
+from splatnlp.monosemantic_sae.models import SparseAutoencoder
 
 
 @dataclass

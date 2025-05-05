@@ -6,11 +6,8 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 from splatnlp.model.models import SetCompletionModel
-from splatnlp.monosemanticity_train.data_objects import (
-    ActivationHook,
-    SAEConfig,
-)
-from splatnlp.monosemanticity_train.models import SparseAutoencoder
+from splatnlp.monosemantic_sae.data_objects import ActivationHook, SAEConfig
+from splatnlp.monosemantic_sae.models import SparseAutoencoder
 
 logger = logging.getLogger(__name__)
 

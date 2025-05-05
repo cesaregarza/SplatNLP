@@ -4,11 +4,8 @@ import torch
 import torch.nn.functional as F
 from torch.optim import Optimizer
 
-from splatnlp.monosemanticity_train.data_objects import (
-    ActivationBuffer,
-    SAEConfig,
-)
-from splatnlp.monosemanticity_train.models import SparseAutoencoder
+from splatnlp.monosemantic_sae.data_objects import ActivationBuffer, SAEConfig
+from splatnlp.monosemantic_sae.models import SparseAutoencoder
 
 logger = logging.getLogger(__name__)
 

@@ -11,13 +11,11 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from splatnlp.model.models import SetCompletionModel
-from splatnlp.monosemanticity_train.data_objects import SAEConfig
-from splatnlp.monosemanticity_train.models import SparseAutoencoder
-from splatnlp.monosemanticity_train.sae_training.evaluate import (
-    evaluate_sae_model,
-)
-from splatnlp.monosemanticity_train.sae_training.train import train_sae_model
-from splatnlp.monosemanticity_train.utils import (
+from splatnlp.monosemantic_sae.data_objects import SAEConfig
+from splatnlp.monosemantic_sae.models import SparseAutoencoder
+from splatnlp.monosemantic_sae.sae_training.evaluate import evaluate_sae_model
+from splatnlp.monosemantic_sae.sae_training.train import train_sae_model
+from splatnlp.monosemantic_sae.utils import (
     load_json_from_path,
     load_tokenized_data,
     setup_hook,

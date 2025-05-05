@@ -23,16 +23,13 @@ from tqdm import tqdm
 sys.path.append("src")
 
 from splatnlp.model.models import SetCompletionModel
-from splatnlp.monosemanticity_train.data_objects import (
-    ActivationBuffer,
-    SAEConfig,
-)
-from splatnlp.monosemanticity_train.models import SparseAutoencoder
-from splatnlp.monosemanticity_train.sae_training import (
+from splatnlp.monosemantic_sae.data_objects import ActivationBuffer, SAEConfig
+from splatnlp.monosemantic_sae.models import SparseAutoencoder
+from splatnlp.monosemantic_sae.sae_training import (
     evaluate_sae_model,
     train_sae_model,
 )
-from splatnlp.monosemanticity_train.utils import (
+from splatnlp.monosemantic_sae.utils import (
     load_json_from_path,
     load_tokenized_data,
     setup_hook,

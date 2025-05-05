@@ -6,20 +6,20 @@ from torch.optim.lr_scheduler import _LRScheduler
 from tqdm import tqdm
 
 from splatnlp.model.models import SetCompletionModel
-from splatnlp.monosemanticity_train.data_objects import (
+from splatnlp.monosemantic_sae.data_objects import (
     ActivationBuffer,
     ActivationHook,
     SAEConfig,
 )
-from splatnlp.monosemanticity_train.models import SparseAutoencoder
-from splatnlp.monosemanticity_train.sae_training.evaluate import (
+from splatnlp.monosemantic_sae.models import SparseAutoencoder
+from splatnlp.monosemantic_sae.sae_training.evaluate import (
     evaluate_reconstruction_impact,
     evaluate_sae_model,
 )
-from splatnlp.monosemanticity_train.sae_training.resample import (
+from splatnlp.monosemantic_sae.sae_training.resample import (
     resample_dead_neurons,
 )
-from splatnlp.monosemanticity_train.sae_training.schedules import (
+from splatnlp.monosemantic_sae.sae_training.schedules import (
     usage_coeff_schedule,
 )
 

@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from splatnlp.model.models import SetCompletionModel
-from splatnlp.monosemanticity_train.models import SparseAutoencoder
+from splatnlp.monosemantic_sae.models import SparseAutoencoder
 
 logger = logging.getLogger(__name__)
 
