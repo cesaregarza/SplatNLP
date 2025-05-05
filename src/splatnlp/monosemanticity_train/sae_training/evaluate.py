@@ -60,7 +60,9 @@ def evaluate_sae_model(
 
     pad_id = vocab.get("<PAD>", -1)
 
-    pbar_eval = tqdm(data_loader, desc=description, leave=False)
+    pbar_eval: tqdm[
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+    ] = tqdm(data_loader, desc=description, leave=False)
 
     for abilities, weapons, targets, _ in pbar_eval:
         abilities = abilities.to(device)
@@ -90,7 +92,8 @@ def evaluate_sae_model(
         num_activations += current_batch_size
 
         # 2) Run SAE forward pass
-        recon_acts, hidden_acts = sae_model(acts.float())
+        out_tuple: tuple[torch.Tensor, torch.Tensor] = sae_model(acts.float())
+        recon_acts, hidden_acts = out_tuple
 
         # 3) Calculate losses and metrics for this batch
         batch_mse_loss = F.mse_loss(recon_acts, acts.float()).item()

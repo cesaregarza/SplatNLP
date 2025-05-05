@@ -75,7 +75,8 @@ def train_sae_model(
         num_epochs: Number of training epochs
         activation_buffer_size: Size of activation buffer
         sae_batch_size: Batch size for SAE training
-        steps_before_sae_train: Number of steps to buffer before starting SAE training
+        steps_before_sae_train: Number of steps to buffer before starting SAE
+            training
         sae_train_steps_per_primary_step: Number of SAE training steps per
             primary model step
         resample_steps: Set of steps at which to resample dead neurons
