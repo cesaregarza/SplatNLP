@@ -1,13 +1,3 @@
-"""
-Sparse Autoencoder (SAE) training package.
-
-This package provides functionality for training sparse autoencoders with features like:
-- KL warm-up scheduling
-- Dead neuron resampling
-- Comprehensive evaluation metrics
-- Training loop with validation
-"""
-
 from splatnlp.monosemanticity_train.sae_training.evaluate import (
     evaluate_reconstruction_impact,
     evaluate_sae_model,
