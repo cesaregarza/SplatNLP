@@ -1,11 +1,17 @@
-from typing import Callable, Dict, List, Optional, Tuple, Union
-
 import torch
 from torch import nn
 from torch.nn import functional as F
 
 
 class SparseAutoencoder(nn.Module):
+    """Sparse Autoencoder model implementation.
+
+    This class defines a sparse autoencoder model that learns a compressed
+    representation of input data. The model includes an encoder and decoder
+    with a sparse regularization term to encourage the latent space to be
+    sparse.
+    """
+
     def __init__(
         self,
         input_dim: int,
@@ -13,9 +19,26 @@ class SparseAutoencoder(nn.Module):
         l1_coefficient: float = 1e-3,
         dead_neuron_threshold: float = 1e-6,
         dead_neuron_steps: int = 12500,
-        target_usage: float = 0.05,  # fraction of samples to fire
-        usage_coeff: float = 1e-3,  # penalty multiplier for usage KL
+        target_usage: float = 0.05,
+        usage_coeff: float = 1e-3,
     ):
+        """Initialize the SparseAutoencoder model.
+
+        Args:
+            input_dim (int): Dimension of the input data.
+            expansion_factor (float, optional): Factor by which the input
+                dimension is expanded. Defaults to 8.
+            l1_coefficient (float, optional): Coefficient for the L1
+                regularization term. Defaults to 1e-3.
+            dead_neuron_threshold (float, optional): Threshold for identifying
+                dead neurons. Defaults to 1e-6.
+            dead_neuron_steps (int, optional): Number of steps to count for
+                dead neuron detection. Defaults to 12500.
+            target_usage (float, optional): Target usage rate for sparse
+                activations. Defaults to 0.05.
+            usage_coeff (float, optional): Coefficient for the usage KL
+                divergence term. Defaults to 1e-3.
+        """
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = int(input_dim * expansion_factor)
@@ -25,19 +48,17 @@ class SparseAutoencoder(nn.Module):
         self.target_usage = target_usage
         self.usage_coeff = usage_coeff
 
-        # Track usage with an EMA
         self.register_buffer("usage_ema", torch.zeros(self.hidden_dim))
 
-        # Pre-encoder bias
         self.decoder_bias = nn.Parameter(torch.zeros(input_dim))
 
-        # Core autoencoder
         self.encoder = nn.Linear(input_dim, self.hidden_dim)
         self.decoder = nn.Linear(self.hidden_dim, input_dim)
 
         self._initialize_weights()
 
     def _initialize_weights(self) -> None:
+        """Initialize the weights of the encoder and decoder."""
         nn.init.kaiming_uniform_(
             self.encoder.weight, mode="fan_in", nonlinearity="relu"
         )
@@ -56,13 +77,23 @@ class SparseAutoencoder(nn.Module):
         self.usage_coeff = float(coeff)
 
     def forward(self, x: torch.Tensor):
+        """Forward pass of the SparseAutoencoder.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape [batch_size, input_dim]
+                or [batch_size * seq_len, input_dim].
+
+        Returns:
+            tuple: A tuple containing:
+                - reconstruction: Reconstructed tensor of shape
+                    [batch_size, input_dim] or
+                    [batch_size * seq_len, input_dim].
+                - hidden: Hidden layer activations of shape
+                    [batch_size, hidden_dim] or
+                    [batch_size * seq_len, hidden_dim].
         """
-        x: [batch_size, input_dim]  or possibly [batch_size * seq_len, input_dim]
-        Returns: (reconstruction, hidden)
-        """
-        x_centered = x - self.decoder_bias  # pre-encoder bias
+        x_centered = x - self.decoder_bias
         h = F.relu(self.encoder(x_centered))
-        # Normalize decoder weights
         normalized_decoder_weights = F.normalize(self.decoder.weight, dim=0)
         reconstruction = (
             F.linear(h, normalized_decoder_weights) + self.decoder_bias
@@ -75,48 +106,45 @@ class SparseAutoencoder(nn.Module):
         reconstruction: torch.Tensor,
         hidden: torch.Tensor,
     ):
+        """Compute total loss with sparsity penalties.
+
+        Args:
+            x (torch.Tensor): Original input tensor.
+            reconstruction (torch.Tensor): Reconstruction tensor from forward
+                pass.
+            hidden (torch.Tensor): Hidden layer activations from forward pass.
+
+        Returns:
+            tuple: (total loss, dictionary of loss components).
         """
-        Returns (total_loss, metrics_dict)
-        """
-        # MSE reconstruction loss
         mse_loss = F.mse_loss(reconstruction, x, reduction="mean")
 
-        # L1 penalty on activations (optional)
         l1_loss = hidden.abs().sum(dim=1).mean()
 
-        # Ensure hidden is [batch_size, hidden_dim]
-        # If hidden is [batch_size, seq_len, hidden_dim], flatten it:
         if hidden.dim() == 3:
-            # e.g. [B, S, H] -> [B*S, H]
             hidden = hidden.reshape(-1, hidden.size(-1))
 
-        # usage_batch => fraction of samples in which each neuron > 0
-        # shape => [hidden_dim]
         usage_batch = (hidden > 0).float().mean(dim=0)
 
-        # Check dimension match
         if usage_batch.shape[0] != self.hidden_dim:
             raise RuntimeError(
                 f"usage_batch has shape {usage_batch.shape}, "
                 f"expected [{self.hidden_dim}]. Check your hidden shape!"
             )
-
-        # Update usage_ema
         alpha = 0.99
+
         with torch.no_grad():
             self.usage_ema = alpha * self.usage_ema + (1 - alpha) * usage_batch
 
-        # usage_ema in [hidden_dim], clamp to avoid log(0)
+        # Compute KL divergence for usage regularization
         p = torch.clamp(self.usage_ema, min=1e-7, max=1.0 - 1e-7)
         rho = self.target_usage
 
-        # KL usage
         kl_usage = rho * torch.log(rho / p) + (1 - rho) * torch.log(
             (1 - rho) / (1 - p)
         )
         kl_loss = kl_usage.mean()
 
-        # Weighted sum
         total_loss = (
             mse_loss
             + self.l1_coefficient * l1_loss
@@ -137,15 +165,21 @@ class SparseAutoencoder(nn.Module):
         optimizer: torch.optim.Optimizer,
         gradient_clip_val: float | None = None,
     ):
-        """
-        Single training step for external loop.
+        """Perform one optimization step.
+
+        Args:
+            x (torch.Tensor): Input tensor for training.
+            optimizer (torch.optim.Optimizer): Optimizer instance.
+            gradient_clip_val (float | None): Value to clip gradients.
+
+        Returns:
+            dict: Dictionary containing loss components.
         """
         reconstruction, hidden = self(x)
         loss, metrics = self.compute_loss(x, reconstruction, hidden)
         optimizer.zero_grad()
         loss.backward()
 
-        # remove parallel gradients from decoder weight, if you're doing that
         self.remove_parallel_gradients()
 
         if gradient_clip_val is not None:
@@ -153,7 +187,6 @@ class SparseAutoencoder(nn.Module):
 
         optimizer.step()
 
-        # re-normalize decoder weights
         with torch.no_grad():
             self.decoder.weight.data = F.normalize(
                 self.decoder.weight.data, dim=0
@@ -162,7 +195,7 @@ class SparseAutoencoder(nn.Module):
         return metrics
 
     def remove_parallel_gradients(self):
-        """Optional step to remove gradient components parallel to dictionary vectors"""
+        """Remove gradient components parallel to decoder dictionary vectors."""
         if self.decoder.weight.grad is not None:
             normalized_dict = F.normalize(self.decoder.weight.data, dim=0)
             parallel_component = (
@@ -170,12 +203,14 @@ class SparseAutoencoder(nn.Module):
             ).sum(0) * normalized_dict
             self.decoder.weight.grad -= parallel_component
 
-    # ------------------------------------------------------------------
-    # Convenience – returns a 1-D tensor with the indices of "dead" units
-    # ------------------------------------------------------------------
     def get_dead_neurons(self, threshold: float = 1e-6) -> torch.Tensor:
-        """
-        Indices where the exponential-moving average of activations
-        is < `threshold`.  Returned on the same device as `usage_ema`.
+        """Identify dead neurons based on usage statistics.
+
+        Args:
+            threshold (float): Threshold below which neurons are considered
+            dead.
+
+        Returns:
+            torch.Tensor: Indices of dead neurons.
         """
         return (self.usage_ema < threshold).nonzero(as_tuple=False).flatten()
