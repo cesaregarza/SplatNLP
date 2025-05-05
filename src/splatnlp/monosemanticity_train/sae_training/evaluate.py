@@ -1,9 +1,3 @@
-"""
-evaluate.py - Contains evaluation functions for the Sparse Autoencoder,
-including standard SAE metrics (MSE, L1 loss, sparsity) and reconstruction
-impact evaluation.
-"""
-
 import logging
 
 import numpy as np
