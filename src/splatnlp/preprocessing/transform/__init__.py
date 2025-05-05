@@ -4,7 +4,7 @@ import pandas as pd
 
 from splatnlp.preprocessing.transform.create import add_columns
 from splatnlp.preprocessing.transform.process import process_abilities
-from splatnlp.preprocessing.transform.remove import remove
+from splatnlp.preprocessing.transform.remove import remove_columns
 from splatnlp.preprocessing.transform.sample import sample
 
 logger = logging.getLogger(__name__)
@@ -46,5 +46,5 @@ def transform(
             random_state=random_state,
         )
         .pipe(process_abilities)
-        .pipe(remove)
+        .pipe(remove_columns)
     )
