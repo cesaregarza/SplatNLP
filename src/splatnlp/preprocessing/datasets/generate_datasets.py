@@ -1,11 +1,11 @@
 import pandas as pd
 from torch.utils.data import DataLoader
 
-from splatnlp.preprocessing.constants import PAD
 from splatnlp.preprocessing.datasets.dataset import (
     SetDataset,
     create_collate_fn,
 )
+from splatnlp.utils.constants import PAD
 
 
 def generate_tokenized_datasets(

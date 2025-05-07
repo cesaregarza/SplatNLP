@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Literal
 
 import numpy as np
 import pandas as pd
@@ -14,6 +14,7 @@ def build_predict_abilities(
     pad_token: str = "<PAD>",
     hook: SetCompletionHook | None = None,
     device: torch.device | None = None,
+    output_type: Literal["df", "dict", "list"] = "df",
 ) -> Callable[
     [
         SetCompletionModel,
@@ -22,7 +23,7 @@ def build_predict_abilities(
         bool,
         bool,
     ],
-    pd.DataFrame,
+    pd.DataFrame | dict[str, float] | list[str],
 ]:
     """Builds a function that predicts abilities for a given target and weapon
     using a SetCompletionModel. If a hook is provided, this will also set the
@@ -33,6 +34,8 @@ def build_predict_abilities(
             prediction. Defaults to None.
         device (torch.device | None, optional): The device to use for the
             prediction. Defaults to None.
+        output_type (Literal["df", "dict", "list"], optional): The type of
+            output to return. Defaults to "df".
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -45,7 +48,7 @@ def build_predict_abilities(
         weapon_id: str,
         bypass: bool = False,
         no_change: bool = False,
-    ) -> pd.DataFrame:
+    ) -> pd.DataFrame | dict[str, float] | list[str]:
         model.eval()
         if hook is not None:
             hook.bypass = bypass
@@ -75,8 +78,15 @@ def build_predict_abilities(
             }
         )
 
-        return df.sort_values("probability", ascending=False).reset_index(
-            drop=True
-        )
+        if output_type == "df":
+            return df.sort_values("probability", ascending=False).set_index(
+                "label"
+            )
+        elif output_type == "dict":
+            return {
+                row["label"]: row["probability"] for _, row in df.iterrows()
+            }
+        elif output_type == "list":
+            return df["label"].tolist()
 
     return predict_abilities

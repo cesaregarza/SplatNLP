@@ -7,7 +7,7 @@ import requests
 import torch
 
 from splatnlp.model.models import SetCompletionModel
-from splatnlp.preprocessing.constants import PAD
+from splatnlp.utils.constants import PAD
 
 logger = logging.getLogger(__name__)
 

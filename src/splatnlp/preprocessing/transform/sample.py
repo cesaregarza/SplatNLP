@@ -2,7 +2,7 @@ import logging
 
 import pandas as pd
 
-from splatnlp.preprocessing.constants import TARGET_WEAPON_WINRATE
+from splatnlp.utils.constants import TARGET_WEAPON_WINRATE
 
 logger = logging.getLogger(__name__)
 

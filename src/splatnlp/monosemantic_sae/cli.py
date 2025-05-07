@@ -14,11 +14,11 @@ from splatnlp.model.models import SetCompletionModel
 from splatnlp.model.training_loop import train_model
 from splatnlp.monosemantic_sae.models import ModifiedSetCompletionModel
 from splatnlp.monosemantic_sae.training_loop import train_autoencoder
-from splatnlp.preprocessing.constants import PAD
 from splatnlp.preprocessing.datasets.generate_datasets import (
     generate_dataloaders,
     generate_tokenized_datasets,
 )
+from splatnlp.utils.constants import PAD
 
 
 def load_vocab(vocab_path):

@@ -48,7 +48,32 @@ REMOVE_COLUMNS = [
 MASK = "<MASK>"
 PAD = "<PAD>"
 NULL = "<NULL>"
+SPECIAL_TOKENS = [MASK, PAD, NULL]
 SEASONS_WITHOUT_NEW_WEAPONS = [8, 9]
 BUFFER_DAYS_FOR_MAJOR_PATCH = 14
 BUFFER_DAYS_FOR_MINOR_PATCH = 7
 TARGET_WEAPON_WINRATE = 0.6
+
+HEADGEAR_ABILITIES = [
+    "comeback",
+    "last_ditch_effort",
+    "opening_gambit",
+    "tenacity",
+]
+CLOTHING_ABILITIES = [
+    "ability_doubler",
+    "haunt",
+    "ninja_squid",
+    "respawn_punisher",
+    "thermal_ink",
+]
+SHOES_ABILITIES = [
+    "drop_roller",
+    "object_shredder",
+    "stealth_jump",
+]
+CANONICAL_MAIN_ONLY_ABILITIES = {
+    **{name: "head" for name in HEADGEAR_ABILITIES},
+    **{name: "clothes" for name in CLOTHING_ABILITIES},
+    **{name: "shoes" for name in SHOES_ABILITIES},
+}

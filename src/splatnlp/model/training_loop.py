@@ -12,7 +12,7 @@ from splatnlp.model.utils import (
     update_epoch_metrics,
     update_progress_bar,
 )
-from splatnlp.preprocessing.constants import PAD
+from splatnlp.utils.constants import PAD
 
 
 class EarlyStopping:

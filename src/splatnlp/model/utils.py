@@ -3,7 +3,7 @@ import torch
 from sklearn.metrics import f1_score, precision_score, recall_score
 from tqdm import tqdm
 
-from splatnlp.preprocessing.constants import PAD
+from splatnlp.utils.constants import PAD
 
 
 def create_multi_hot_targets(

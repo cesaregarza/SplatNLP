@@ -2,7 +2,7 @@ import logging
 
 import pandas as pd
 
-from splatnlp.preprocessing.constants import (
+from splatnlp.utils.constants import (
     BUFFER_DAYS_FOR_MAJOR_PATCH,
     BUFFER_DAYS_FOR_MINOR_PATCH,
     REMOVE_COLUMNS,
