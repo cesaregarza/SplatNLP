@@ -1,6 +1,6 @@
 import logging
 
-from splatnlp.preprocessing.constants import (
+from splatnlp.utils.constants import (
     BUCKET_THRESHOLDS,
     MAIN_ONLY_ABILITIES,
     NULL,

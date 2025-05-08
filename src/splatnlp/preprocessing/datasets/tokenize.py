@@ -3,7 +3,7 @@ from typing import Optional
 
 import pandas as pd
 
-from splatnlp.preprocessing.constants import MASK, PAD
+from splatnlp.utils.constants import MASK, PAD
 
 logger = logging.getLogger(__name__)
 

@@ -68,3 +68,8 @@ results.csv
 *.svg
 *.gv
 *.html
+*.txt
+*.sh
+*.py
+!src/**/*.py
+.codesearch/
