@@ -2,15 +2,17 @@ import math
 from dataclasses import dataclass
 from typing import Optional
 
-from splatnlp.utils.constants import TOKEN_BONUS
+from splatnlp.utils.constants import NULL, TOKEN_BONUS
 from splatnlp.utils.reconstruct.allocator import Allocator
 from splatnlp.utils.reconstruct.classes import AbilityToken, Build
 
 
 @dataclass
 class BeamState:
-    """Represents a partial set of requested capstones in a multi-label
-    scenario.
+    """
+    Represents a partial set of requested capstones in a multi-label scenario.
+    Keys in `capstones` are the exact token strings. Values are the
+    corresponding AbilityToken objects.
     """
 
     capstones: dict[str, AbilityToken]
@@ -36,7 +38,8 @@ def reconstruct_build(
     Parameters
     ----------
     predict_fn : Callable
-        A function taking (current_tokens, weapon_id) -> List of (token, logp).
+        A function taking (current_tokens, weapon_id) -> Dict[str, float],
+        mapping each possible next token to a log probability.
     weapon_id : str
         The ID of the weapon for which we're generating a build.
     initial_context : list[str]
@@ -61,15 +64,34 @@ def reconstruct_build(
     """
 
     # 1) Convert initial_context into an initial set of capstones
+    #    Dictionary key = exact token string, value = AbilityToken
     initial_capstones: dict[str, AbilityToken] = {}
     for tok in initial_context:
         cap = AbilityToken.from_vocab_entry(tok)
         if cap.main_only:
-            initial_capstones[cap.family] = cap
+            # If the exact token is not already in the dict, add it
+            if tok not in initial_capstones:
+                initial_capstones[tok] = cap
         else:
-            existing = initial_capstones.get(cap.family)
-            if existing is None or cap.min_ap > existing.min_ap:
-                initial_capstones[cap.family] = cap
+            # For standard abilities, if we already have the same family with
+            # lower AP, replace it. Otherwise, just add.
+            existing_tokens_for_family = [
+                k
+                for k, v in initial_capstones.items()
+                if v.family == cap.family
+            ]
+            # Check if there's an existing token with strictly less min_ap
+            replaced = False
+            for old_token_key in existing_tokens_for_family:
+                old_cap = initial_capstones[old_token_key]
+                if cap.min_ap > old_cap.min_ap:
+                    # Replace the old token
+                    del initial_capstones[old_token_key]
+                    initial_capstones[tok] = cap
+                    replaced = True
+                    break
+            if not replaced and not existing_tokens_for_family:
+                initial_capstones[tok] = cap
 
     # Start our beam with one state
     beam: list[BeamState] = [
@@ -87,31 +109,62 @@ def reconstruct_build(
         for state in beam:
             # Expand using the model
             current_tokens = list(state.capstones.keys())
+            if len(current_tokens) == 0:
+                current_tokens = [
+                    NULL
+                ]  # Some marker if your model expects at least one token
+
+            # predict_fn returns a dict: {token: logp, ...}
             next_tokens_with_scores = predict_fn(current_tokens, weapon_id)
 
-            # If your model returns many expansions, you might limit them:
-            # next_tokens_with_scores = next_tokens_with_scores[:top_k]
-
-            for next_token, lp in next_tokens_with_scores:
+            for next_token, lp in next_tokens_with_scores.items():
                 # Convert to AbilityToken
                 try:
                     next_cap = AbilityToken.from_vocab_entry(next_token)
                 except ValueError:
                     continue  # skip invalid
 
-                # If it's main-only, ensure we don't duplicate
+                # Build a new dictionary of capstones from the old state
                 new_caps = dict(state.capstones)
+
                 if next_cap.main_only:
-                    if next_cap.family in new_caps:
-                        # Already added => skip
+                    # If we already have this EXACT main-only token, skip
+                    if next_token in new_caps:
                         continue
-                    new_caps[next_cap.family] = next_cap
+                    # Otherwise add it
+                    new_caps[next_token] = next_cap
                 else:
-                    # For standard, keep higher min_ap if we already have that
-                    # family
-                    existing = new_caps.get(next_cap.family)
-                    if existing is None or next_cap.min_ap > existing.min_ap:
-                        new_caps[next_cap.family] = next_cap
+                    # For standard abilities, see if we have an existing token
+                    # for the same family.
+                    existing_tokens_for_family = [
+                        k
+                        for k, v in new_caps.items()
+                        if v.family == next_cap.family
+                    ]
+                    if not existing_tokens_for_family:
+                        # No token for this family => just add
+                        new_caps[next_token] = next_cap
+                    else:
+                        # There's at least one existing token for this family.
+                        # We only keep the new token if min_ap is strictly
+                        # higher than all existing ones.
+                        # If so, remove the older tokens for that family and add
+                        # the new one.
+                        can_replace = False
+                        for old_token_key in existing_tokens_for_family:
+                            old_cap = new_caps[old_token_key]
+                            if next_cap.min_ap > old_cap.min_ap:
+                                # Remove them
+                                del new_caps[old_token_key]
+                                can_replace = True
+                        if can_replace:
+                            # Add the new higher-min-ap token
+                            new_caps[next_token] = next_cap
+                        else:
+                            # If we didn't replace anything, that means
+                            # next_cap.min_ap <= old_cap.min_ap, so it's not an
+                            # improvement. Skip it.
+                            continue
 
                 # Add a token bonus to encourage adding
                 new_log_prob = state.log_prob + lp + token_bonus
@@ -122,16 +175,15 @@ def reconstruct_build(
 
             # Also consider "not adding anything new" as a candidate,
             # to allow the beam state to carry over if no expansions are
-            # beneficial. The log_prob doesn't change, but the state is
-            # effectively re-added.
+            # beneficial.
             candidates.append(state)
 
         # 4) Sort by log_prob descending, take the top beam_size
         candidates.sort(key=lambda s: s.log_prob, reverse=True)
         beam = candidates[:beam_size]
 
-        # 5) Attempt to allocate each state in the beam and see if it yields a
-        # better build
+        # 5) Attempt to allocate each state in the beam and see if it yields
+        # a better build
         for st in beam:
             build, penalty = allocator.allocate(st.capstones)
             if build is not None:

@@ -80,3 +80,5 @@ CANONICAL_MAIN_ONLY_ABILITIES = {
     **{name: "shoes" for name in SHOES_ABILITIES},
 }
 TOKEN_BONUS = math.log(2.0)
+ALPHA = 0.3
+ACCEPTANCE_THRESHOLD = math.log(0.75)
