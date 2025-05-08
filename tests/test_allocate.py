@@ -64,8 +64,18 @@ def ssu_6_t():
 
 
 @pytest.fixture
+def ssu_10_t():
+    return AbilityToken.from_vocab_entry("swim_speed_up_10")
+
+
+@pytest.fixture
 def rsu_9_t():
     return AbilityToken.from_vocab_entry("run_speed_up_9")
+
+
+@pytest.fixture
+def rsu_10_t():
+    return AbilityToken.from_vocab_entry("run_speed_up_10")
 
 
 @pytest.fixture

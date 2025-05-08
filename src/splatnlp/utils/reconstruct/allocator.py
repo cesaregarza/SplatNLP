@@ -40,6 +40,7 @@ class Allocator:
             Optional[
                 tuple[
                     int,
+                    float,  # priority score
                     dict[str, Optional[str]],
                     dict[str, int],
                     int,
@@ -47,11 +48,29 @@ class Allocator:
             ]
         ],
         capstone_family_to_token: dict[str, AbilityToken],
+        priority: dict[str, float],
     ):
         """
         Recursive helper to find the optimal assignment of standard abilities to
         main slots. Modifies best_build_info[0] if a better valid build is
         found.
+
+        Parameters
+        ----------
+        standard_capstones : list[AbilityToken]
+            List of standard ability tokens to consider for main slots
+        cap_idx : int
+            Current index in standard_capstones
+        available_main_slots : tuple[str, ...]
+            List of main slots still available
+        current_mains_config : dict[str, Optional[str]]
+            Current assignment of abilities to main slots
+        best_build_info : list[Optional[tuple]]
+            Container for the best build found so far
+        capstone_family_to_token : dict[str, AbilityToken]
+            Mapping from family names to their tokens
+        priority : dict[str, float]
+            Mapping from family names to their priority scores (higher is better)
         """
         state_key = (
             cap_idx,
@@ -138,12 +157,24 @@ class Allocator:
                     actual_ap = ap_from_mains + ap_from_subs
                     total_penalty += actual_ap - token.min_ap
 
+                # Calculate priority score for main slots
+                priority_score = sum(
+                    priority.get(fam, 0.0)
+                    for fam in current_mains_config.values()
+                    if fam is not None
+                )
+
                 if (
                     best_build_info[0] is None
                     or candidate_build.total_ap < best_build_info[0][0]
+                    or (
+                        candidate_build.total_ap == best_build_info[0][0]
+                        and priority_score > best_build_info[0][1]
+                    )
                 ):
                     best_build_info[0] = (
                         candidate_build.total_ap,
+                        priority_score,
                         dict(current_mains_config),
                         final_subs_map,
                         total_penalty,
@@ -165,6 +196,7 @@ class Allocator:
             current_mains_config,
             best_build_info,
             capstone_family_to_token,
+            priority,
         )
 
         # Option 2: Try assigning 1, 2, or 3 main slots to current_std_token
@@ -191,14 +223,37 @@ class Allocator:
                     next_mains_config,
                     best_build_info,
                     capstone_family_to_token,
+                    priority,
                 )
 
         self._memo_recursive_assign[state_key] = None
 
     def allocate(
-        self, capstones: Mapping[str, AbilityToken]
+        self,
+        capstones: Mapping[str, AbilityToken],
+        priority: dict[str, float] | None = None,
     ) -> Optional[tuple[Build, int]]:
+        """
+        Allocate abilities to gear slots, considering priorities for main slots.
+
+        Parameters
+        ----------
+        capstones : Mapping[str, AbilityToken]
+            Mapping from token strings to their AbilityToken objects
+        priority : dict[str, float] | None
+            Optional mapping from family names to priority scores (higher is
+            better). Used to break ties when multiple valid builds have the same
+            total AP.
+
+        Returns
+        -------
+        Optional[tuple[Build, int]]
+            The best valid build found and its penalty score, or (None, None) if
+            no valid build could be formed
+        """
         self._memo_recursive_assign.clear()
+        if priority is None:
+            priority = {}
 
         main_only_capstones: list[AbilityToken] = []
         standard_capstones_dict: dict[str, AbilityToken] = {}
@@ -260,12 +315,13 @@ class Allocator:
 
         # best_build_info is a list containing one item: the best tuple or None
         # Structure: [ Optional[
-        # (total_ap, mains_dict, subs_dict, penalty_per_token)
+        # (total_ap, priority_score, mains_dict, subs_dict, penalty_per_token)
         # ] ]
         best_build_info_container: list[
             Optional[
                 tuple[
                     int,
+                    float,
                     dict[str, Optional[str]],
                     dict[str, int],
                     int,
@@ -281,11 +337,12 @@ class Allocator:
             initial_mains_config,
             best_build_info_container,
             capstone_family_to_token,
+            priority,
         )
 
         # If a best build was found by the recursive solver
         if best_build_info_container[0] is not None:
-            _total_ap, best_mains, best_subs, total_penalty = (
+            _total_ap, _priority_score, best_mains, best_subs, total_penalty = (
                 best_build_info_container[0]
             )
             try:

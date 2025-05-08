@@ -17,6 +17,9 @@ class BeamState:
 
     capstones: dict[str, AbilityToken]
     log_prob: float
+    family_logp: dict[
+        str, float
+    ]  # Maps family names to their best log probability
 
 
 def reconstruct_build(
@@ -66,12 +69,17 @@ def reconstruct_build(
     # 1) Convert initial_context into an initial set of capstones
     #    Dictionary key = exact token string, value = AbilityToken
     initial_capstones: dict[str, AbilityToken] = {}
+    initial_family_logp: dict[str, float] = {}
+
     for tok in initial_context:
         cap = AbilityToken.from_vocab_entry(tok)
         if cap.main_only:
             # If the exact token is not already in the dict, add it
             if tok not in initial_capstones:
                 initial_capstones[tok] = cap
+                initial_family_logp[cap.family] = (
+                    0.0  # Default high priority for user-specified tokens
+                )
         else:
             # For standard abilities, if we already have the same family with
             # lower AP, replace it. Otherwise, just add.
@@ -88,14 +96,24 @@ def reconstruct_build(
                     # Replace the old token
                     del initial_capstones[old_token_key]
                     initial_capstones[tok] = cap
+                    initial_family_logp[cap.family] = (
+                        0.0  # Default high priority for user-specified tokens
+                    )
                     replaced = True
                     break
             if not replaced and not existing_tokens_for_family:
                 initial_capstones[tok] = cap
+                initial_family_logp[cap.family] = (
+                    0.0  # Default high priority for user-specified tokens
+                )
 
     # Start our beam with one state
     beam: list[BeamState] = [
-        BeamState(capstones=initial_capstones, log_prob=0.0)
+        BeamState(
+            capstones=initial_capstones,
+            log_prob=0.0,
+            family_logp=initial_family_logp,
+        )
     ]
 
     # 2) Track the best build so far
@@ -117,7 +135,13 @@ def reconstruct_build(
             # predict_fn returns a dict: {token: logp, ...}
             next_tokens_with_scores = predict_fn(current_tokens, weapon_id)
 
-            for next_token, lp in next_tokens_with_scores.items():
+            # Sort tokens by log probability to prioritize higher probability
+            # tokens
+            for next_token, lp in sorted(
+                next_tokens_with_scores.items(),
+                key=lambda kv: kv[1],
+                reverse=True,
+            ):
                 # Convert to AbilityToken
                 try:
                     next_cap = AbilityToken.from_vocab_entry(next_token)
@@ -126,6 +150,7 @@ def reconstruct_build(
 
                 # Build a new dictionary of capstones from the old state
                 new_caps = dict(state.capstones)
+                new_family_logp = dict(state.family_logp)
 
                 if next_cap.main_only:
                     # If we already have this EXACT main-only token, skip
@@ -133,6 +158,9 @@ def reconstruct_build(
                         continue
                     # Otherwise add it
                     new_caps[next_token] = next_cap
+                    new_family_logp[next_cap.family] = max(
+                        new_family_logp.get(next_cap.family, -math.inf), lp
+                    )
                 else:
                     # For standard abilities, see if we have an existing token
                     # for the same family.
@@ -144,6 +172,9 @@ def reconstruct_build(
                     if not existing_tokens_for_family:
                         # No token for this family => just add
                         new_caps[next_token] = next_cap
+                        new_family_logp[next_cap.family] = max(
+                            new_family_logp.get(next_cap.family, -math.inf), lp
+                        )
                     else:
                         # There's at least one existing token for this family.
                         # We only keep the new token if min_ap is strictly
@@ -160,6 +191,10 @@ def reconstruct_build(
                         if can_replace:
                             # Add the new higher-min-ap token
                             new_caps[next_token] = next_cap
+                            new_family_logp[next_cap.family] = max(
+                                new_family_logp.get(next_cap.family, -math.inf),
+                                lp,
+                            )
                         else:
                             # If we didn't replace anything, that means
                             # next_cap.min_ap <= old_cap.min_ap, so it's not an
@@ -170,7 +205,11 @@ def reconstruct_build(
                 new_log_prob = state.log_prob + lp + token_bonus
 
                 # Create the new candidate
-                new_state = BeamState(capstones=new_caps, log_prob=new_log_prob)
+                new_state = BeamState(
+                    capstones=new_caps,
+                    log_prob=new_log_prob,
+                    family_logp=new_family_logp,
+                )
                 candidates.append(new_state)
 
             # Also consider "not adding anything new" as a candidate,
@@ -185,7 +224,9 @@ def reconstruct_build(
         # 5) Attempt to allocate each state in the beam and see if it yields
         # a better build
         for st in beam:
-            build, penalty = allocator.allocate(st.capstones)
+            build, penalty = allocator.allocate(
+                st.capstones, priority=st.family_logp
+            )
             if build is not None:
                 final_score = st.log_prob - alpha * penalty
                 if final_score > best_final_score:
