@@ -1,3 +1,5 @@
+import math
+
 MAIN_ONLY_ABILITIES = [
     "comeback",
     "last_ditch_effort",
@@ -77,3 +79,4 @@ CANONICAL_MAIN_ONLY_ABILITIES = {
     **{name: "clothes" for name in CLOTHING_ABILITIES},
     **{name: "shoes" for name in SHOES_ABILITIES},
 }
+TOKEN_BONUS = math.log(2.0)
