@@ -14,7 +14,9 @@ class Allocator:
     Allocates a set of capstone abilities to a Splatoon gear build.
     The goal is to satisfy all min_ap requirements of the capstones
     while minimizing the total AP of the resulting build (i.e., "tightest fit").
-    This version can assign multiple main slots to a single standard ability if optimal.
+    This version can assign multiple main slots to a single standard ability if
+    optimal. Now also returns the penalty score (actual_ap - required_ap for
+    each token).
     """
 
     def __init__(
@@ -26,48 +28,44 @@ class Allocator:
         if main_only_slots_override:
             self._main_only_slots_map.update(main_only_slots_override)
 
-        # Memoization cache for the recursive solver
-        self._memo_recursive_assign: dict[Any, None] = (
-            {}
-        )  # Key: state tuple, Value: (not used, just for presence)
+        self._memo_recursive_assign: dict[Any, None] = {}
 
     def _solve_standard_mains_recursively(
         self,
-        standard_capstones: list[
-            AbilityToken
-        ],  # The list of all standard capstones to process
-        cap_idx: int,  # Current index in standard_capstones being processed
-        available_main_slots: tuple[
-            str, ...
-        ],  # Tuple of available physical main slot names (e.g., ('clothes', 'shoes'))
-        current_mains_config: dict[
-            str, Optional[str]
-        ],  # Accumulates main assignments (head:X, clothes:Y, shoes:Z)
+        standard_capstones: list[AbilityToken],
+        cap_idx: int,
+        available_main_slots: tuple[str, ...],
+        current_mains_config: dict[str, Optional[str]],
         best_build_info: list[
-            Optional[tuple[int, dict[str, Optional[str]], dict[str, int]]]
-        ],  # Mutable list to store the best result
+            Optional[
+                tuple[
+                    int,
+                    dict[str, Optional[str]],
+                    dict[str, int],
+                    int,
+                ]
+            ]
+        ],
+        capstone_family_to_token: dict[str, AbilityToken],
     ):
         """
-        Recursive helper to find the optimal assignment of standard abilities to main slots.
-        Modifies best_build_info[0] if a better valid build is found.
+        Recursive helper to find the optimal assignment of standard abilities to
+        main slots. Modifies best_build_info[0] if a better valid build is
+        found.
         """
         state_key = (
             cap_idx,
-            available_main_slots,  # Already sorted tuple
-            frozenset(
-                current_mains_config.items()
-            ),  # Represents assignments so far
+            available_main_slots,
+            frozenset(current_mains_config.items()),
         )
         if state_key in self._memo_recursive_assign:
             return
 
-        # Base Case: All standard capstones have been considered for main slot assignment
+        # Base Case: All standard capstones have been considered for main slot
+        # assignment
         if cap_idx == len(standard_capstones):
-            # current_mains_config now reflects a complete assignment hypothesis for mains
-            # (including main-onlys from initial setup and standard abilities from recursion)
-
             # Calculate AP provided by all abilities on main slots
-            ap_from_all_mains: dict[str, int] = {}  # family -> AP from mains
+            ap_from_all_mains: dict[str, int] = {}
             for ability_family in current_mains_config.values():
                 if ability_family is not None:
                     ap_from_all_mains[ability_family] = (
@@ -77,9 +75,6 @@ class Allocator:
             subs_needed_for_all_std_caps: dict[str, int] = {}
             current_total_sub_slots_used = 0
             all_min_ap_requirements_met = True
-
-            # Check main-only capstones (already included in ap_from_all_mains if placed)
-            # Their min_ap is 10, which is met if they are on a main.
 
             # Calculate subs for standard capstones and check if min_ap is met
             for std_token in standard_capstones:
@@ -115,9 +110,7 @@ class Allocator:
                 not all_min_ap_requirements_met
                 or current_total_sub_slots_used > Build.MAX_SUB_SLOTS_TOTAL
             ):
-                self._memo_recursive_assign[state_key] = (
-                    None  # Mark as processed
-                )
+                self._memo_recursive_assign[state_key] = None
                 return
 
             # Try to construct and validate the build
@@ -127,60 +120,65 @@ class Allocator:
                     for fam, count in subs_needed_for_all_std_caps.items()
                     if count > 0
                 }
-                # current_mains_config is the complete mains picture for this path
                 candidate_build = Build(
                     mains=dict(current_mains_config), subs=final_subs_map
-                )  # Use a copy
+                )
+
+                # Compute total penalty (sum of actual_ap - required_ap for all
+                # tokens)
+                total_penalty = 0
+                # For all capstones (main-only and standard)
+                for fam, token in capstone_family_to_token.items():
+                    # Compute actual_ap for this family in this build
+                    ap_from_mains = 0
+                    for slot, slot_fam in current_mains_config.items():
+                        if slot_fam == fam:
+                            ap_from_mains += 10
+                    ap_from_subs = final_subs_map.get(fam, 0) * 3
+                    actual_ap = ap_from_mains + ap_from_subs
+                    total_penalty += actual_ap - token.min_ap
 
                 if (
                     best_build_info[0] is None
                     or candidate_build.total_ap < best_build_info[0][0]
-                ):  # type: ignore
+                ):
                     best_build_info[0] = (
                         candidate_build.total_ap,
                         dict(current_mains_config),
                         final_subs_map,
+                        total_penalty,
                     )
             except ValueError:
-                pass  # Build validation failed (e.g., total AP > 57, main-only on wrong slot from initial)
+                pass  # Build validation failed
 
-            self._memo_recursive_assign[state_key] = None  # Mark as processed
+            self._memo_recursive_assign[state_key] = None
             return
 
         # Recursive Step: Consider current standard_capstones[cap_idx]
         current_std_token = standard_capstones[cap_idx]
 
         # Option 1: Assign 0 main slots to current_std_token
-        # Pass current_mains_config as is, since no mains are used by this token here
         self._solve_standard_mains_recursively(
             standard_capstones,
             cap_idx + 1,
             available_main_slots,
             current_mains_config,
             best_build_info,
+            capstone_family_to_token,
         )
 
         # Option 2: Try assigning 1, 2, or 3 main slots to current_std_token
-        # Max mains one ability family would ever "sensibly" take is related to its min_ap.
-        # For min_ap=20, 2 mains is sensible. For min_ap=10, 1 main.
-        # We can try up to min(len(available_main_slots), 3)
         max_mains_to_attempt_for_token = min(len(available_main_slots), 3)
 
         for num_mains_to_assign_to_token in range(
             1, max_mains_to_attempt_for_token + 1
         ):
-            # Choose 'num_mains_to_assign_to_token' slots from 'available_main_slots'
             for main_slots_combo_for_token in combinations(
                 available_main_slots, num_mains_to_assign_to_token
             ):
-                # Create a new mains_config for this path
                 next_mains_config = dict(current_mains_config)
-
-                # Assign the current standard token's family to these chosen main slots
                 for slot in main_slots_combo_for_token:
-                    next_mains_config[slot] = (
-                        current_std_token.family
-                    )  # Overwrites if slot was None
+                    next_mains_config[slot] = current_std_token.family
 
                 remaining_available_slots_list = list(
                     set(available_main_slots) - set(main_slots_combo_for_token)
@@ -188,27 +186,31 @@ class Allocator:
 
                 self._solve_standard_mains_recursively(
                     standard_capstones,
-                    cap_idx + 1,  # Move to the next standard capstone
-                    tuple(
-                        sorted(remaining_available_slots_list)
-                    ),  # New set of available slots
-                    next_mains_config,  # Updated mains configuration
+                    cap_idx + 1,
+                    tuple(sorted(remaining_available_slots_list)),
+                    next_mains_config,
                     best_build_info,
+                    capstone_family_to_token,
                 )
 
-        self._memo_recursive_assign[state_key] = None  # Mark as processed
+        self._memo_recursive_assign[state_key] = None
 
     def allocate(
         self, capstones: Mapping[str, AbilityToken]
-    ) -> Optional[Build]:
-        self._memo_recursive_assign.clear()  # Clear memo for each new allocation call
+    ) -> Optional[tuple[Build, int]]:
+        self._memo_recursive_assign.clear()
 
         main_only_capstones: list[AbilityToken] = []
         standard_capstones_dict: dict[str, AbilityToken] = {}
 
+        # For penalty calculation, we need a mapping from family to the "most
+        # demanding" token
+        capstone_family_to_token: dict[str, AbilityToken] = {}
+
         for token in capstones.values():
             if token.main_only:
                 main_only_capstones.append(token)
+                capstone_family_to_token[token.family] = token
             else:
                 if (
                     token.family not in standard_capstones_dict
@@ -216,6 +218,14 @@ class Allocator:
                     > standard_capstones_dict[token.family].min_ap
                 ):
                     standard_capstones_dict[token.family] = token
+                # For penalty, always keep the highest min_ap token for each
+                # family
+                if (
+                    token.family not in capstone_family_to_token
+                    or token.min_ap
+                    > capstone_family_to_token[token.family].min_ap
+                ):
+                    capstone_family_to_token[token.family] = token
 
         standard_capstones_list: list[AbilityToken] = list(
             standard_capstones_dict.values()
@@ -233,54 +243,65 @@ class Allocator:
                 logger.debug(
                     f"Main-only capstone {token.name} has no defined slot."
                 )
-                return None
+                return None, None
             if initial_mains_config[slot] is not None:
                 logger.debug(
-                    f"Slot conflict for main-only ability {token.name} on slot {slot}."
+                    f"Slot conflict for main-only ability {token.name} on slot "
+                    f"{slot}."
                 )
-                return None
+                return None, None
             initial_mains_config[slot] = token.family
 
-        # List of physical main gear slots still available for standard abilities
+        # List of physical main gear slots still available for standard
+        # abilities
         free_main_slots_list: list[str] = [
             s for s, fam in initial_mains_config.items() if fam is None
         ]
 
         # best_build_info is a list containing one item: the best tuple or None
-        # This allows the recursive helper to modify it.
-        # Structure: [ Optional[(total_ap, mains_dict, subs_dict)] ]
+        # Structure: [ Optional[
+        # (total_ap, mains_dict, subs_dict, penalty_per_token)
+        # ] ]
         best_build_info_container: list[
-            Optional[tuple[int, dict[str, Optional[str]], dict[str, int]]]
+            Optional[
+                tuple[
+                    int,
+                    dict[str, Optional[str]],
+                    dict[str, int],
+                    int,
+                ]
+            ]
         ] = [None]
 
         # Start the recursive process for standard abilities
-        # The initial call passes the mains config which already has main-onlys placed.
         self._solve_standard_mains_recursively(
             standard_capstones_list,
-            0,  # Start with the first standard capstone
-            tuple(
-                sorted(free_main_slots_list)
-            ),  # Available slots for standard abilities
-            initial_mains_config,  # Mains config with main-onlys placed
+            0,
+            tuple(sorted(free_main_slots_list)),
+            initial_mains_config,
             best_build_info_container,
+            capstone_family_to_token,
         )
 
         # If a best build was found by the recursive solver
         if best_build_info_container[0] is not None:
-            _total_ap, best_mains, best_subs = best_build_info_container[0]
+            _total_ap, best_mains, best_subs, total_penalty = (
+                best_build_info_container[0]
+            )
             try:
-                # Ensure the final mains dict has all gear slots, even if some are None
                 final_mains_for_build = {
                     slot: best_mains.get(slot) for slot in Build.GEAR_SLOTS
                 }
-                return Build(mains=final_mains_for_build, subs=best_subs)
+                build = Build(mains=final_mains_for_build, subs=best_subs)
+                return build, total_penalty
             except ValueError as e:
                 logger.error(
-                    f"Failed to reconstruct previously validated best build. Error: {e}. Mains: {best_mains}, Subs: {best_subs}"
+                    "Failed to reconstruct previously validated best build. "
+                    f"Error: {e}. Mains: {best_mains}, Subs: {best_subs}"
                 )
-                return None
+                return None, None
 
         logger.debug(
             "No valid build configuration found for the given capstones."
         )
-        return None
+        return None, None

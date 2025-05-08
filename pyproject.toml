@@ -37,6 +37,7 @@ sqlalchemy = "^2.0.31"
 scikit-learn = "^1.5.1"
 xxhash = "^3.4.1"
 graphviz = "^0.20.3"
+pytest = "^8.3.5"
 
 [tool.poetry.group.serve.dependencies]
 fastapi = "^0.115.2"

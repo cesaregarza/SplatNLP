@@ -98,8 +98,9 @@ def qsj_3_t():
 
 def test_no_capstones(allocator_instance: Allocator):
     """Allocator with no capstones should return an empty valid build (0 AP)."""
-    build = allocator_instance.allocate({})
+    build, penalty = allocator_instance.allocate({})
     assert build is not None
+    assert penalty == 0
     assert build.total_ap == 0
     assert build.mains == {"head": None, "clothes": None, "shoes": None}
     assert build.subs == {}
@@ -110,8 +111,9 @@ def test_single_main_only(
 ):
     """Single main-only ability."""
     capstones = {"cb": comeback_t}
-    build = allocator_instance.allocate(capstones)
+    build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
+    assert penalty == 0
     assert build.mains == {"head": "comeback", "clothes": None, "shoes": None}
     assert build.subs == {}
     assert build.total_ap == 10
@@ -123,8 +125,9 @@ def test_main_only_conflict(
 ):
     """Conflicting main-only abilities for the same slot."""
     capstones = {"cb": comeback_t, "lde": lde_t}  # Both head
-    build = allocator_instance.allocate(capstones)
+    build, penalty = allocator_instance.allocate(capstones)
     assert build is None
+    assert penalty is None
 
 
 def test_all_main_slots_with_main_only(
@@ -135,8 +138,9 @@ def test_all_main_slots_with_main_only(
 ):
     """All three main slots filled with compatible main-only abilities."""
     capstones = {"cb": comeback_t, "ns": ninja_squid_t, "sj": stealth_jump_t}
-    build = allocator_instance.allocate(capstones)
+    build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
+    assert penalty == 0
     assert build.mains == {
         "head": "comeback",
         "clothes": "ninja_squid",
@@ -151,8 +155,9 @@ def test_standard_ability_min_ap_3_gets_1_sub(
 ):
     """Standard ability with min_ap 3. Optimal is 1 sub (3 AP), not a main (10 AP)."""
     capstones = {"ism": ism_3_t}
-    build = allocator_instance.allocate(capstones)
+    build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
+    assert penalty == 0
     # It should not use a main slot if subs are cheaper for total_ap
     assert build.mains == {"head": None, "clothes": None, "shoes": None}
     assert build.subs == {"ink_saver_main": 1}
@@ -165,8 +170,9 @@ def test_standard_ability_min_ap_9_gets_3_subs(
 ):
     """Standard ability with min_ap 9. Optimal is 3 subs (9 AP), not a main (10 AP)."""
     capstones = {"ism": ism_9_t}
-    build = allocator_instance.allocate(capstones)
+    build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
+    assert penalty == 0
     assert build.mains == {"head": None, "clothes": None, "shoes": None}
     assert build.subs == {"ink_saver_main": 3}
     assert build.total_ap == 9
@@ -178,8 +184,9 @@ def test_standard_ability_min_ap_10_gets_1_main(
 ):
     """Standard ability with min_ap 10. Optimal is 1 main (10 AP), not 4 subs (12 AP)."""
     capstones = {"ism": ism_10_t}
-    build = allocator_instance.allocate(capstones)
+    build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
+    assert penalty == 0
     assert "ink_saver_main" in build.mains.values()  # Should be on a main
     assert sum(1 for v in build.mains.values() if v == "ink_saver_main") == 1
     assert build.subs.get("ink_saver_main", 0) == 0  # No subs for it
@@ -194,8 +201,9 @@ def test_standard_ability_min_ap_12_gets_1_main_1_sub(
     Alternative: 4 subs = 12 AP. So 4 subs is better.
     """
     capstones = {"ism": ism_12_t}
-    build = allocator_instance.allocate(capstones)
+    build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
+    assert penalty == 0
     # Optimal should be 4 subs (12 AP) vs 1 main + 1 sub (13 AP)
     assert build.mains == {
         "head": None,
@@ -216,8 +224,9 @@ def test_mixed_main_only_and_standard_tightest_fit(
     Optimal: CB on main (10AP), SSU as 1 sub (3AP). Total 13AP.
     """
     capstones = {"cb": comeback_t, "ssu": ssu_3_t}
-    build = allocator_instance.allocate(capstones)
+    build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
+    assert penalty == 0
     assert build.mains == {"head": "comeback", "clothes": None, "shoes": None}
     assert build.subs == {"swim_speed_up": 1}
     assert build.total_ap == 13
@@ -236,8 +245,9 @@ def test_two_standards_competing_for_main_vs_subs(
     Optimal is Option 1: All subs.
     """
     capstones = {"ism": ism_9_t, "ssu": ssu_6_t}
-    build = allocator_instance.allocate(capstones)
+    build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
+    assert penalty == 0
     assert build.mains == {"head": None, "clothes": None, "shoes": None}
     assert build.subs == {"ink_saver_main": 3, "swim_speed_up": 2}
     assert build.total_ap == 15
@@ -260,8 +270,9 @@ def test_three_standards_one_must_use_main(
     So, ISM on main is better.
     """
     capstones = {"ism": ism_10_t, "ssu": ssu_6_t, "rsu": rsu_9_t}
-    build = allocator_instance.allocate(capstones)
+    build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
+    assert penalty == 0
     assert "ink_saver_main" in build.mains.values()
     assert build.subs.get("swim_speed_up") == 2
     assert build.subs.get("run_speed_up") == 3
@@ -300,8 +311,9 @@ def test_sub_slots_exceeded(
         "ns": ninja_squid_t,
         "sj": stealth_jump_t,
     }
-    build = allocator_instance.allocate(capstones)
+    build, penalty = allocator_instance.allocate(capstones)
     assert build is None
+    assert penalty is None
 
 
 def test_capstone_min_ap_unmet(
@@ -321,8 +333,9 @@ def test_capstone_min_ap_unmet(
     # and only 1 main slot can be taken by it (10 + some subs).
     # For now, let's test SCU_20 as is.
     capstones = {"scu": scu_20_t}
-    build = allocator_instance.allocate(capstones)
+    build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
+    assert penalty == 0
     num_mains = sum(1 for v in build.mains.values() if v == "special_charge_up")
     assert num_mains == 2
     assert build.subs.get("special_charge_up", 0) == 0
@@ -339,8 +352,9 @@ def test_impossible_min_ap_overall(allocator_instance: Allocator):
         name="imp_40", family="impossible", min_ap=60, main_only=False
     )
     capstones = {"imp": impossible_token}
-    build = allocator_instance.allocate(capstones)
+    build, penalty = allocator_instance.allocate(capstones)
     assert build is None
+    assert penalty is None
 
 
 def test_complex_scenario_minimize_total_ap(
@@ -376,8 +390,9 @@ def test_complex_scenario_minimize_total_ap(
         "qr": qr_3_t,
         "qsj": qsj_3_t,
     }
-    build = allocator_instance.allocate(capstones)
+    build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
+    assert penalty == 1
     assert build.total_ap == 41
     assert build.mains["head"] == "comeback"
     # One of the other two mains is "swim_speed_up" but not both
