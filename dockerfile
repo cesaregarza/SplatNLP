@@ -34,6 +34,19 @@ COPY pyproject.toml poetry.lock ./
 RUN poetry install --no-root --no-dev --without embeddings
 
 ###############################
+#           Tests             #
+###############################
+FROM dependencies AS tests
+
+COPY pyproject.toml poetry.lock ./
+RUN poetry install --with dev --no-root
+
+COPY src/splatnlp /app/src/splatnlp
+COPY tests /app/tests
+
+CMD ["pytest", "-q"]
+
+###############################
 #        Build Image          #
 ###############################
 FROM dependencies AS build
