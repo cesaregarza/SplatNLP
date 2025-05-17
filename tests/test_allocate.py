@@ -414,3 +414,30 @@ def test_complex_scenario_minimize_total_ap(
     assert build.subs["ink_saver_main"] == 1
     assert build.subs["quick_respawn"] == 1
     assert build.subs["quick_super_jump"] == 1
+
+
+def test_priority_favors_main_family(
+    allocator_instance: Allocator,
+    comeback_t: AbilityToken,
+    ninja_squid_t: AbilityToken,
+    ism_10_t: AbilityToken,
+    rsu_10_t: AbilityToken,
+):
+    """Priority weighting chooses which family receives the lone main slot."""
+    capstones = {
+        "cb": comeback_t,
+        "ns": ninja_squid_t,
+        "ism": ism_10_t,
+        "rsu": rsu_10_t,
+    }
+    priority = {"ink_saver_main": 2.0, "run_speed_up": 1.0}
+    build, penalty = allocator_instance.allocate(capstones, priority=priority)
+    assert build is not None
+    assert penalty == 2
+    assert build.mains == {
+        "head": "comeback",
+        "clothes": "ninja_squid",
+        "shoes": "ink_saver_main",
+    }
+    assert build.subs == {"run_speed_up": 4}
+    assert build.total_ap == 42
