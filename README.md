@@ -4,9 +4,9 @@ This repository contains the code for SplatNLP, a project focused on applying ma
 
 ## Overview
 
-Optimizing gear loadouts in Splatoon 3 presents a unique challenge due to intricate ability stacking mechanics, weapon-specific synergies, context-dependent effectiveness, and noisy real-world data. Traditional ML approaches often struggle with the set-based nature of gear and the complex interactions involved.
+Optimizing gear loadouts in Splatoon 3 presents a unique challenge due to intricate ability stacking mechanics, weapon-specific synergies, context-dependent effectiveness and noisy real-world data. Traditional ML approaches often struggle with the set-based nature of gear and the complex interactions involved.
 
-This project tackles this challenge through an end-to-end machine learning pipeline. It explores multiple approaches, including representing gear sets using **Doc2Vec embeddings** for analysis and clustering (see the `embeddings` module), and developing the core **`SetCompletionModel` (`SplatGPT`)**, a novel architecture designed specifically for set-based prediction tasks.
+This project tackles this challenge through an end-to-end machine learning pipeline. It explores multiple approaches, including representing gear sets using **Doc2Vec embeddings** for analysis and clustering (see the `embeddings` module) and developing the core **`SetCompletionModel` (`SplatGPT`)**, a novel architecture designed specifically for set-based prediction tasks.
 
 **Core Model (`SplatGPT`):** The primary model (`SetCompletionModel`) leverages principles from Set Transformers and GPT-2, incorporating unique attention mechanisms to process gear sets effectively while considering weapon context.
 
@@ -14,14 +14,13 @@ This project tackles this challenge through an end-to-end machine learning pipel
 
 ---
 
-**Blog Post Deep Dive:**
+**Blog Post Deep Dive**
 
-For a comprehensive deep-dive into the problem definition, the novel model architecture (`SplatGPT`), methodology, data processing techniques, results, and insights, please read the accompanying blog post:
+For a comprehensive deep-dive into the problem definition, the novel model architecture (`SplatGPT`), methodology, data processing techniques, results and insights, please read the accompanying blog post:
 
 [SplatGPT: Set-Based Deep Learning for Splatoon 3 Gear Completion](https://cegarza.com/introducing-splatgpt/)
 
 ---
-
 ## Key Features
 
 * **End-to-End Pipeline:** Covers data acquisition from stat.ink, sophisticated preprocessing, model training, evaluation, and API serving.
