@@ -40,11 +40,13 @@ def test_model(
             test_iter
         ):
             batch_inputs, batch_weapons, batch_targets = (
-                batch_inputs.to(device),
-                batch_weapons.to(device),
-                batch_targets.to(device),
+                batch_inputs.to(device, non_blocking=True),
+                batch_weapons.to(device, non_blocking=True),
+                batch_targets.to(device, non_blocking=True),
             )
-            key_padding_mask = (batch_inputs == vocab[pad_token]).to(device)
+            key_padding_mask = (
+                batch_inputs == vocab[pad_token]
+            ).to(device, non_blocking=True)
 
             outputs = model(
                 batch_inputs, batch_weapons, key_padding_mask=key_padding_mask
