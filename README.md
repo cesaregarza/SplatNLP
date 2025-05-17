@@ -110,6 +110,8 @@ python -m splatnlp.embeddings.cli \
     --umap_min_dist 0.1 \
     --random_state 42 \
     --verbose True
+> **Note:** The pretrained `doc2vec.model` is not included in the repository. Download it from the project releases and place it in `./embeddings_output/` before running inference or clustering.
+
 
 # Example: Run inference with trained model
 python -m splatnlp.embeddings.cli \
