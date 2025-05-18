@@ -70,27 +70,36 @@ def generate_dataloaders(
     null_token_id: int | None = None,
     **kwargs,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
-    """Generate DataLoaders for train, validation, and test sets.
+    """Create loaders for the provided train, validation and test sets.
 
-    Args:
-        train_set (pd.DataFrame): The training dataset.
-        validation_set (pd.DataFrame): The validation dataset.
-        test_set (pd.DataFrame): The test dataset.
-        vocab_size (int): The size of the vocabulary.
-        pad_token_id (int): The ID of the padding token.
-        num_instances_per_set (int, optional): Number of instances to
-            generate per set. Defaults to 5.
-        skew_factor (float, optional): Factor to control the skew of the
-            removal distribution. Defaults to 1.2.
-        null_token_id (int | None, optional): The ID of the null token. If
-            None, empty sets are not generated. Defaults to None.
-        **kwargs: Additional keyword arguments for DataLoader.
+    Parameters
+    ----------
+    train_set, validation_set, test_set : pd.DataFrame
+        DataFrames containing ``ability_tags`` (``list[int]``) and
+        ``weapon_id`` (``int``) columns.
+    vocab_size : int
+        Size of the vocabulary.
+    pad_token_id : int
+        Token ID used for padding in the collate function.
+    num_instances_per_set : int, default ``5``
+        Passed to :class:`SetDataset`.
+    skew_factor : float, default ``1.2``
+        Passed to :class:`SetDataset`.
+    null_token_id : int | None, default ``None``
+        Passed to :class:`SetDataset`.
+    **kwargs : Any
+        Additional keyword arguments forwarded to :class:`DataLoader`.
 
-    Returns:
-        tuple[DataLoader, DataLoader, DataLoader]:
-            - DataLoader: The DataLoader for the training set.
-            - DataLoader: The DataLoader for the validation set.
-            - DataLoader: The DataLoader for the test set.
+    Returns
+    -------
+    tuple[DataLoader, DataLoader, DataLoader]
+        ``(train_loader, validation_loader, test_loader)``.
+
+    Notes
+    -----
+    The default DataLoader settings are ``batch_size=32``, ``shuffle=True``,
+    ``num_workers=0`` and ``drop_last=True``. Any values provided via
+    ``kwargs`` override these defaults.
     """
     DEFAULT_BATCH_SIZE = 32
     DEFAULT_SHUFFLE = True
