@@ -62,6 +62,14 @@ def load_data(data_path, table_name=None):
 
 
 def main():
+    """Train a SetCompletionModel via command line.
+
+    Required arguments specify the tokenized dataset and vocabulary JSON files.
+    Additional options configure model hyperparameters and training behavior.
+    The trained model (``model.pth``), metrics history and parameter summary are
+    saved in ``--output_dir``.
+    """
+
     parser = argparse.ArgumentParser(description="Train a SetCompletionModel")
     parser.add_argument(
         "--data_path",

@@ -63,6 +63,14 @@ def load_data(data_path, table_name=None):
 
 
 def main():
+    """Train a SetCompletionModel or its autoencoder variant via CLI.
+
+    Input paths for tokenized data and vocabularies are required. When
+    ``--pretrained_model_path`` is provided, an autoencoder is trained on the
+    pretrained model's activations. The resulting weights, metrics history and
+    model parameters are written to ``--output_dir``.
+    """
+
     parser = argparse.ArgumentParser(
         description="Train an Autoencoder for SetCompletionModel or a standard SetCompletionModel"
     )
