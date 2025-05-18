@@ -52,6 +52,14 @@ def load_data(data_path, table_name=None):
 
 
 def main():
+    """CLI entry point for Doc2Vec embedding utilities.
+
+    The script supports training, inference, dimensionality reduction and
+    clustering modes. It expects tokenized data and vocabulary JSON files.
+    Depending on ``--mode``, it saves a Doc2Vec model or derived vectors and
+    clustering results under ``--output_dir``.
+    """
+
     parser = argparse.ArgumentParser(
         description="Train and use Doc2Vec embeddings for SplatNLP"
     )
