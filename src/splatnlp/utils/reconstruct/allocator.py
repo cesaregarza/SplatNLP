@@ -1,3 +1,14 @@
+"""Allocate predicted abilities to a legal Splatoon gear build.
+
+This module defines :class:`Allocator` for the reconstruction pipeline. It
+searches possible assignments of capstone abilities to gear slots, choosing
+between main and sub slots while respecting game rules. The allocator
+minimises total Ability Points (AP) while meeting each requested ability's
+minimum requirement.
+
+See ``README.md`` in this directory for a full description of the strategy.
+"""
+
 import logging
 import math
 from itertools import combinations
