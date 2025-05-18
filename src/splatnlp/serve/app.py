@@ -1,3 +1,16 @@
+"""FastAPI application for serving ``SetCompletionModel`` predictions.
+
+The application exposes an ``/infer`` endpoint that accepts a partial gear
+build and weapon identifier and returns the model's ranked ability
+predictions.  Model artifacts (vocabularies, parameters and metadata) are
+downloaded on startup using URLs provided via environment variables – see
+``load_model.load_from_env`` for details.
+
+The response format for ``/infer`` is defined by ``InferenceResponse`` and
+contains the list of predicted ability labels with probabilities, the model
+metadata and timing information.
+"""
+
 import logging
 from contextlib import asynccontextmanager
 
@@ -20,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Load model artifacts at startup and expose them as globals."""
     global vocab, weapon_vocab, pad_token_id, model_info, model, inv_vocab
     vocab, weapon_vocab, pad_token_id, model_info, model = load_from_env()
     logger.info(f"Model info: {model_info}")
@@ -40,11 +54,28 @@ app.add_middleware(
 
 
 class InferenceRequest(BaseModel):
+    """Request payload for the ``/infer`` endpoint."""
+
     target: dict[str, int]
     weapon_id: int
 
 
 class InferenceResponse(BaseModel):
+    """Structure of the ``/infer`` response.
+
+    Attributes
+    ----------
+    predictions:
+        List of ``(ability_tag, probability)`` tuples ordered by
+        likelihood.
+    splatgpt_info:
+        Model metadata loaded from the ``model_info.json`` file.
+    api_version:
+        Version of the API (defaults to the package ``VERSION``).
+    inference_time:
+        Time in seconds taken by the model to produce predictions.
+    """
+
     predictions: list[tuple[str, float]]
     splatgpt_info: dict
     api_version: str = "0.1.0"
@@ -53,6 +84,20 @@ class InferenceResponse(BaseModel):
 
 @app.post("/infer")
 def infer(request: InferenceRequest) -> InferenceResponse:
+    """Return ability predictions for the provided build.
+
+    Parameters
+    ----------
+    request:
+        Contains the partial build as a mapping of ability names to ability
+        points and the numeric ``weapon_id``.
+
+    Returns
+    -------
+    InferenceResponse
+        Predictions and metadata as described in ``InferenceResponse``.
+    """
+
     logger.info(f"Received inference request: {request}")
     target = tokenize_build(request.target)
     weapon_id_str = f"weapon_id_{request.weapon_id}"
@@ -78,6 +123,7 @@ def infer(request: InferenceRequest) -> InferenceResponse:
 
 @app.get("/infer")
 def infer_test() -> InferenceResponse:
+    """Convenience endpoint with a fixed input for quick testing."""
     request = InferenceRequest(
         target={"ink_saver_main": 3, "ink_resistance_up": 3}, weapon_id=1
     )
