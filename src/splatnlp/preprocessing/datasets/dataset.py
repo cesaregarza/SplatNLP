@@ -15,16 +15,37 @@ class SetDataset(Dataset):
         skew_factor: float = 1.2,
         null_token: int | None = None,
     ):
-        """
-        Args:
-            df: DataFrame with 'ability_tags' and 'weapon_id' columns.
-            vocab_size: Total number of tokens in your vocabulary.
-            num_instances_per_set: Number of instances to generate per set.
-            skew_factor: Adjust this value to control the skew of the
-                removal distribution. Higher values increase the probability of
-                generating more removals.
-            null_token: The token to use for generating from an empty set. If
-                None, will not generate empty sets. Defaults to None.
+        """Dataset that samples subsets of ability tag lists.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            DataFrame with two required columns:
+            ``ability_tags`` (``list[int]``) containing tokenised ability
+            tag IDs and ``weapon_id`` (``int``) indicating the
+            corresponding weapon.
+        vocab_size : int
+            Size of the vocabulary including special tokens.
+        num_instances_per_set : int, default ``5``
+            Number of random subsets generated for each original set. If
+            ``null_token`` is provided an additional instance containing only
+            that token is produced.
+        skew_factor : float, default ``1.2``
+            Controls the distribution of how many tokens are removed. Higher
+            values bias the sampling towards removing more tokens.
+        null_token : int | None, default ``None``
+            Optional token used to generate an empty input sequence. When set,
+            one extra instance per set is yielded consisting solely of this
+            token.
+
+        Sampling logic
+        ---------------
+        For every ability tag list ``S`` and each generated instance,
+        ``k`` indices are randomly removed from ``S`` where ``k`` is drawn
+        from :meth:`weighted_random_removals`. This method uses a triangular
+        distribution shaped by ``skew_factor`` so that larger ``k`` values are
+        slightly more likely. The remaining tokens form the input while ``S``
+        itself is returned as the target along with ``weapon_id``.
         """
         self.ability_tags = df["ability_tags"].tolist()
         self.weapon_ids = df["weapon_id"].tolist()
