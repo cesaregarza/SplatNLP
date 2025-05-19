@@ -1,6 +1,6 @@
 import pandas as pd
-import torch
 import pytest
+import torch
 
 from splatnlp.utils.infer import build_predict_abilities
 from splatnlp.utils.reconstruct.allocator import Allocator

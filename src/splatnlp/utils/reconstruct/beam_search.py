@@ -31,7 +31,8 @@ def reconstruct_build(
     max_steps: int = 6,
     token_bonus: float = TOKEN_BONUS,
     alpha: float = 0.1,
-) -> Optional[Build]:
+    top_k: int = 1,
+) -> Optional[list[Build]]:
     """
     Multi-label beam search: at each step, expand each state by considering
     new tokens predicted by the model. We do NOT rely on <END> tokens. We
@@ -59,11 +60,14 @@ def reconstruct_build(
         Bonus added to the log probability each time we add a new token.
     alpha : float
         Weight for the penalty term in final scoring.
+    top_k : int
+        Number of top predictions to return.
 
     Returns
     -------
-    Optional[Build]
-        The best valid Build found, or None if no valid build could be formed.
+    Optional[list[Build]]
+        The `k` best valid Builds found, or None if no valid build could be
+        formed.
     """
 
     # 1) Convert initial_context into an initial set of capstones
@@ -117,8 +121,7 @@ def reconstruct_build(
     ]
 
     # 2) Track the best build so far
-    best_final_score = -math.inf
-    best_build: Optional[Build] = None
+    top_candidates: list[tuple[float, Build]] = []
 
     # 3) Run expansions for up to max_steps
     for step in range(max_steps):
@@ -229,9 +232,14 @@ def reconstruct_build(
             )
             if build is not None:
                 final_score = st.log_prob - alpha * penalty
-                if final_score > best_final_score:
-                    best_final_score = final_score
-                    best_build = build
+                # Only add if we don't already have an equivalent build
+                if not any(b == build for _, b in top_candidates):
+                    top_candidates.append((final_score, build))
 
     # 6) After max_steps expansions, we have our best_build
-    return best_build
+    if not top_candidates:
+        return None
+
+    top_candidates.sort(key=lambda x: x[0], reverse=True)
+    top_k_candidates = top_candidates[:top_k]
+    return [b for _, b in top_k_candidates]

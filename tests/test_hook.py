@@ -1,9 +1,9 @@
-import torch
 import pytest
+import torch
 
-from splatnlp.monosemantic_sae.models import SparseAutoencoder
 from splatnlp.model.models import SetCompletionModel
 from splatnlp.monosemantic_sae.hooks import register_hooks
+from splatnlp.monosemantic_sae.models import SparseAutoencoder
 
 
 def make_models():

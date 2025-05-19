@@ -1,13 +1,17 @@
 import random
+
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from splatnlp.preprocessing.datasets.dataset import SetDataset, create_collate_fn
-from splatnlp.model.training_loop import train_epoch, validate
 import splatnlp.model.evaluation as evaluation
 from splatnlp.model.config import TrainingConfig
+from splatnlp.model.training_loop import train_epoch, validate
+from splatnlp.preprocessing.datasets.dataset import (
+    SetDataset,
+    create_collate_fn,
+)
 
 
 class DummyModel(torch.nn.Module):

@@ -1,9 +1,13 @@
 import random
+
 import numpy as np
 import pandas as pd
 import torch
 
-from splatnlp.preprocessing.datasets.dataset import SetDataset, create_collate_fn
+from splatnlp.preprocessing.datasets.dataset import (
+    SetDataset,
+    create_collate_fn,
+)
 
 
 def make_df():

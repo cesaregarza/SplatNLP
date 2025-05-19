@@ -1,4 +1,5 @@
 import torch
+
 from splatnlp.model.models import SetCompletionModel
 
 

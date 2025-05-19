@@ -185,9 +185,9 @@ def train_epoch(
             batch_weapons.to(device, non_blocking=True),
             batch_targets.to(device, non_blocking=True),
         )
-        key_padding_mask = (
-            batch_inputs == vocab[pad_token]
-        ).to(device, non_blocking=True)
+        key_padding_mask = (batch_inputs == vocab[pad_token]).to(
+            device, non_blocking=True
+        )
 
         optimizer.zero_grad()
 
@@ -276,9 +276,9 @@ def validate(
                 batch_weapons.to(device, non_blocking=True),
                 batch_targets.to(device, non_blocking=True),
             )
-            key_padding_mask = (
-                batch_inputs == vocab[pad_token]
-            ).to(device, non_blocking=True)
+            key_padding_mask = (batch_inputs == vocab[pad_token]).to(
+                device, non_blocking=True
+            )
 
             outputs = model(
                 batch_inputs, batch_weapons, key_padding_mask=key_padding_mask

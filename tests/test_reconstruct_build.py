@@ -1,7 +1,7 @@
 import pytest
 
-from splatnlp.utils.reconstruct.beam_search import reconstruct_build
 from splatnlp.utils.reconstruct.allocator import Allocator
+from splatnlp.utils.reconstruct.beam_search import reconstruct_build
 
 
 def noop_predict(tokens, weapon_id):

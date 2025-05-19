@@ -1,6 +1,6 @@
-import torch
 import numpy as np
 import pytest
+import torch
 
 from splatnlp.model.utils import (
     create_multi_hot_targets,

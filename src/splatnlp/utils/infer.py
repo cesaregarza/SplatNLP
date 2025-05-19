@@ -49,6 +49,27 @@ def build_predict_abilities(
         bypass: bool = False,
         no_change: bool = False,
     ) -> pd.DataFrame | dict[str, float] | list[str]:
+        """Predicts abilities for a given target and weapon using a
+        SetCompletionModel.
+
+        Args:
+            model (SetCompletionModel): The model to use for prediction.
+            target (list[str]): List of target tokens to predict abilities for.
+            weapon_id (str): The weapon ID to use for prediction.
+            bypass (bool, optional): Whether to bypass the hook. Defaults to
+                False.
+            no_change (bool, optional): Whether to prevent changes in the hook.
+                Defaults to False.
+
+        Returns:
+            pd.DataFrame | dict[str, float] | list[str]: The predicted abilities
+                in the format specified by output_type.
+                - If output_type is "df": Returns a DataFrame with labels as
+                    index and probabilities as values.
+                - If output_type is "dict": Returns a dictionary mapping labels
+                    to probabilities.
+                - If output_type is "list": Returns a list of labels.
+        """
         model.eval()
         if hook is not None:
             hook.bypass = bypass

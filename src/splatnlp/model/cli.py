@@ -230,9 +230,9 @@ def main():
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=True if args.device == "cuda" else False,
-        persistent_workers=True
-        if args.device == "cuda" and args.num_workers > 0
-        else False,
+        persistent_workers=(
+            True if args.device == "cuda" and args.num_workers > 0 else False
+        ),
     )
 
     if args.verbose:

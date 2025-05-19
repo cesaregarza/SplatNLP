@@ -1,5 +1,6 @@
 import logging
 import re
+from collections import Counter
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -246,4 +247,20 @@ class Build:
         logger.debug(
             f"Disallowed for next step: {', '.join(sorted(list(set(disallowed))))}"
         )
-        return list(set(disallowed))  # Return unique list
+        return list(set(disallowed))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Build):
+            return False
+
+        # Check main-only abilities match exactly in their slots
+        for slot, value in self.mains.items():
+            if value in MAIN_ONLY_ABILITIES and value != other.mains[slot]:
+                return False
+
+        # Compare main ability counts
+        if Counter(self.mains.values()) != Counter(other.mains.values()):
+            return False
+
+        # Compare sub ability counts
+        return self.subs == other.subs
