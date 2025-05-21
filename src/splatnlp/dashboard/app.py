@@ -1,6 +1,6 @@
 import dash
 import dash_bootstrap_components as dbc
-from dash import dcc, html
+from dash import dcc, html, Input, Output
 
 # Import components
 from splatnlp.dashboard.components import (
@@ -24,7 +24,7 @@ app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_
 app.layout = dbc.Container(
     [
         dcc.Location(id="url", refresh=False),
-        dcc.Store(id="page-load-trigger", data_type="number"),
+        dcc.Store(id="page-load-trigger", storage_type="memory"),
         dbc.Row(
             [
                 dbc.Col(
