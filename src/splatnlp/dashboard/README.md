@@ -2,62 +2,83 @@
 
 This dashboard provides an interactive, visual interface for exploring and interpreting features learned by a Sparse Autoencoder (SAE) trained on Splatoon ability set data. It is designed to help researchers and developers understand the internal representations of the model, debug feature behavior, and generate insights for further model development.
 
-## Features (Current & Planned)
+## Features
+
+This section details the currently implemented features of the dashboard.
 
 ### 1. Feature Selector
-- Dropdown or search to select a specific SAE feature by index.
-- Hyperlinkable feature numbers for easy sharing/bookmarking.
+- **Dropdown Menu**: Allows selection of a specific SAE feature by its index. The dropdown is dynamically populated based on the loaded SAE model's `hidden_dim`.
+- **URL Synchronization**: The selected feature ID is reflected in the URL (e.g., `/?feature=X`), enabling direct linking and bookmarking of specific feature views. The dashboard also initializes with the feature specified in the URL, if present.
 
 ### 2. Feature Summary
-- Display the selected feature number, auto-interpretation score, and (optionally) a human explanation.
-- Show ablation/prediction score for the feature.
+- **Selected Feature Display**: Shows the ID of the currently selected feature.
+- *(Planned: Display for auto-interpretation score, human explanation, and ablation/prediction score for the feature, pending data integration.)*
 
 ### 3. Activation Histogram
-- Histogram of nonzero activations for the selected feature across the dataset.
-- Option to view all activations or only nonzero values.
+- **Histogram Display**: Visualizes the distribution of activations for the selected SAE feature across the dataset.
+- **Filtering Options**: Provides a radio button toggle to view either "All Activations" or only "Non-Zero Activations" (values > 1e-6).
 
 ### 4. Top Output Logits
-- Bar chart or table showing the top 10 most negative and positive output logits for the feature.
+- **Logit Influence Chart**: Displays a bar chart showing the output vocabulary tokens whose logits are most positively and negatively influenced by the selected SAE feature. This is calculated by projecting the SAE feature's decoder vector through the primary model's output layer.
 
 ### 5. Top Activating Examples
-- Table or card view of the top 20 examples that maximally activate the feature.
-- Each example shows context, input tokens, and output predictions.
+- **Tabular View**: Presents a table of the top ~20 examples from the dataset that maximally activate the selected SAE feature.
+- **Example Details**: Each row shows: Rank, Weapon name, Input ability tokens, the SAE feature's activation value, Top predicted ability tokens, and the Original index of the example.
+- **Token Projection Tooltips**: If per-token primary model hidden state activations are provided via the `--token-activations-path` argument to the CLI, hovering over input ability tokens will display a tooltip showing the projection of that token's activation vector onto the selected SAE feature's direction vector.
 
 ### 6. Subsampled Intervals Grid
-- Ten evenly spaced intervals spanning the full range of activation values.
-- For each interval, show a few representative examples, with context and ablation coloring.
-- Indicate if an example appears in multiple intervals.
+- **Activation Intervals**: Divides the full range of the selected SAE feature's activation values into ~10 evenly spaced intervals.
+- **Representative Examples**: For each interval, a few representative examples are displayed.
+- **Example Details**: Each example shows the weapon, input abilities, the feature's activation value, and the top model prediction.
+- **Token Projection Tooltips**: Similar to "Top Activating Examples," if per-token primary model hidden state activations are provided, hovering over input ability tokens will display their activation projection onto the selected SAE feature's direction.
 
 ### 7. Correlations
-- Top 3 neurons by activation (how much the feature activates them).
-- Top 3 neurons by token correlation.
-- Top 3 features from a parallel run (different random seed).
+- **SAE Feature-to-Feature Correlations**: Shows a list of other SAE features whose activation patterns across the dataset are most correlated (Pearson correlation) with the selected feature.
+- **SAE Feature-to-Token-Logit Correlations**: Displays a list of output vocabulary tokens whose logit values (across all examples) are most correlated (Pearson correlation) with the selected SAE feature's activation values.
 
-### 8. Tooltips & Color Coding
-- Hover over any token to see its activation value and ablation loss.
-- Blue underline = lower ablation loss (better prediction), red = higher loss.
-- Bold = token from training data used to select the example.
-
-### 9. Data/Model Management
-- Persistent caching of activations and records for fast reloads.
-- Support for large datasets via efficient serialization (joblib, etc).
+### 8. Data/Model Management (via `cli.py`)
+- **Mandatory Activations Cache**: The dashboard relies on a pre-generated cache file (`--activations-cache-path`) containing SAE feature activations and processed example records (`analysis_df_records`) for fast loading.
+- **Optional Token Activations**: Supports an optional HDF5 file (`--token-activations-path`) for per-token primary model hidden states, enabling detailed tooltip projections.
+- **Model Loading**: Loads the primary model and SAE model from specified checkpoint paths.
 
 ## Usage
 
-1. Run the dashboard with:
-   ```bash
-   python scripts/run_dashboard.py
-   ```
-2. Open the provided local URL in your browser.
-3. Select a feature and explore its properties interactively.
+1.  **Prepare Data:**
+    *   Ensure you have trained primary model and SAE model checkpoints (`.pth` files).
+    *   Have your `vocab.json` and `weapon_vocab.json` files ready.
+    *   **Crucially, generate the activations cache file.** This file should contain at least `analysis_df_records` (as a Pandas DataFrame or list of dicts that will be converted) and `all_sae_hidden_activations` (as a NumPy array). This is typically generated by a separate script after training your models and running inference.
+    *   Optionally, prepare an HDF5 file containing per-token hidden state activations from the primary model if you want token projection tooltips. Each dataset in the HDF5 file should be named by the example's original index (e.g., '0', '1', ...) and store a (sequence_length, hidden_dimension) NumPy array.
+
+2.  **Run the Dashboard:**
+    Launch the dashboard from your project's root directory using the command-line interface:
+    ```bash
+    python -m splatnlp.dashboard.cli \
+        --primary-model-checkpoint /path/to/your/primary_model.pth \
+        --sae-model-checkpoint /path/to/your/sae_model.pth \
+        --vocab-path /path/to/your/vocab.json \
+        --weapon-vocab-path /path/to/your/weapon_vocab.json \
+        --activations-cache-path /path/to/your/activations_cache.joblib \
+        # Optional arguments:
+        # --token-activations-path /path/to/your/token_hidden_states.h5 \
+        # --host 127.0.0.1 \
+        # --port 8050 \
+        # --debug
+    ```
+    The script loads all specified models and data into a shared context (`DASHBOARD_CONTEXT`) used by the dashboard components, and then starts the Dash server.
+
+3.  **Interact:**
+    Open the local URL provided by the script (usually `http://127.0.0.1:8050/`) in your web browser. Select an SAE feature and explore its various analytical views.
 
 ## Development Roadmap
 - [x] Basic Dash app scaffold
 - [x] Feature selector and activation histogram
-- [x] Persistent caching of activations
-- [ ] Wire up all visualizations to real data
-- [ ] Add top logits, examples, intervals, and correlations
-- [ ] Add tooltips, ablation coloring, and hyperlinks
+- [x] Persistent caching of activations (via mandatory cache file for `cli.py`)
+- [x] Wire up all visualizations to real data (via `DASHBOARD_CONTEXT` populated by `cli.py`)
+- [x] Add top logits, examples, intervals, and correlations components
+- [x] Add tooltips for token activation projections (if data provided via `--token-activations-path`)
+- [ ] Integrate auto-interpretation scores and human explanations into Feature Summary
+- [ ] Add ablation-related scores and visualizations (e.g., ablation coloring, specific tooltips for ablation loss)
+- [ ] Further enhancements to interactivity and visual styling.
 - [ ] Support for custom datasets and models
 
 ---

@@ -148,33 +148,47 @@ def load_dashboard_data(args_ns: argparse.Namespace): # Use Namespace type hint
     return dashboard_context_data
 
 def main():
-    parser = argparse.ArgumentParser(description="Run the SplatNLP SAE Feature Dashboard")
+    parser = argparse.ArgumentParser(
+        description="Run the SplatNLP SAE Feature Dashboard.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter # Provides default values in help messages
+    )
     
-    parser.add_argument("--primary-model-checkpoint", type=str, required=True, help="Path to primary model .pth checkpoint")
-    parser.add_argument("--sae-model-checkpoint", type=str, required=True, help="Path to SAE model .pth checkpoint")
-    parser.add_argument("--vocab-path", type=str, required=True, help="Path to vocab.json")
-    parser.add_argument("--weapon-vocab-path", type=str, required=True, help="Path to weapon_vocab.json")
-    parser.add_argument("--activations-cache-path", type=str, required=True, help="Path to joblib cache for activations (analysis_df_records, all_sae_hidden_activations)")
+    # --- Required Paths ---
+    parser.add_argument("--primary-model-checkpoint", type=str, required=True, help="Path to the primary model's .pth checkpoint file.")
+    parser.add_argument("--sae-model-checkpoint", type=str, required=True, help="Path to the SAE model's .pth checkpoint file.")
+    parser.add_argument("--vocab-path", type=str, required=True, help="Path to the main vocabulary JSON file (e.g., 'vocab.json').")
+    parser.add_argument("--weapon-vocab-path", type=str, required=True, help="Path to the weapon vocabulary JSON file (e.g., 'weapon_vocab.json').")
+    parser.add_argument(
+        "--activations-cache-path", 
+        type=str, 
+        required=True, 
+        help="Path to the mandatory joblib cache file. This file must contain 'analysis_df_records' (Pandas DataFrame or list of dicts) and 'all_sae_hidden_activations' (NumPy array)."
+    )
+    
+    # --- Optional Paths ---
     parser.add_argument(
         "--token-activations-path", 
         type=str, 
         default=None, 
-        help="Optional path to HDF5 file containing per-token primary model activations. "
-             "Datasets within HDF5 should be named by example index (e.g., '0', '1', ...) "
-             "and store a (seq_len, hidden_dim) array."
+        help="Optional path to an HDF5 file containing per-token primary model hidden state activations. "
+             "This enables detailed projection tooltips for input tokens in 'Top Activating Examples' and 'Subsampled Intervals Grid'. "
+             "Datasets within the HDF5 file should be named by example index (e.g., '0', '1', ...) and each should store a (sequence_length, hidden_dimension) NumPy array."
     )
 
-    parser.add_argument("--primary-embedding-dim", type=int, default=32, help="Primary model embedding dimension")
-    parser.add_argument("--primary-hidden-dim", type=int, default=512, help="Primary model hidden dimension (also SAE input dim)")
-    parser.add_argument("--primary-num-layers", type=int, default=3, help="Primary model number of layers")
-    parser.add_argument("--primary-num-heads", type=int, default=8, help="Primary model number of attention heads")
-    parser.add_argument("--primary-num-inducing", type=int, default=32, help="Primary model number of inducing points")
+    # --- Primary Model Configuration (matching SetCompletionModel defaults if possible) ---
+    parser.add_argument("--primary-embedding-dim", type=int, default=32, help="Embedding dimension for the primary model.")
+    parser.add_argument("--primary-hidden-dim", type=int, default=512, help="Hidden dimension for the primary model. This also serves as the input dimension for the SAE.")
+    parser.add_argument("--primary-num-layers", type=int, default=3, help="Number of layers in the primary model's transformer encoder.")
+    parser.add_argument("--primary-num-heads", type=int, default=8, help="Number of attention heads in the primary model.")
+    parser.add_argument("--primary-num-inducing", type=int, default=32, help="Number of inducing points for PMA in the primary model.")
 
-    parser.add_argument("--sae-expansion-factor", type=float, default=4.0, help="SAE expansion factor for hidden dim")
+    # --- SAE Model Configuration (matching SparseAutoencoder defaults if possible) ---
+    parser.add_argument("--sae-expansion-factor", type=float, default=4.0, help="SAE expansion factor, determines SAE hidden_dim relative to input_dim (primary_hidden_dim * expansion_factor).")
     
-    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host for the Dash server")
-    parser.add_argument("--port", type=int, default=8050, help="Port for the Dash server")
-    parser.add_argument("--debug", action="store_true", help="Run Dash server in debug mode")
+    # --- Server Configuration ---
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host address for the Dash dashboard server.")
+    parser.add_argument("--port", type=int, default=8050, help="Port number for the Dash dashboard server.")
+    parser.add_argument("--debug", action="store_true", help="Run Dash server in debug mode, enabling hot-reloading and verbose error messages.")
 
     args = parser.parse_args()
 

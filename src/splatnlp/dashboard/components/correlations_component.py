@@ -132,22 +132,15 @@ def update_correlations_display(selected_feature_id):
 
     try:
         all_sae_acts = DASHBOARD_CONTEXT.all_sae_hidden_activations
-        # The prompt and previous components assume analysis_df_records might be list of dicts or DataFrame.
-        # This component's helper functions expect a DataFrame.
-        analysis_data_source = DASHBOARD_CONTEXT.analysis_df_records
+        analysis_df = DASHBOARD_CONTEXT.analysis_df_records # Use analysis_df
         inv_vocab = DASHBOARD_CONTEXT.inv_vocab
+
+        # Safeguard check for analysis_df type
+        if not isinstance(analysis_df, pd.DataFrame):
+            return [], [], "Error: analysis_df_records is not a DataFrame as expected."
         
-        # Ensure analysis_df is a DataFrame for the helper functions
-        analysis_df = None
-        if isinstance(analysis_data_source, pd.DataFrame):
-            analysis_df = analysis_data_source
-        elif isinstance(analysis_data_source, list) and all(isinstance(item, dict) for item in analysis_data_source):
-            if not analysis_data_source: # Handle empty list of records
-                 analysis_df = pd.DataFrame()
-            else:
-                 analysis_df = pd.DataFrame(analysis_data_source)
-        else:
-            raise ValueError("Analysis records (analysis_df_records) are not a Pandas DataFrame or a convertible list of dicts.")
+        # Other critical data (all_sae_acts, inv_vocab) are assumed to be correct from cli.py
+        # or will raise errors in helper functions if types are wrong.
 
         # 1. Correlated SAE Features
         top_sae_features, err = calculate_top_correlated_features(all_sae_acts, selected_feature_id)
