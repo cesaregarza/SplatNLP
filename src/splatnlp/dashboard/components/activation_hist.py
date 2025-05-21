@@ -1,3 +1,5 @@
+from typing import Any, Dict, Optional
+
 import numpy as np
 import plotly.express as px
 from dash import Input, Output, State, callback, dcc, html
@@ -38,11 +40,13 @@ activation_hist_component = html.Div(
     # For multi-page apps or more complex scenarios, Dash Enterprise's Job Queue
     # or other caching mechanisms (Redis, etc.) might be better.
     # For this project, accessing a module-level global is acceptable given the run script's setup.
-    State(
-        "feature-dropdown", "value"
-    ),  # We use State here just to pass it to the global accessor
+    State("feature-dropdown", "value"),
 )
-def update_activation_histogram(selected_feature_id, filter_type, _):
+def update_activation_histogram(
+    selected_feature_id: Optional[int],
+    filter_type: str,
+    _: Optional[int],
+) -> Dict[str, Any]:
     # This assumes that 'splatnlp.dashboard.app' module has DASHBOARD_CONTEXT attribute set by the script.
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
@@ -86,6 +90,16 @@ def update_activation_histogram(selected_feature_id, filter_type, _):
     ):  # Handle case where there's only one value (e.g. a single zero)
         plot_activations = np.array([plot_activations.item()])
 
-    fig = px.histogram(plot_activations, nbins=50, title=title)
-    fig.update_layout(showlegend=False)
+    fig = px.histogram(
+        x=plot_activations,
+        title=title,
+        labels={"x": "Activation Value", "y": "Count"},
+        nbins=50,
+    )
+
+    fig.update_layout(
+        showlegend=False,
+        margin=dict(l=40, r=40, t=40, b=40),
+    )
+
     return fig

@@ -1,6 +1,8 @@
 import random
+from typing import Any, Optional, Tuple, Union
 
 import dash_bootstrap_components as dbc  # Needed for dbc.Tooltip
+import h5py
 import numpy as np
 import pandas as pd
 from dash import Input, Output, callback, dcc, html
@@ -8,20 +10,20 @@ from dash import Input, Output, callback, dcc, html
 
 # Helper function to format individual examples with tooltips
 def format_example_with_tooltips(
-    example_idx,
-    record,
-    inv_vocab,
-    inv_weapon_vocab,
-    feature_activation_value,
-    model_logits,
-    token_activations_accessor,  # h5py.File object or None
-    sae_feature_direction,  # NumPy array or None
-    interval_num,  # For unique ID generation
-    example_in_interval_num,  # For unique ID generation
-    json_weapon_id_to_name=None,  # Optional mapping for weapon display names
-):
+    example_idx: int,
+    record: pd.Series,
+    inv_vocab: dict[str, str],
+    inv_weapon_vocab: dict[str, str],
+    feature_activation_value: float,
+    model_logits: Optional[np.ndarray],
+    token_activations_accessor: Optional[h5py.File],
+    sae_feature_direction: Optional[np.ndarray],
+    interval_num: int,
+    example_in_interval_num: int,
+    json_weapon_id_to_name: Optional[dict[str, str]] = None,
+) -> tuple[html.Div, list[dbc.Tooltip]]:
     if record is None:
-        return html.P("Example data not found.")
+        return html.P("Example data not found."), []
 
     ability_token_ids = record.get("ability_input_tokens", [])
     weapon_id_token = record.get("weapon_id_token")
@@ -61,10 +63,10 @@ def format_example_with_tooltips(
             top_pred_str = f"{token_name} ({score:.2f})"
 
     # Prepare input abilities with tooltips
-    input_abilities_spans = []
-    tooltip_components = []
+    input_abilities_spans: list[html.Span] = []
+    tooltip_components: list[dbc.Tooltip] = []
 
-    token_projections = []
+    token_projections: list[str] = []
     if (
         token_activations_accessor is not None
         and sae_feature_direction is not None
@@ -200,15 +202,15 @@ intervals_grid_component = html.Div(
     ],
     [Input("feature-dropdown", "value")],
 )
-def update_intervals_grid(selected_feature_id):
+def update_intervals_grid(selected_feature_id: Optional[int]) -> tuple[list[Any], str]:
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
     if selected_feature_id is None or DASHBOARD_CONTEXT is None:
         return [], "Select an SAE feature."
 
-    current_run_error_messages = []
-    grid_layout_children = []  # For all interval sections
-    all_tooltips_for_page = []  # For all tooltips from all examples
+    current_run_error_messages: list[str] = []
+    grid_layout_children: list[Any] = []  # For all interval sections
+    all_tooltips_for_page: list[Any] = []  # For all tooltips from all examples
 
     all_sae_acts = DASHBOARD_CONTEXT.all_sae_hidden_activations
     analysis_df = DASHBOARD_CONTEXT.analysis_df_records  # Guaranteed DataFrame

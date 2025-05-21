@@ -1,4 +1,7 @@
+from typing import Any, List, Optional
+
 from dash import Input, Output, callback, dcc, html
+
 
 feature_summary_component = html.Div(
     id="feature-summary-content",
@@ -17,10 +20,13 @@ feature_summary_component = html.Div(
     Output("selected-feature-display", "children"),
     Input("feature-dropdown", "value"),
 )
-def update_feature_summary(selected_feature_id):
+def update_feature_summary(selected_feature_id: Optional[int]) -> List[Any]:
     if selected_feature_id is None:
-        return "No feature selected."
-    return f"Displaying details for Feature: {selected_feature_id}"
+        return [html.P("Select a feature to see its summary.")]
+
+    return [
+        html.P(f"Selected Feature: {selected_feature_id}"),
+    ]
 
 
 # Note:

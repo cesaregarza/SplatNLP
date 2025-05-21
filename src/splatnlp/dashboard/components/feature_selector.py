@@ -1,3 +1,5 @@
+from typing import List, Optional, Tuple
+
 from dash import Input, Output, State, callback, dcc, html
 
 # DASHBOARD_CONTEXT will be populated by the main script in app.py
@@ -19,19 +21,19 @@ feature_selector_layout = html.Div(
 @callback(
     Output("feature-dropdown", "options"),
     Output("feature-dropdown", "value"),
-    Input(
-        "page-load-trigger", "data"
-    ),  # Dummy input to trigger on page load after context is set
-    State(
-        "feature-dropdown", "value"
-    ),  # Current value to preserve if already set by URL
+    Input("page-load-trigger", "data"),
+    State("feature-dropdown", "value"),
     State("url", "search"),
 )
-def populate_feature_options(page_load_data, current_value, search_query):
+def populate_feature_options(
+    page_load_data: Optional[str],
+    current_value: Optional[int],
+    search_query: Optional[str],
+) -> Tuple[List[dict], Optional[int]]:
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
     default_value = 0  # Default to feature 0 if no other value is set
-    options = []
+    options: List[dict] = []
 
     if (
         DASHBOARD_CONTEXT is not None

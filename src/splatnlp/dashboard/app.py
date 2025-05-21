@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from typing import Optional
 
 import dash
 import dash_bootstrap_components as dbc
@@ -61,7 +62,7 @@ app.layout = dbc.Container(
 # The assumption is that the script running the Dash app (e.g., cli.py) will have set
 # DASHBOARD_CONTEXT *before* app.run_server() is called.
 @app.callback(Output("page-load-trigger", "data"), Input("url", "pathname"))
-def trigger_page_load(_pathname):
+def trigger_page_load(_pathname: Optional[str]) -> str:
     # This callback's main purpose is to signal that the initial app setup phase
     # (where context might be loaded externally by the script starting the server)
     # should be complete. The value returned (timestamp) is a simple way to trigger

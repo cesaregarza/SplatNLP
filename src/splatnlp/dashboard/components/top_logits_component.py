@@ -1,3 +1,5 @@
+from typing import Any, Dict, Optional, Tuple
+
 import numpy as np
 import plotly.express as px
 import torch
@@ -31,155 +33,114 @@ top_logits_component = html.Div(
     ],
     [Input("feature-dropdown", "value")],
 )
-def update_top_logits_graph(selected_feature_id):
+def update_top_logits_graph(selected_feature_id: Optional[int]) -> Tuple[Dict[str, Any], str]:
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
     if selected_feature_id is None:
         return {
             "data": [],
             "layout": {
-                "title": "Select an SAE feature to see logit influences"
+                "title": "Select a feature to see its logit influences"
             },
         }, ""
+
     if DASHBOARD_CONTEXT is None:
         return {
             "data": [],
-            "layout": {"title": "Dashboard context not loaded"},
-        }, "Error: DASHBOARD_CONTEXT is None. Ensure data is loaded."
+            "layout": {
+                "title": "Dashboard context not initialized"
+            },
+        }, "Error: Dashboard context not initialized"
 
     sae_model = DASHBOARD_CONTEXT.sae_model
-    primary_model = DASHBOARD_CONTEXT.primary_model
-    inv_vocab = (
-        DASHBOARD_CONTEXT.inv_vocab
-    )  # Expected: {int_index: token_name_str}
+    if sae_model is None:
+        return {
+            "data": [],
+            "layout": {
+                "title": "SAE model not loaded"
+            },
+        }, "Error: SAE model not loaded"
 
-    if not hasattr(sae_model, "decoder") or not hasattr(
-        sae_model.decoder, "weight"
-    ):
+    if not hasattr(sae_model, "decoder") or not hasattr(sae_model.decoder, "weight"):
         return {
             "data": [],
-            "layout": {"title": "SAE decoder weights not found"},
-        }, "Error: SAE decoder or its weights not found."
-    if not hasattr(sae_model, "hidden_dim"):
+            "layout": {
+                "title": "SAE model missing decoder weights"
+            },
+        }, "Error: SAE model missing decoder weights"
+
+    if not (0 <= selected_feature_id < sae_model.decoder.weight.shape[1]):
         return {
             "data": [],
-            "layout": {"title": "SAE hidden_dim not found"},
-        }, "Error: SAE hidden_dim attribute not found on sae_model."
+            "layout": {
+                "title": f"Feature ID {selected_feature_id} out of range"
+            },
+        }, f"Error: Feature ID {selected_feature_id} out of range"
+
+    sae_feature_direction = sae_model.decoder.weight.data.detach().cpu().numpy()[
+        :, selected_feature_id
+    ]
+
+    primary_model = DASHBOARD_CONTEXT.primary_model
+    if primary_model is None:
+        return {
+            "data": [],
+            "layout": {
+                "title": "Primary model not loaded"
+            },
+        }, "Error: Primary model not loaded"
 
     if not hasattr(primary_model, "output_layer") or not hasattr(
         primary_model.output_layer, "weight"
     ):
         return {
             "data": [],
-            "layout": {"title": "Primary model output layer weights not found"},
-        }, "Error: Primary model output_layer or its weights not found."
+            "layout": {
+                "title": "Primary model missing output layer weights"
+            },
+        }, "Error: Primary model missing output layer weights"
 
-    if selected_feature_id >= sae_model.hidden_dim:
-        err_msg = f"Error: Feature ID {selected_feature_id} is out of range for SAE hidden dim {sae_model.hidden_dim}."
-        return {"data": [], "layout": {"title": err_msg}}, err_msg
+    primary_output_layer_weights = primary_model.output_layer.weight.data.detach().cpu().numpy()
 
-    # Get SAE decoder weights for the selected feature
-    # sae_model.decoder: nn.Linear(self.hidden_dim, input_dim) -> decoder.weight: (input_dim, hidden_dim)
-    # We need the column vector corresponding to the selected_feature_id.
-    try:
-        sae_feature_effect_on_primary_activation = (
-            sae_model.decoder.weight.data[:, selected_feature_id].detach().cpu()
-        )
-    except IndexError:
-        err_msg = f"Error: Feature ID {selected_feature_id} caused an IndexError when accessing SAE decoder weights. Max index is {sae_model.decoder.weight.data.shape[1]-1}."
-        return {
-            "data": [],
-            "layout": {"title": "SAE Weight Access Error"},
-        }, err_msg
-
-    # primary_model.output_layer: nn.Linear(hidden_dim_primary, output_dim_vocab)
-    # primary_model.output_layer.weight: (output_dim_vocab, hidden_dim_primary)
-    primary_output_layer_weights = (
-        primary_model.output_layer.weight.data.detach().cpu()
-    )
-
-    if (
-        sae_feature_effect_on_primary_activation.shape[0]
-        != primary_output_layer_weights.shape[1]
-    ):
-        err_msg = (
-            f"Dimension mismatch: SAE feature effect vector size ({sae_feature_effect_on_primary_activation.shape[0]}) "
-            f"does not match primary model output layer input dimension ({primary_output_layer_weights.shape[1]})."
-        )
-        return {
-            "data": [],
-            "layout": {"title": "Dimension Mismatch"},
-        }, "Error: " + err_msg
-
-    # (vocab_size, hidden_dim_primary) @ (hidden_dim_primary) -> (vocab_size)
+    sae_feature_effect_on_primary_activation = sae_feature_direction
     effect_on_logits = torch.matmul(
         primary_output_layer_weights, sae_feature_effect_on_primary_activation
     )
-    effect_on_logits_np = effect_on_logits.numpy()
 
-    top_n = 15
-    if effect_on_logits_np.ndim > 1:
-        effect_on_logits_np = effect_on_logits_np.squeeze()
-    if effect_on_logits_np.ndim == 0:
-        effect_on_logits_np = np.array([effect_on_logits_np.item()])
-
-    sorted_indices = np.argsort(effect_on_logits_np)
-
-    num_logits = len(effect_on_logits_np)
-    actual_top_n = min(top_n, num_logits)
-
-    top_positive_indices = sorted_indices[-actual_top_n:][::-1]
-    top_negative_indices = sorted_indices[:actual_top_n]
-
-    # Handle cases where there might be overlap or fewer than 2*top_n unique tokens
-    # For example, if vocab size is small or effects are very concentrated
-    combined_indices_set = set(top_positive_indices) | set(top_negative_indices)
-    combined_indices = sorted(
-        list(combined_indices_set),
-        key=lambda x: effect_on_logits_np[x],
-        reverse=True,
-    )
-
-    results = []
-    for idx in combined_indices:
-        token_idx_int = int(idx)
-        token_name = inv_vocab.get(token_idx_int, f"Token_ID_{token_idx_int}")
-
-        # If inv_vocab keys might be strings (e.g. from a JSON load where ints became strings)
-        if (
-            token_name == f"Token_ID_{token_idx_int}"
-        ):  # Fallback if int key didn't work
-            token_name = inv_vocab.get(
-                str(token_idx_int), f"Token_ID_{token_idx_int}"
-            )
-
-        results.append(
-            {
-                "token": token_name,
-                "effect": effect_on_logits_np[idx],
-                "type": (
-                    "Positive" if effect_on_logits_np[idx] >= 0 else "Negative"
-                ),
-            }
-        )
-
-    if not results:
+    inv_vocab = DASHBOARD_CONTEXT.inv_vocab
+    if inv_vocab is None:
         return {
             "data": [],
             "layout": {
-                "title": f"No significant logit effects found for Feature {selected_feature_id}"
+                "title": "Vocabulary not loaded"
             },
-        }, ""
+        }, "Error: Vocabulary not loaded"
+
+    token_names = [
+        inv_vocab.get(str(i), inv_vocab.get(i, f"Token_ID_{i}"))
+        for i in range(len(effect_on_logits))
+    ]
+
+    sorted_indices = torch.argsort(effect_on_logits)
+    top_positive = sorted_indices[-10:].flip(0)
+    top_negative = sorted_indices[:10]
+
+    positive_tokens = [token_names[i] for i in top_positive]
+    negative_tokens = [token_names[i] for i in top_negative]
+    positive_effects = [effect_on_logits[i].item() for i in top_positive]
+    negative_effects = [effect_on_logits[i].item() for i in top_negative]
 
     fig = px.bar(
-        results,
-        x="token",
-        y="effect",
-        color="type",
-        title=f"Top Logit Influences for SAE Feature {selected_feature_id}",
-        labels={"effect": "Influence on Logit Value", "token": "Output Token"},
-        color_discrete_map={"Positive": "green", "Negative": "red"},
+        x=positive_tokens + negative_tokens,
+        y=positive_effects + negative_effects,
+        title=f"Top Logit Influences for Feature {selected_feature_id}",
+        labels={"x": "Token", "y": "Logit Influence"},
+        color=["Positive"] * 10 + ["Negative"] * 10,
     )
-    fig.update_layout(xaxis_categoryorder="total descending")
+
+    fig.update_layout(
+        showlegend=False,
+        margin=dict(l=40, r=40, t=40, b=40),
+    )
 
     return fig, ""

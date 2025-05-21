@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 import h5py
 import numpy as np
@@ -18,7 +19,7 @@ from splatnlp.data.tokenizer import SplatTokenizer
 from splatnlp.models.sae import SAE
 
 
-def fetch_weapon_data():
+def fetch_weapon_data() -> dict[str, str]:
     """Fetch and process weapon data from the Splatoon API."""
     TRANSLATION_URL = "https://splat.top/api/game_translation"
     FINAL_REF_URL = "https://splat.top/api/weapon_info"
@@ -60,7 +61,7 @@ def fetch_weapon_data():
     return JSON_ID_TO_NAME
 
 
-def main():
+def main() -> None:
     # Set up paths
     base_dir = Path("/root/dev/SplatNLP")
     model_path = base_dir / "models" / "sae_model.pt"
@@ -88,7 +89,7 @@ def main():
 
     # Load token activations if available
     print("Loading token activations...")
-    token_activations_accessor = None
+    token_activations_accessor: Optional[h5py.File] = None
     if os.path.exists(token_acts_cache_path):
         token_activations_accessor = h5py.File(token_acts_cache_path, "r")
         print("Token activations loaded successfully.")
