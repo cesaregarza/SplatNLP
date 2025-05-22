@@ -100,7 +100,7 @@ def update_activation_histogram(
     fig.update_layout(
         showlegend=False,
         margin=dict(l=40, r=40, t=40, b=40),
-        height=300  # Set fixed height for the histogram
+        height=300,  # Set fixed height for the histogram
     )
 
     return fig

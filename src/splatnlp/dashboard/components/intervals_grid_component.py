@@ -1,5 +1,5 @@
 import random
-from typing import Any, Optional, Tuple, Union
+from typing import Any, Optional
 
 import dash_bootstrap_components as dbc  # Needed for dbc.Tooltip
 import h5py
@@ -7,20 +7,22 @@ import numpy as np
 import pandas as pd
 from dash import Input, Output, callback, dcc, html
 
+from splatnlp.preprocessing.transform.mappings import generate_maps
+
 
 # Helper function to format individual examples with tooltips
 def format_example_with_tooltips(
     example_idx: int,
     record: pd.Series,
     inv_vocab: dict[str, str],
-    inv_weapon_vocab: dict[str, str],
+    inv_weapon_vocab: dict[int, str],
     feature_activation_value: float,
     model_logits: Optional[np.ndarray],
     token_activations_accessor: Optional[h5py.File],
     sae_feature_direction: Optional[np.ndarray],
     interval_num: int,
     example_in_interval_num: int,
-    # json_weapon_id_to_name: Optional[dict[str, str]] = None, # Removed
+    id_to_name: dict[str, str],
 ) -> tuple[html.Div, list[dbc.Tooltip]]:
     if record is None:
         return html.P("Example data not found."), []
@@ -35,10 +37,15 @@ def format_example_with_tooltips(
 
     # Get the weapon name directly from inv_weapon_vocab using weapon_id_token
     # weapon_id_token is expected to be a simple ID (e.g., "0", "10", "201") from the analysis_df record.
-    id_to_lookup = str(weapon_id_token) # Convert to string, assume it's the simple ID.
-    
+    id_to_lookup = int(weapon_id_token)
+
     # Perform the lookup with the new fallback format
-    weapon_name = inv_weapon_vocab.get(id_to_lookup, f"UNKNOWN_WPN_ID[{id_to_lookup}]")
+    weapon_name = inv_weapon_vocab.get(
+        id_to_lookup, f"UNKNOWN_WPN_ID[{id_to_lookup}]"
+    )
+    weapon_name = id_to_name.get(
+        weapon_name.split("_")[-1], f"UNKNOWN_WPN_ID[{id_to_lookup}]"
+    )
     # The previous logic involving conditional stripping or json_weapon_id_to_name is removed/simplified.
 
     top_pred_str = "N/A"  # Default
@@ -197,7 +204,9 @@ intervals_grid_component = html.Div(
     ],
     [Input("feature-dropdown", "value")],
 )
-def update_intervals_grid(selected_feature_id: Optional[int]) -> tuple[list[Any], str]:
+def update_intervals_grid(
+    selected_feature_id: Optional[int],
+) -> tuple[list[Any], str]:
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
     if selected_feature_id is None or DASHBOARD_CONTEXT is None:
@@ -215,9 +224,7 @@ def update_intervals_grid(selected_feature_id: Optional[int]) -> tuple[list[Any]
         DASHBOARD_CONTEXT, "token_activations_accessor", None
     )
     sae_model = DASHBOARD_CONTEXT.sae_model
-    # json_weapon_id_to_name = getattr(
-    #     DASHBOARD_CONTEXT, "json_weapon_id_to_name", None
-    # ) # Removed
+    _, id_to_name, _ = generate_maps()
 
     if not isinstance(analysis_df, pd.DataFrame):  # Safeguard
         return [], "Error: analysis_df_records is not a DataFrame as expected."
@@ -307,7 +314,7 @@ def update_intervals_grid(selected_feature_id: Optional[int]) -> tuple[list[Any]
                     sae_feature_direction,
                     num_intervals - i,
                     ex_in_interval_idx,  # Pass interval and example numbers for unique IDs
-                    # json_weapon_id_to_name, # Removed from call
+                    id_to_name,
                 )
                 interval_section_children.append(example_div)
                 all_tooltips_for_page.extend(example_tooltips)

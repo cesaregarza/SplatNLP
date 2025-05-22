@@ -2,7 +2,6 @@ from typing import Any, List, Optional
 
 from dash import Input, Output, callback, dcc, html
 
-
 feature_summary_component = html.Div(
     id="feature-summary-content",
     children=[

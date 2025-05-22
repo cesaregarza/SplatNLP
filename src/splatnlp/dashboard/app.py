@@ -43,16 +43,28 @@ app.layout = dbc.Container(
                     [
                         dbc.Tabs(
                             [
-                                dbc.Tab(label="Overview", children=[
-                                    feature_summary_component,
-                                    activation_hist_component,
-                                ]),
-                                dbc.Tab(label="Top Examples", children=top_examples_component),
-                                dbc.Tab(label="Intervals Grid", children=intervals_grid_component),
-                                dbc.Tab(label="Top Logits & Correlations", children=[
-                                    top_logits_component,
-                                    correlations_component,
-                                ]),
+                                dbc.Tab(
+                                    label="Overview",
+                                    children=[
+                                        feature_summary_component,
+                                        activation_hist_component,
+                                    ],
+                                ),
+                                dbc.Tab(
+                                    label="Top Examples",
+                                    children=top_examples_component,
+                                ),
+                                dbc.Tab(
+                                    label="Intervals Grid",
+                                    children=intervals_grid_component,
+                                ),
+                                dbc.Tab(
+                                    label="Top Logits & Correlations",
+                                    children=[
+                                        top_logits_component,
+                                        correlations_component,
+                                    ],
+                                ),
                             ]
                         )
                     ],
