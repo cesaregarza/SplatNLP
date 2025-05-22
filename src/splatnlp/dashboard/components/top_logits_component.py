@@ -1,6 +1,7 @@
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 import plotly.express as px
 import torch
 from dash import Input, Output, State, callback, dcc, html
@@ -147,18 +148,30 @@ def update_top_logits_graph(
     positive_effects = [effect_on_logits[i].item() for i in top_positive]
     negative_effects = [effect_on_logits[i].item() for i in top_negative]
 
+    # Create DataFrame for plotting
+    df = pd.DataFrame(
+        {
+            "Token": positive_tokens + negative_tokens,
+            "Effect": positive_effects + negative_effects,
+            "Type": ["Positive"] * 5 + ["Negative"] * 5,
+        }
+    )
+
     fig = px.bar(
-        x=positive_tokens + negative_tokens,
-        y=positive_effects + negative_effects,
+        df,
+        x="Token",
+        y="Effect",
+        color="Type",
         title=f"Top Logit Influences for Feature {selected_feature_id}",
-        labels={"x": "Token", "y": "Logit Influence"},
-        color=["Positive"] * 5 + ["Negative"] * 5,  # Changed from 10 to 5
+        labels={"Token": "Token", "Effect": "Logit Influence"},
+        color_discrete_map={"Positive": "#1f77b4", "Negative": "#ff7f0e"},
     )
 
     fig.update_layout(
         showlegend=False,
         margin=dict(l=40, r=40, t=40, b=40),
-        height=350,  # Set fixed height for the graph
+        height=350,
+        xaxis={"tickangle": 45},  # Rotate labels for better readability
     )
 
     return fig, ""
