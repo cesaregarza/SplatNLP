@@ -316,36 +316,49 @@ def update_top_examples_grid(selected_feature_id):
             "flex": 2,
             "tooltipValueGetter": """
 function(params) {
-    // 1. Check params and params.data
-    if (!params || !params.data) {
-        // Fallback to params.value if params.data is not available
-        if (params && params.value) return String(params.value);
-        return null;
-    }
+    try {
+        // 1. Check params and params.data
+        if (!params || !params.data) {
+            if (params && params.value) return String(params.value);
+            return null;
+        }
 
-    // 2. Check ability_projections_str_list
-    const projectionsList = params.data.ability_projections_str_list;
-    if (Array.isArray(projectionsList) && projectionsList.length > 0) {
-        // Check the first item for the special placeholder case
-        if (projectionsList.length === 1) {
-            const firstItem = projectionsList[0];
-            if (typeof firstItem === 'string' && firstItem.startsWith('(')) {
-                return firstItem;
+        // 2. Check ability_projections_str_list
+        const projectionsList = params.data.ability_projections_str_list;
+        if (Array.isArray(projectionsList) && projectionsList.length > 0) {
+            // Handle single item list (potential placeholder)
+            if (projectionsList.length === 1) {
+                const firstItem = projectionsList[0];
+                // Check if firstItem is a string before calling startsWith
+                if (typeof firstItem === 'string' && firstItem.startsWith('(')) {
+                    return firstItem;
+                }
+            }
+            
+            // Process list to create multi-line tooltip
+            const stringArray = projectionsList
+                .filter(item => item !== null && typeof item !== 'undefined')
+                .map(item => String(item)); // Convert each item to string
+
+            // Check if join is a function on stringArray (it should be for an array)
+            if (typeof stringArray.join === 'function') {
+                return stringArray.join('\\n');
+            } else {
+                // Fallback if stringArray is not as expected (highly unlikely if filter/map worked)
+                return "[Tooltip Error: Invalid array]"; 
             }
         }
-        
-        // Convert all items to strings and join
-        // Filter out null/undefined items before mapping to String to avoid "null" or "undefined" strings
-        const stringArray = projectionsList
-            .filter(item => item !== null && typeof item !== 'undefined')
-            .map(item => String(item));
-        return stringArray.join('\\n');
-    }
 
-    // 3. Fallback to params.value if projectionsList is not valid
-    if (params.value) return String(params.value);
-    
-    return null; // Default fallback
+        // 3. Fallback to params.value if projectionsList is not valid
+        if (params.value) return String(params.value);
+        
+        return null; // Default fallback
+
+    } catch (e) {
+        // Catch any unexpected error during tooltip generation
+        // console.error("Tooltip Error:", e); // Optional: log to browser console for debugging
+        return "[Tooltip Generation Error]"; // Return a generic error message
+    }
 }
             """,
         },

@@ -34,15 +34,12 @@ def format_example_with_tooltips(
     ]
 
     # Get the weapon name directly from inv_weapon_vocab using weapon_id_token
-    # Preprocess weapon_id_token to handle potential "weapon_id_" prefix
-    raw_key = str(weapon_id_token) # Ensure it's a string
-    if raw_key.startswith("weapon_id_"):
-        simple_id = raw_key.replace("weapon_id_", "")
-    else:
-        simple_id = raw_key
+    # weapon_id_token is expected to be a simple ID (e.g., "0", "10", "201") from the analysis_df record.
+    id_to_lookup = str(weapon_id_token) # Convert to string, assume it's the simple ID.
     
-    weapon_name = inv_weapon_vocab.get(simple_id, f"WeaponID_{simple_id}") # Fallback using the processed simple_id
-    # The previous logic involving original_weapon_name and json_weapon_id_to_name is removed.
+    # Perform the lookup with the new fallback format
+    weapon_name = inv_weapon_vocab.get(id_to_lookup, f"UNKNOWN_WPN_ID[{id_to_lookup}]")
+    # The previous logic involving conditional stripping or json_weapon_id_to_name is removed/simplified.
 
     top_pred_str = "N/A"  # Default
     if (
