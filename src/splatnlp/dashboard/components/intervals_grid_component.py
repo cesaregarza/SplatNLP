@@ -192,6 +192,7 @@ intervals_grid_component = html.Div(
         html.P(id="intervals-grid-error-message", style={"color": "red"}),
     ],
     className="mb-4",
+    style={'max-height': '400px', 'overflowY': 'auto', 'padding': '10px'},
 )
 
 

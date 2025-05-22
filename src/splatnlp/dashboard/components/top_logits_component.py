@@ -122,8 +122,8 @@ def update_top_logits_graph(selected_feature_id: Optional[int]) -> Tuple[Dict[st
     ]
 
     sorted_indices = torch.argsort(effect_on_logits)
-    top_positive = sorted_indices[-10:].flip(0)
-    top_negative = sorted_indices[:10]
+    top_positive = sorted_indices[-5:].flip(0) # Changed from -10 to -5
+    top_negative = sorted_indices[:5]          # Changed from :10 to :5
 
     positive_tokens = [token_names[i] for i in top_positive]
     negative_tokens = [token_names[i] for i in top_negative]
@@ -135,12 +135,13 @@ def update_top_logits_graph(selected_feature_id: Optional[int]) -> Tuple[Dict[st
         y=positive_effects + negative_effects,
         title=f"Top Logit Influences for Feature {selected_feature_id}",
         labels={"x": "Token", "y": "Logit Influence"},
-        color=["Positive"] * 10 + ["Negative"] * 10,
+        color=["Positive"] * 5 + ["Negative"] * 5, # Changed from 10 to 5
     )
 
     fig.update_layout(
         showlegend=False,
         margin=dict(l=40, r=40, t=40, b=40),
+        height=350  # Set fixed height for the graph
     )
 
     return fig, ""

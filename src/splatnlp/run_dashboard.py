@@ -17,48 +17,49 @@ sys.path.append(str(project_root))
 
 from splatnlp.data.tokenizer import SplatTokenizer
 from splatnlp.models.sae import SAE
+from splatnlp.preprocessing.weapon_data import fetch_weapon_data, build_weapon_maps
 
 
-def fetch_weapon_data() -> dict[str, str]:
-    """Fetch and process weapon data from the Splatoon API."""
-    TRANSLATION_URL = "https://splat.top/api/game_translation"
-    FINAL_REF_URL = "https://splat.top/api/weapon_info"
-
-    INFO_JSON = requests.get(FINAL_REF_URL).json()
-    TRANSLATION_JSON = requests.get(TRANSLATION_URL).json()["USen"][
-        "WeaponName_Main"
-    ]
-
-    NAME_TO_REF = {
-        value: key
-        for key, value in TRANSLATION_JSON.items()
-        if any(
-            key.endswith(f"_{suffix}")
-            for suffix in ["00", "01", "O", "H", "Oct"]
-        )
-    }
-
-    REF_TO_ID = {
-        value["class"] + "_" + value["kit"]: key
-        for key, value in INFO_JSON.items()
-    }
-
-    NAME_TO_DATA = {
-        key: INFO_JSON[REF_TO_ID[NAME_TO_REF[key]]]
-        for key, value in TRANSLATION_JSON.items()
-        if value in REF_TO_ID
-    }
-
-    JSON_NAME_TO_ID = {
-        key: REF_TO_ID[NAME_TO_REF[key]]
-        for key in NAME_TO_REF
-        if NAME_TO_REF[key] in REF_TO_ID
-    }
-    JSON_ID_TO_NAME = {
-        f"weapon_id_{value}": key for key, value in JSON_NAME_TO_ID.items()
-    }
-
-    return JSON_ID_TO_NAME
+# def fetch_weapon_data() -> dict[str, str]:
+#     """Fetch and process weapon data from the Splatoon API."""
+#     TRANSLATION_URL = "https://splat.top/api/game_translation"
+#     FINAL_REF_URL = "https://splat.top/api/weapon_info"
+#
+#     INFO_JSON = requests.get(FINAL_REF_URL).json()
+#     TRANSLATION_JSON = requests.get(TRANSLATION_URL).json()["USen"][
+#         "WeaponName_Main"
+#     ]
+#
+#     NAME_TO_REF = {
+#         value: key
+#         for key, value in TRANSLATION_JSON.items()
+#         if any(
+#             key.endswith(f"_{suffix}")
+#             for suffix in ["00", "01", "O", "H", "Oct"]
+#         )
+#     }
+#
+#     REF_TO_ID = {
+#         value["class"] + "_" + value["kit"]: key
+#         for key, value in INFO_JSON.items()
+#     }
+#
+#     NAME_TO_DATA = {
+#         key: INFO_JSON[REF_TO_ID[NAME_TO_REF[key]]]
+#         for key, value in TRANSLATION_JSON.items()
+#         if value in REF_TO_ID
+#     }
+#
+#     JSON_NAME_TO_ID = {
+#         key: REF_TO_ID[NAME_TO_REF[key]]
+#         for key in NAME_TO_REF
+#         if NAME_TO_REF[key] in REF_TO_ID
+#     }
+#     JSON_ID_TO_NAME = {
+#         f"weapon_id_{value}": key for key, value in JSON_NAME_TO_ID.items()
+#     }
+#
+#     return JSON_ID_TO_NAME
 
 
 def main() -> None:
@@ -104,8 +105,12 @@ def main() -> None:
     analysis_df = pd.read_parquet(analysis_df_path)
 
     # Fetch weapon data
-    print("Fetching weapon data...")
-    json_weapon_id_to_name = fetch_weapon_data()
+    print("Fetching weapon data using splatnlp.preprocessing.weapon_data...")
+    info_json, translation_json = fetch_weapon_data()
+
+    # Build weapon maps using the proper function
+    print("Building weapon maps using splatnlp.preprocessing.weapon_data...")
+    name_to_ref_map, ref_to_id_map, name_to_data_map, id_to_name_map = build_weapon_maps(info_json, translation_json)
 
     # Set up the dashboard context
     print("Setting up dashboard context...")
@@ -115,8 +120,8 @@ def main() -> None:
     DASHBOARD_CONTEXT.token_activations_accessor = token_activations_accessor
     DASHBOARD_CONTEXT.analysis_df_records = analysis_df
     DASHBOARD_CONTEXT.inv_vocab = tokenizer.id_to_token
-    DASHBOARD_CONTEXT.inv_weapon_vocab = tokenizer.id_to_weapon
-    DASHBOARD_CONTEXT.json_weapon_id_to_name = json_weapon_id_to_name
+    DASHBOARD_CONTEXT.inv_weapon_vocab = id_to_name_map # Use the new map
+    # DASHBOARD_CONTEXT.json_weapon_id_to_name = json_weapon_id_to_name # This is now superseded by inv_weapon_vocab
 
     # Run the dashboard
     print("Starting dashboard server...")

@@ -1,7 +1,11 @@
+import logging
+
 import dash_ag_grid as dag
 import numpy as np
 import pandas as pd
 from dash import Input, Output, callback, dcc, html
+
+logger = logging.getLogger(__name__)
 
 
 # Helper function for predictions (ensure this is robust)
@@ -57,9 +61,9 @@ top_examples_component = html.Div(
                     "minWidth": 150,
                 },
                 dashGridOptions={
-                    "domLayout": "autoHeight"
-                },  # Adjusts height to content
-                style={"width": "100%"},
+                    "domLayout": "normal" # Changed from autoHeight
+                },
+                style={"height": "400px", "width": "100%"}, # Added fixed height
             ),
             className="mb-2",
         ),
@@ -82,6 +86,8 @@ def update_top_examples_grid(selected_feature_id):
         DASHBOARD_CONTEXT,
     )
 
+    logger.info(f"TopExamples: Received selected_feature_id: {selected_feature_id}")
+
     # Default column definitions for early exit or error
     default_col_defs = [
         {"field": "Rank", "maxWidth": 80},
@@ -102,8 +108,13 @@ def update_top_examples_grid(selected_feature_id):
         {"field": "Original Index", "maxWidth": 120},
     ]
 
-    if selected_feature_id is None or DASHBOARD_CONTEXT is None:
+    if selected_feature_id is None:
+        logger.info("TopExamples: selected_feature_id is None. No feature selected.")
         return [], default_col_defs, "Select an SAE feature."
+    
+    if DASHBOARD_CONTEXT is None:
+        logger.warning("TopExamples: DASHBOARD_CONTEXT is None.")
+        return [], default_col_defs, "Dashboard context not available. Critical error."
 
     current_run_error_messages = []
 
@@ -119,25 +130,44 @@ def update_top_examples_grid(selected_feature_id):
 
     # Validate essential data
     if not isinstance(all_sae_acts, np.ndarray):
+        logger.warning(f"TopExamples: all_sae_acts is not a numpy array. Type: {type(all_sae_acts)}")
         return (
             [],
             default_col_defs,
             "SAE activations data is missing or not in expected NumPy array format.",
         )
+    else:
+        logger.info(f"TopExamples: all_sae_acts shape: {all_sae_acts.shape}")
+
     if not isinstance(analysis_df, pd.DataFrame):
+        logger.warning(f"TopExamples: analysis_df is not a DataFrame. Type: {type(analysis_df)}")
         return (
             [],
             default_col_defs,
             "Analysis records data is not a Pandas DataFrame as expected.",
         )
+    else:
+        logger.info(f"TopExamples: analysis_df shape: {analysis_df.shape}")
+        if analysis_df.empty:
+            logger.warning("TopExamples: analysis_df is empty.")
+        else:
+            logger.info(f"TopExamples: analysis_df head:\n{analysis_df.head().to_string()}")
+            # Log column names to check for expected columns
+            logger.info(f"TopExamples: analysis_df columns: {analysis_df.columns.tolist()}")
+
+
     if not isinstance(inv_vocab, dict) or not isinstance(
         inv_weapon_vocab, dict
     ):
+        logger.warning(f"TopExamples: Vocabulary data is missing or not in expected dict format. inv_vocab type: {type(inv_vocab)}, inv_weapon_vocab type: {type(inv_weapon_vocab)}")
         return (
             [],
             default_col_defs,
             "Vocabulary data is missing or not in expected dict format.",
         )
+    else:
+        logger.info(f"TopExamples: inv_vocab contains {len(inv_vocab)} items. inv_weapon_vocab contains {len(inv_weapon_vocab)} items.")
+
 
     sae_feature_direction = None
     if (
@@ -167,14 +197,24 @@ def update_top_examples_grid(selected_feature_id):
 
     # Validate selected_feature_id against all_sae_acts dimensions
     if not (0 <= selected_feature_id < all_sae_acts.shape[1]):
+        logger.warning(f"TopExamples: selected_feature_id {selected_feature_id} is out of range for all_sae_acts with shape {all_sae_acts.shape}.")
         current_run_error_messages.append(
             f"Error: Feature ID {selected_feature_id} is out of range for available SAE feature activations ({all_sae_acts.shape[1]} features)."
         )
         return [], default_col_defs, " ".join(current_run_error_messages)
 
     feature_activations = all_sae_acts[:, selected_feature_id]
+    logger.info(f"TopExamples: For feature {selected_feature_id}, activations min: {np.min(feature_activations):.4f}, max: {np.max(feature_activations):.4f}, mean: {np.mean(feature_activations):.4f}")
+    
     top_n = 20  # Number of top examples to show
     top_indices = np.argsort(feature_activations)[-top_n:][::-1]
+    logger.info(f"TopExamples: Found {len(top_indices)} top indices for feature {selected_feature_id}.")
+    if len(top_indices) > 0:
+        logger.info(f"TopExamples: Top indices examples: {top_indices[:5]}")
+        logger.info(f"TopExamples: Corresponding activations: {feature_activations[top_indices[:5]]}")
+    elif all_sae_acts.shape[0] > 0 : # Only log if there was data to sort
+        logger.warning(f"TopExamples: No top indices found for feature {selected_feature_id}, despite having {all_sae_acts.shape[0]} examples. This might indicate all activations for this feature are zero or NaN.")
+
 
     grid_data = []
     for rank, example_idx in enumerate(top_indices):
@@ -277,14 +317,18 @@ def update_top_examples_grid(selected_feature_id):
             "tooltipValueGetter": """
                 function(params) {
                     if (params.data && params.data.ability_projections_str_list && Array.isArray(params.data.ability_projections_str_list) && params.data.ability_projections_str_list.length > 0) {
-                        // If it's a single item array and starts with '(', it's likely one of our placeholder/error messages
-                        if (params.data.ability_projections_str_list.length === 1 && params.data.ability_projections_str_list[0].startsWith('(')) {
+                    // If it's a single item array, check if the first element is a string and starts with '('
+                    if (params.data.ability_projections_str_list.length === 1 && 
+                        typeof params.data.ability_projections_str_list[0] === 'string' && 
+                        params.data.ability_projections_str_list[0].startsWith('(')) {
                            return params.data.ability_projections_str_list[0]; 
                         }
-                        return params.data.ability_projections_str_list.join('\n');
+                    // Ensure all elements are strings before joining, or filter out non-strings
+                    const stringArray = params.data.ability_projections_str_list.map(item => String(item));
+                    return stringArray.join('\\n');
                     }
                     // Fallback to the cell's displayed value if no specific tooltip data is available
-                    if (params.value) return params.value; 
+                if (params.value) return String(params.value); // Ensure this is also a string
                     return null; // No tooltip if no value and no projection data
                 }
             """,
