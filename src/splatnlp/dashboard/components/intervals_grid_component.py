@@ -20,7 +20,7 @@ def format_example_with_tooltips(
     sae_feature_direction: Optional[np.ndarray],
     interval_num: int,
     example_in_interval_num: int,
-    json_weapon_id_to_name: Optional[dict[str, str]] = None,
+    # json_weapon_id_to_name: Optional[dict[str, str]] = None, # Removed
 ) -> tuple[html.Div, list[dbc.Tooltip]]:
     if record is None:
         return html.P("Example data not found."), []
@@ -33,18 +33,16 @@ def format_example_with_tooltips(
         for tid in ability_token_ids
     ]
 
-    # Get the original weapon name from inv_weapon_vocab
-    original_weapon_name = inv_weapon_vocab.get(
-        str(weapon_id_token),
-        inv_weapon_vocab.get(weapon_id_token, f"WeaponID_{weapon_id_token}"),
-    )
-
-    # Try to get the display name from json_weapon_id_to_name using the original name as key
-    weapon_name = original_weapon_name
-    if json_weapon_id_to_name is not None:
-        display_name = json_weapon_id_to_name.get(original_weapon_name)
-        if display_name is not None:
-            weapon_name = display_name
+    # Get the weapon name directly from inv_weapon_vocab using weapon_id_token
+    # Preprocess weapon_id_token to handle potential "weapon_id_" prefix
+    raw_key = str(weapon_id_token) # Ensure it's a string
+    if raw_key.startswith("weapon_id_"):
+        simple_id = raw_key.replace("weapon_id_", "")
+    else:
+        simple_id = raw_key
+    
+    weapon_name = inv_weapon_vocab.get(simple_id, f"WeaponID_{simple_id}") # Fallback using the processed simple_id
+    # The previous logic involving original_weapon_name and json_weapon_id_to_name is removed.
 
     top_pred_str = "N/A"  # Default
     if (
@@ -192,7 +190,6 @@ intervals_grid_component = html.Div(
         html.P(id="intervals-grid-error-message", style={"color": "red"}),
     ],
     className="mb-4",
-    style={'max-height': '400px', 'overflowY': 'auto', 'padding': '10px'},
 )
 
 
@@ -221,9 +218,9 @@ def update_intervals_grid(selected_feature_id: Optional[int]) -> tuple[list[Any]
         DASHBOARD_CONTEXT, "token_activations_accessor", None
     )
     sae_model = DASHBOARD_CONTEXT.sae_model
-    json_weapon_id_to_name = getattr(
-        DASHBOARD_CONTEXT, "json_weapon_id_to_name", None
-    )
+    # json_weapon_id_to_name = getattr(
+    #     DASHBOARD_CONTEXT, "json_weapon_id_to_name", None
+    # ) # Removed
 
     if not isinstance(analysis_df, pd.DataFrame):  # Safeguard
         return [], "Error: analysis_df_records is not a DataFrame as expected."
@@ -313,7 +310,7 @@ def update_intervals_grid(selected_feature_id: Optional[int]) -> tuple[list[Any]
                     sae_feature_direction,
                     num_intervals - i,
                     ex_in_interval_idx,  # Pass interval and example numbers for unique IDs
-                    json_weapon_id_to_name,  # Pass the JSON weapon mapping
+                    # json_weapon_id_to_name, # Removed from call
                 )
                 interval_section_children.append(example_div)
                 all_tooltips_for_page.extend(example_tooltips)

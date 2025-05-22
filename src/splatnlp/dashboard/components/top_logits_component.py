@@ -101,10 +101,25 @@ def update_top_logits_graph(selected_feature_id: Optional[int]) -> Tuple[Dict[st
         }, "Error: Primary model missing output layer weights"
 
     primary_output_layer_weights = primary_model.output_layer.weight.data.detach().cpu().numpy()
+    sae_feature_effect_on_primary_activation = sae_feature_direction # This is already a numpy array
 
-    sae_feature_effect_on_primary_activation = sae_feature_direction
+    # Ensure DEVICE is available in DASHBOARD_CONTEXT, otherwise default to 'cpu'
+    DEVICE = getattr(DASHBOARD_CONTEXT, "device", "cpu")
+    if DEVICE is None: # Handle case where device might be explicitly None
+        DEVICE = "cpu"
+        print("Warning: DASHBOARD_CONTEXT.device was None, defaulting to 'cpu' for top_logits_component.")
+
+
+    # Convert numpy arrays to tensors and move to the correct device
+    t_primary_output_layer_weights = torch.as_tensor(primary_output_layer_weights, dtype=torch.float32).to(DEVICE)
+    t_sae_feature_effect_on_primary_activation = torch.as_tensor(sae_feature_effect_on_primary_activation, dtype=torch.float32).to(DEVICE)
+    
+    # Perform matrix multiplication
+    # primary_output_layer_weights is likely (output_vocab_size, hidden_dim)
+    # sae_feature_effect_on_primary_activation is likely (hidden_dim,)
+    # Resulting effect_on_logits should be (output_vocab_size,)
     effect_on_logits = torch.matmul(
-        primary_output_layer_weights, sae_feature_effect_on_primary_activation
+        t_primary_output_layer_weights, t_sae_feature_effect_on_primary_activation
     )
 
     inv_vocab = DASHBOARD_CONTEXT.inv_vocab

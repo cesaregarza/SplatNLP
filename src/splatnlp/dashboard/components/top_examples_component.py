@@ -315,22 +315,38 @@ def update_top_examples_grid(selected_feature_id):
             "autoHeight": True,
             "flex": 2,
             "tooltipValueGetter": """
-                function(params) {
-                    if (params.data && params.data.ability_projections_str_list && Array.isArray(params.data.ability_projections_str_list) && params.data.ability_projections_str_list.length > 0) {
-                    // If it's a single item array, check if the first element is a string and starts with '('
-                    if (params.data.ability_projections_str_list.length === 1 && 
-                        typeof params.data.ability_projections_str_list[0] === 'string' && 
-                        params.data.ability_projections_str_list[0].startsWith('(')) {
-                           return params.data.ability_projections_str_list[0]; 
-                        }
-                    // Ensure all elements are strings before joining, or filter out non-strings
-                    const stringArray = params.data.ability_projections_str_list.map(item => String(item));
-                    return stringArray.join('\\n');
-                    }
-                    // Fallback to the cell's displayed value if no specific tooltip data is available
-                if (params.value) return String(params.value); // Ensure this is also a string
-                    return null; // No tooltip if no value and no projection data
-                }
+function(params) {
+    // 1. Check params and params.data
+    if (!params || !params.data) {
+        // Fallback to params.value if params.data is not available
+        if (params && params.value) return String(params.value);
+        return null;
+    }
+
+    // 2. Check ability_projections_str_list
+    const projectionsList = params.data.ability_projections_str_list;
+    if (Array.isArray(projectionsList) && projectionsList.length > 0) {
+        // Check the first item for the special placeholder case
+        if (projectionsList.length === 1) {
+            const firstItem = projectionsList[0];
+            if (typeof firstItem === 'string' && firstItem.startsWith('(')) {
+                return firstItem;
+            }
+        }
+        
+        // Convert all items to strings and join
+        // Filter out null/undefined items before mapping to String to avoid "null" or "undefined" strings
+        const stringArray = projectionsList
+            .filter(item => item !== null && typeof item !== 'undefined')
+            .map(item => String(item));
+        return stringArray.join('\\n');
+    }
+
+    // 3. Fallback to params.value if projectionsList is not valid
+    if (params.value) return String(params.value);
+    
+    return null; // Default fallback
+}
             """,
         },
         {"field": "SAE Feature Activation"},
