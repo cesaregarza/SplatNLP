@@ -3,7 +3,7 @@ from typing import Optional
 
 import dash
 import dash_bootstrap_components as dbc
-from dash import Input, Output, dcc, html
+from dash import Input, Output, State, dcc, html
 
 # Import components
 from splatnlp.dashboard.components import (
@@ -16,6 +16,8 @@ from splatnlp.dashboard.components import (
     top_logits_component,
 )
 
+# Feature names functionality is integrated directly
+
 # THIS IS WHERE THE GLOBAL CONTEXT WILL BE STORED
 # It will be populated by the script that runs the dashboard (e.g., cli.py or run_dashboard.py)
 DASHBOARD_CONTEXT = SimpleNamespace()  # Initialize as a SimpleNamespace
@@ -24,6 +26,31 @@ app = dash.Dash(
     __name__,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
     suppress_callback_exceptions=True,
+)
+
+# Create the feature name editor component
+feature_name_editor = html.Div(
+    [
+        dbc.InputGroup(
+            [
+                dbc.InputGroupText("Feature Name:"),
+                dbc.Input(
+                    id="feature-name-input",
+                    placeholder="Enter a descriptive name for this feature",
+                    type="text",
+                    value="",
+                ),
+                dbc.Button(
+                    "Save",
+                    id="save-feature-name-btn",
+                    color="primary",
+                    n_clicks=0,
+                ),
+            ],
+            className="mb-2",
+        ),
+        html.Div(id="feature-name-feedback", className="text-muted small"),
+    ]
 )
 
 app.layout = dbc.Container(
@@ -36,6 +63,7 @@ app.layout = dbc.Container(
                     [
                         html.H2("SAE Feature Dashboard", className="mb-4"),
                         feature_selector_layout,
+                        feature_name_editor,  # Add the editor directly here
                     ],
                     width=3,
                 ),
@@ -90,6 +118,85 @@ def trigger_page_load(_pathname: Optional[str]) -> str:
     import time
 
     return time.time()
+
+
+# Feature name callbacks
+@app.callback(
+    Output("feature-name-input", "value"),
+    Input("feature-dropdown", "value"),
+    prevent_initial_call=True,
+)
+def load_feature_name(feature_id):
+    """Load existing feature name when selection changes."""
+    print(f"Load feature name callback: feature_id={feature_id}")
+    if feature_id is None or feature_id == -1:
+        return ""
+
+    if (
+        hasattr(DASHBOARD_CONTEXT, "feature_names_manager")
+        and DASHBOARD_CONTEXT.feature_names_manager
+    ):
+        name = (
+            DASHBOARD_CONTEXT.feature_names_manager.get_name(feature_id) or ""
+        )
+        print(f"Loaded name for feature {feature_id}: {name}")
+        return name
+    return ""
+
+
+@app.callback(
+    Output("feature-name-feedback", "children"),
+    Output("feature-names-updated", "data"),
+    Input("save-feature-name-btn", "n_clicks"),
+    State("feature-dropdown", "value"),
+    State("feature-name-input", "value"),
+    State("feature-names-updated", "data"),
+    prevent_initial_call=True,
+)
+def save_feature_name(n_clicks, feature_id, name, current_counter):
+    """Save feature name when button is clicked."""
+    print(
+        f"Save callback triggered: n_clicks={n_clicks}, feature_id={feature_id}, name={name}"
+    )
+
+    # Always show something when clicked to verify callback is working
+    if n_clicks is None:
+        return "", current_counter or 0
+
+    if n_clicks == 0:
+        return "", current_counter or 0
+
+    if feature_id is None or feature_id == -1:
+        return "Please select a feature first.", current_counter or 0
+
+    if (
+        hasattr(DASHBOARD_CONTEXT, "feature_names_manager")
+        and DASHBOARD_CONTEXT.feature_names_manager
+    ):
+        print(f"Setting name for feature {feature_id}: {name}")
+        DASHBOARD_CONTEXT.feature_names_manager.set_name(feature_id, name)
+        print(
+            f"Current feature names: {DASHBOARD_CONTEXT.feature_names_manager.feature_names}"
+        )
+        print(
+            f"Saved to file: {DASHBOARD_CONTEXT.feature_names_manager.storage_path}"
+        )
+
+        # Verify the name was saved
+        saved_name = DASHBOARD_CONTEXT.feature_names_manager.get_name(
+            feature_id
+        )
+        print(f"Verification - saved name: {saved_name}")
+
+        # Increment counter to trigger dropdown refresh
+        new_counter = (current_counter or 0) + 1
+
+        if name.strip():
+            return f"✓ Saved name for Feature {feature_id}", new_counter
+        else:
+            return f"✓ Removed name for Feature {feature_id}", new_counter
+
+    return "Feature naming not available", current_counter or 0
 
 
 if __name__ == "__main__":

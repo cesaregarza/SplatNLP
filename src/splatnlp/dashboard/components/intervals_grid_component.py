@@ -11,8 +11,36 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from splatnlp.preprocessing.transform.mappings import generate_maps
 
 # ---------------------------------------------------------------------------
-# Helper - compact card (no tooltips)
+# Helper functions
 # ---------------------------------------------------------------------------
+
+
+def _get_tfidf_color(score: float, items: list) -> str:
+    """Get color for TF-IDF badge based on score relative to others."""
+    if not items:
+        return "primary"
+
+    scores = [s for _, s in items]
+    min_score = min(scores)
+    max_score = max(scores)
+
+    if max_score == min_score:
+        return "primary"
+
+    # Normalize score to 0-1 range
+    normalized = (score - min_score) / (max_score - min_score)
+
+    # Color gradient from light to dark based on score
+    if normalized > 0.8:
+        return "danger"  # Red for highest scores
+    elif normalized > 0.6:
+        return "warning"  # Orange
+    elif normalized > 0.4:
+        return "primary"  # Blue
+    elif normalized > 0.2:
+        return "info"  # Light blue
+    else:
+        return "secondary"  # Gray for lowest scores
 
 
 def _example_card(
@@ -55,16 +83,26 @@ def _example_card(
     card = dbc.Card(
         dbc.CardBody(
             [
-                html.H6(weapon_name, className="card-title mb-2"),
-                html.P(ability_str, className="small mb-2"),
+                html.H6(
+                    weapon_name,
+                    className="card-title mb-2 text-truncate",
+                    title=weapon_name,
+                ),
+                html.Div(
+                    ability_str,
+                    className="flex-grow-1 overflow-auto mb-2",
+                    style={"fontSize": "0.9rem"},
+                ),
                 html.P(
                     f"Activation: {activation_val:.4f}",
-                    className="mb-0 fw-semibold",
+                    className="mb-0 fw-semibold text-primary",
                 ),
-            ]
+            ],
+            className="d-flex flex-column",
+            style={"height": "180px"},
         ),
-        style={"width": "220px"},
-        className="shadow-sm",
+        style={"width": "250px", "height": "180px"},
+        className="shadow-sm h-100",
     )
     return card
 
@@ -155,21 +193,125 @@ def render_intervals_grid(selected_feature_id: Optional[int]):
         ]
         top_tfidf_tokens = {tok for tok, _ in items}
 
+        # Get weapons that activate this feature most
+        top_weapons = []
+        if len(top_indices) > 0:
+            weapon_counts = {}
+            for idx in top_indices:
+                wid = int(analysis_df.iloc[idx].get("weapon_id_token", -1))
+                raw_wpn = inv_weapon_vocab.get(wid, f"WPN_{wid}")
+                weapon_name = id_to_name.get(raw_wpn.split("_")[-1], raw_wpn)
+                weapon_counts[weapon_name] = (
+                    weapon_counts.get(weapon_name, 0) + 1
+                )
+
+            # Get top 5 weapons
+            sorted_weapons = sorted(
+                weapon_counts.items(), key=lambda x: x[1], reverse=True
+            )[:5]
+            top_weapons = [
+                (name, count / len(top_indices))
+                for name, count in sorted_weapons
+            ]
+
         if items:
+            # Feature name display
+            feature_names_manager = getattr(
+                DASHBOARD_CONTEXT, "feature_names_manager", None
+            )
+            if feature_names_manager:
+                feature_display = feature_names_manager.get_display_name(
+                    selected_feature_id
+                )
+            else:
+                feature_display = f"Feature {selected_feature_id}"
+
             sections.append(
-                html.Div(
-                    [
-                        html.H5(
-                            "Top TF-IDF tokens (top-100 activations)",
-                            className="mb-3",
-                        ),
-                        html.Ul(
-                            [
-                                html.Li([html.Strong(tok), f": {score:.3f}"])
-                                for tok, score in items
-                            ]
-                        ),
-                    ]
+                dbc.Card(
+                    dbc.CardBody(
+                        [
+                            html.H5(
+                                f"{feature_display} - Top Activations Analysis",
+                                className="mb-3",
+                            ),
+                            dbc.Row(
+                                [
+                                    dbc.Col(
+                                        [
+                                            html.H6(
+                                                "Top TF-IDF Tokens",
+                                                className="text-muted mb-2",
+                                            ),
+                                            html.Div(
+                                                [
+                                                    dbc.Badge(
+                                                        [tok, f" {score:.2f}"],
+                                                        color=_get_tfidf_color(
+                                                            score, items
+                                                        ),
+                                                        className="me-2 mb-2",
+                                                        pill=True,
+                                                        style={
+                                                            "fontSize": "0.9rem"
+                                                        },
+                                                    )
+                                                    for tok, score in items
+                                                ],
+                                                className="d-flex flex-wrap",
+                                            ),
+                                        ],
+                                        md=6,
+                                    ),
+                                    (
+                                        dbc.Col(
+                                            [
+                                                html.H6(
+                                                    "Top Activating Weapons",
+                                                    className="text-muted mb-2",
+                                                ),
+                                                html.Div(
+                                                    [
+                                                        html.Div(
+                                                            [
+                                                                html.Div(
+                                                                    [
+                                                                        html.Span(
+                                                                            weapon,
+                                                                            className="me-2",
+                                                                        ),
+                                                                        html.Small(
+                                                                            f"({pct:.0%})",
+                                                                            className="text-muted",
+                                                                        ),
+                                                                    ],
+                                                                    className="d-flex justify-content-between",
+                                                                ),
+                                                                dbc.Progress(
+                                                                    value=pct
+                                                                    * 100,
+                                                                    color="success",
+                                                                    className="mb-1",
+                                                                    style={
+                                                                        "height": "15px"
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            className="mb-2",
+                                                        )
+                                                        for weapon, pct in top_weapons
+                                                    ]
+                                                ),
+                                            ],
+                                            md=6,
+                                        )
+                                        if top_weapons
+                                        else html.Div()
+                                    ),
+                                ]
+                            ),
+                        ]
+                    ),
+                    className="mb-4 shadow-sm",
                 )
             )
     except Exception as e:

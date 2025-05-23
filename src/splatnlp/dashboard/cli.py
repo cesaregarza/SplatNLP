@@ -53,6 +53,7 @@ logger = logging.getLogger(__name__)
 # --- Import dashboard app ---
 from splatnlp.dashboard.app import DASHBOARD_CONTEXT as app_context_ref
 from splatnlp.dashboard.app import app
+from splatnlp.dashboard.components.feature_names import FeatureNamesManager
 
 # Project-specific imports
 from splatnlp.model.models import SetCompletionModel
@@ -167,6 +168,12 @@ def load_dashboard_data(args_ns: argparse.Namespace):  # Use Namespace type hint
             f"Activations cache not found: {args_ns.activations_cache_path}. Pre-generate this file."
         )
 
+    # Create feature names manager
+    feature_names_manager = FeatureNamesManager()
+    logger.info(
+        f"Loaded {len(feature_names_manager.feature_names)} named features"
+    )
+
     # Create a new SimpleNamespace object for the data to be returned
     # This is distinct from the app_context_ref which is the global context in app.py
     dashboard_context_data = SimpleNamespace(
@@ -179,6 +186,7 @@ def load_dashboard_data(args_ns: argparse.Namespace):  # Use Namespace type hint
         analysis_df_records=analysis_df_records,  # This is now a DataFrame
         all_sae_hidden_activations=all_sae_hidden_activations,
         token_activations_accessor=token_activations_accessor,  # Add this
+        feature_names_manager=feature_names_manager,
         device=DEVICE,
     )
     return dashboard_context_data
@@ -311,6 +319,9 @@ def main():
     app_context_ref.token_activations_accessor = (
         dashboard_data_obj.token_activations_accessor
     )  # Add this line
+    app_context_ref.feature_names_manager = (
+        dashboard_data_obj.feature_names_manager
+    )
     app_context_ref.device = dashboard_data_obj.device
 
     logger.info(

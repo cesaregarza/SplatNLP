@@ -88,6 +88,7 @@ def update_top_examples_grid(selected_feature_id):
     from splatnlp.dashboard.app import (  # Ensure this is the correct way context is passed
         DASHBOARD_CONTEXT,
     )
+    from splatnlp.preprocessing.transform.mappings import generate_maps
 
     logger.info(
         f"TopExamples: Received selected_feature_id: {selected_feature_id}"
@@ -138,6 +139,9 @@ def update_top_examples_grid(selected_feature_id):
         DASHBOARD_CONTEXT, "token_activations_accessor", None
     )
     sae_model = DASHBOARD_CONTEXT.sae_model
+
+    # Get weapon name mapping
+    _, id_to_name, _ = generate_maps()
 
     # Validate essential data
     if not isinstance(all_sae_acts, np.ndarray):
@@ -315,13 +319,15 @@ def update_top_examples_grid(selected_feature_id):
                 "(Token projections not available due to missing data/model)"
             ]
 
+        # Get weapon ID and translate to name
+        wid = int(record.get("weapon_id_token", -1))
+        raw_wpn = inv_weapon_vocab.get(wid, f"WPN_{wid}")
+        weapon_name = id_to_name.get(raw_wpn.split("_")[-1], raw_wpn)
+
         grid_data.append(
             {
                 "Rank": rank + 1,
-                "Weapon": inv_weapon_vocab.get(
-                    str(record.get("weapon_id_token")),
-                    record.get("weapon_id_token", "N/A"),
-                ),
+                "Weapon": weapon_name,
                 "Input Abilities": ", ".join(ability_names),
                 "SAE Feature Activation": f"{feature_activations[example_idx]:.4f}",
                 "Top Predicted Abilities": get_top_k_predictions(
@@ -344,53 +350,7 @@ def update_top_examples_grid(selected_feature_id):
             "wrapText": True,
             "autoHeight": True,
             "flex": 2,
-            "tooltipValueGetter": """
-function(params) {
-    try {
-        // 1. Check params and params.data
-        if (!params || !params.data) {
-            if (params && params.value) return String(params.value);
-            return null;
-        }
-
-        // 2. Check ability_projections_str_list
-        const projectionsList = params.data.ability_projections_str_list;
-        if (Array.isArray(projectionsList) && projectionsList.length > 0) {
-            // Handle single item list (potential placeholder)
-            if (projectionsList.length === 1) {
-                const firstItem = projectionsList[0];
-                // Check if firstItem is a string before calling startsWith
-                if (typeof firstItem === 'string' && firstItem.startsWith('(')) {
-                    return firstItem;
-                }
-            }
-            
-            // Process list to create multi-line tooltip
-            const stringArray = projectionsList
-                .filter(item => item !== null && typeof item !== 'undefined')
-                .map(item => String(item)); // Convert each item to string
-
-            // Check if join is a function on stringArray (it should be for an array)
-            if (typeof stringArray.join === 'function') {
-                return stringArray.join('\\n');
-            } else {
-                // Fallback if stringArray is not as expected (highly unlikely if filter/map worked)
-                return "[Tooltip Error: Invalid array]"; 
-            }
-        }
-
-        // 3. Fallback to params.value if projectionsList is not valid
-        if (params.value) return String(params.value);
-        
-        return null; // Default fallback
-
-    } catch (e) {
-        // Catch any unexpected error during tooltip generation
-        // console.error("Tooltip Error:", e); // Optional: log to browser console for debugging
-        return "[Tooltip Generation Error]"; // Return a generic error message
-    }
-}
-            """,
+            "tooltipField": "Input Abilities",  # Simple tooltip using the field value
         },
         {"field": "SAE Feature Activation"},
         {

@@ -20,11 +20,24 @@ feature_summary_component = html.Div(
     Input("feature-dropdown", "value"),
 )
 def update_feature_summary(selected_feature_id: Optional[int]) -> List[Any]:
+    from splatnlp.dashboard.app import DASHBOARD_CONTEXT
+
     if selected_feature_id is None:
         return [html.P("Select a feature to see its summary.")]
 
+    # Get feature names if available
+    feature_names_manager = getattr(
+        DASHBOARD_CONTEXT, "feature_names_manager", None
+    )
+    if feature_names_manager:
+        display_name = feature_names_manager.get_display_name(
+            selected_feature_id
+        )
+    else:
+        display_name = f"Feature {selected_feature_id}"
+
     return [
-        html.P(f"Selected Feature: {selected_feature_id}"),
+        html.P(f"Selected Feature: {display_name}"),
     ]
 
 
