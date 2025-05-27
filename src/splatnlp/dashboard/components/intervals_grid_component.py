@@ -140,224 +140,106 @@ intervals_grid_component = html.Div(
 )
 def render_intervals_grid(selected_feature_id: Optional[int]):
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
+    import json # For parsing JSON strings from DB if necessary
+    import logging # For logging
+    logger = logging.getLogger(__name__)
 
-    if selected_feature_id is None or DASHBOARD_CONTEXT is None:
+    if selected_feature_id is None:
         return [], "Select a feature."
+    
+    if DASHBOARD_CONTEXT is None or not hasattr(DASHBOARD_CONTEXT, 'db_context') or DASHBOARD_CONTEXT.db_context is None:
+        logger.warning("IntervalsGrid: Dashboard context or DB context not available.")
+        return [], "Error: Database context not available. Ensure data is loaded correctly."
 
-    acts_matrix = DASHBOARD_CONTEXT.all_sae_hidden_activations
-    if not (0 <= selected_feature_id < acts_matrix.shape[1]):
-        return [], f"Feature {selected_feature_id} out of range."
-
-    analysis_df: pd.DataFrame = DASHBOARD_CONTEXT.analysis_df_records
+    db_context = DASHBOARD_CONTEXT.db_context
     inv_vocab = DASHBOARD_CONTEXT.inv_vocab
     inv_weapon_vocab = DASHBOARD_CONTEXT.inv_weapon_vocab
-    _, id_to_name, _ = generate_maps()
+    _, id_to_name, _ = generate_maps() # General mapping, should be fine
 
-    acts = acts_matrix[:, selected_feature_id]
-    lo, hi = float(np.min(acts)), float(np.max(acts) + 1e-6)
+    try:
+        acts_values, example_ids_for_acts = db_context.get_feature_activations(selected_feature_id)
+        if acts_values.size == 0:
+            return [html.P("No activation data found for this feature in the database.")], ""
+    except Exception as e:
+        logger.error(f"IntervalsGrid: Failed to get feature activations for {selected_feature_id} from DB: {e}", exc_info=True)
+        return [], f"Error fetching activations: {str(e)}"
+
+    lo, hi = float(np.min(acts_values)), float(np.max(acts_values) + 1e-6) # Ensure hi includes max value
     bins = 10
     bounds = np.linspace(lo, hi, bins + 1)
     per_interval = 5
-
     sections: List[Any] = []
 
-    # Get top TF-IDF tokens first ---------------------------------------------------------
-    top_tfidf_tokens = set()
-    try:
-        top_k = min(len(acts), 100)
-        top_indices = np.argsort(acts)[-top_k:]
+    # TF-IDF and Top Weapons analysis is removed when using db_context,
+    # as it would require fetching all example texts, which is inefficient.
+    # This kind of global analysis should be precomputed and stored in the DB if needed.
+    top_tfidf_tokens = set() # Pass empty set to _example_card
 
-        def to_doc(token_ids: list[int]):
-            return " ".join(
-                inv_vocab.get(str(t), inv_vocab.get(t, str(t)))
-                for t in token_ids
-            )
-
-        corpus_all = [
-            to_doc(lst) for lst in analysis_df["ability_input_tokens"].tolist()
-        ]
-        corpus_top = [
-            to_doc(analysis_df.iloc[i]["ability_input_tokens"])
-            for i in top_indices
-        ]
-        vec = TfidfVectorizer(min_df=2, max_df=0.95, token_pattern=r"\S+").fit(
-            corpus_all
-        )
-        mat = vec.transform(corpus_top)
-        avg_scores = np.asarray(mat.sum(axis=0)).ravel() / top_k
-        best = np.argsort(avg_scores)[-10:][::-1]
-        items = [
-            (vec.get_feature_names_out()[i], avg_scores[i])
-            for i in best
-            if avg_scores[i] > 0
-        ]
-        top_tfidf_tokens = {tok for tok, _ in items}
-
-        # Get weapons that activate this feature most
-        top_weapons = []
-        if len(top_indices) > 0:
-            weapon_counts = {}
-            for idx in top_indices:
-                wid = int(analysis_df.iloc[idx].get("weapon_id_token", -1))
-                raw_wpn = inv_weapon_vocab.get(wid, f"WPN_{wid}")
-                weapon_name = id_to_name.get(raw_wpn.split("_")[-1], raw_wpn)
-                weapon_counts[weapon_name] = (
-                    weapon_counts.get(weapon_name, 0) + 1
-                )
-
-            # Get top 5 weapons
-            sorted_weapons = sorted(
-                weapon_counts.items(), key=lambda x: x[1], reverse=True
-            )[:5]
-            top_weapons = [
-                (name, count / len(top_indices))
-                for name, count in sorted_weapons
-            ]
-
-        if items:
-            # Feature name display
-            feature_names_manager = getattr(
-                DASHBOARD_CONTEXT, "feature_names_manager", None
-            )
-            if feature_names_manager:
-                feature_display = feature_names_manager.get_display_name(
-                    selected_feature_id
-                )
-            else:
-                feature_display = f"Feature {selected_feature_id}"
-
-            sections.append(
-                dbc.Card(
-                    dbc.CardBody(
-                        [
-                            html.H5(
-                                f"{feature_display} - Top Activations Analysis",
-                                className="mb-3",
-                            ),
-                            dbc.Row(
-                                [
-                                    dbc.Col(
-                                        [
-                                            html.H6(
-                                                "Top TF-IDF Tokens",
-                                                className="text-muted mb-2",
-                                            ),
-                                            html.Div(
-                                                [
-                                                    dbc.Badge(
-                                                        [tok, f" {score:.2f}"],
-                                                        color=_get_tfidf_color(
-                                                            score, items
-                                                        ),
-                                                        className="me-2 mb-2",
-                                                        pill=True,
-                                                        style={
-                                                            "fontSize": "0.9rem"
-                                                        },
-                                                    )
-                                                    for tok, score in items
-                                                ],
-                                                className="d-flex flex-wrap",
-                                            ),
-                                        ],
-                                        md=6,
-                                    ),
-                                    (
-                                        dbc.Col(
-                                            [
-                                                html.H6(
-                                                    "Top Activating Weapons",
-                                                    className="text-muted mb-2",
-                                                ),
-                                                html.Div(
-                                                    [
-                                                        html.Div(
-                                                            [
-                                                                html.Div(
-                                                                    [
-                                                                        html.Span(
-                                                                            weapon,
-                                                                            className="me-2",
-                                                                        ),
-                                                                        html.Small(
-                                                                            f"({pct:.0%})",
-                                                                            className="text-muted",
-                                                                        ),
-                                                                    ],
-                                                                    className="d-flex justify-content-between",
-                                                                ),
-                                                                dbc.Progress(
-                                                                    value=pct
-                                                                    * 100,
-                                                                    color="success",
-                                                                    className="mb-1",
-                                                                    style={
-                                                                        "height": "15px"
-                                                                    },
-                                                                ),
-                                                            ],
-                                                            className="mb-2",
-                                                        )
-                                                        for weapon, pct in top_weapons
-                                                    ]
-                                                ),
-                                            ],
-                                            md=6,
-                                        )
-                                        if top_weapons
-                                        else html.Div()
-                                    ),
-                                ]
-                            ),
-                        ]
-                    ),
-                    className="mb-4 shadow-sm",
-                )
-            )
-    except Exception as e:
-        sections.append(
-            html.P(f"TF-IDF error: {str(e)[:80]}", className="text-danger")
-        )
-
-    # Iterate **high -> low**
+    # Iterate **high -> low** for bins
     for bin_idx in reversed(range(bins)):
         a, b = bounds[bin_idx], bounds[bin_idx + 1]
-        mask = (acts >= a) & (acts < b if bin_idx < bins - 1 else acts <= b)
-        idxs = np.where(mask)[0]
-
-        header = html.Div(
-            f"Interval {bins - bin_idx}: [{a:.3f}, {b:.3f}) - {len(idxs)} exs",
-            className="fw-bold mb-2",
-        )
-
+        # Ensure the last bin correctly includes the max value if it's exactly on the boundary
+        mask = (acts_values >= a) & (acts_values < b if bin_idx < bins - 1 else acts_values <= b)
+        
+        # Indices relative to the `acts_values` array
+        current_interval_indices_in_acts_array = np.where(mask)[0] 
+        
+        num_examples_in_interval = len(current_interval_indices_in_acts_array)
+        header_text = f"Interval {bins - bin_idx}: [{a:.3f}, {b:.3f}) - {num_examples_in_interval} examples"
+        header = html.Div(header_text, className="fw-bold mb-2")
+        
         card_cols: List[Any] = []
-        if idxs.size:
-            chosen = random.sample(list(idxs), min(len(idxs), per_interval))
-            for ex_idx in chosen:
-                rec = analysis_df.iloc[ex_idx]
-                card = _example_card(
-                    rec,
-                    inv_vocab,
-                    inv_weapon_vocab,
-                    float(acts[ex_idx]),
-                    id_to_name,
-                    top_tfidf_tokens,
-                )
-                card_cols.append(dbc.Col(card, width="auto", className="p-1"))
+        if num_examples_in_interval > 0:
+            num_to_sample = min(num_examples_in_interval, per_interval)
+            # Get indices within the `current_interval_indices_in_acts_array` for sampling
+            chosen_indices_for_sampling = np.random.choice(num_examples_in_interval, num_to_sample, replace=False)
+            
+            for chosen_idx in chosen_indices_for_sampling:
+                # Map back to the index in the original `acts_values` and `example_ids_for_acts`
+                original_array_idx = current_interval_indices_in_acts_array[chosen_idx]
+                example_id_to_fetch = int(example_ids_for_acts[original_array_idx]) # Ensure it's Python int
+                activation_val_for_card = float(acts_values[original_array_idx])
+
+                try:
+                    # Fetch full example details from DB using its ID
+                    # This assumes db_context has a method like get_example_details,
+                    # or we build the query here.
+                    with db_context.db.get_connection() as conn: # Access underlying DashboardDatabase instance
+                        cur = conn.execute("SELECT * FROM examples WHERE id = ?", (example_id_to_fetch,))
+                        row = cur.fetchone()
+                    
+                    if row:
+                        example_record_dict = dict(row)
+                        # Parse JSON fields if necessary
+                        if 'ability_input_tokens' in example_record_dict and isinstance(example_record_dict['ability_input_tokens'], str):
+                            example_record_dict['ability_input_tokens'] = json.loads(example_record_dict['ability_input_tokens'])
+                        else: # Ensure it's a list
+                            example_record_dict['ability_input_tokens'] = example_record_dict.get('ability_input_tokens', [])
+                        
+                        # _example_card expects a pd.Series like object
+                        rec_series = pd.Series(example_record_dict)
+                        card = _example_card(
+                            rec_series,
+                            inv_vocab,
+                            inv_weapon_vocab,
+                            activation_val_for_card,
+                            id_to_name,
+                            top_tfidf_tokens, # Currently empty
+                        )
+                        card_cols.append(dbc.Col(card, width="auto", className="p-1"))
+                    else:
+                        logger.warning(f"IntervalsGrid: Example ID {example_id_to_fetch} not found in DB.")
+                        card_cols.append(dbc.Col(html.P(f"Details for Ex. {example_id_to_fetch} not found."), width="auto"))
+                except Exception as card_ex:
+                    logger.error(f"IntervalsGrid: Error creating card for example {example_id_to_fetch}: {card_ex}", exc_info=True)
+                    card_cols.append(dbc.Col(html.P(f"Error for Ex. {example_id_to_fetch}."), width="auto"))
         else:
             card_cols.append(html.I("No examples in this interval."))
 
         sections.append(
             html.Div(
-                [
-                    header,
-                    dbc.Row(
-                        card_cols,
-                        className="g-2 flex-wrap justify-content-start",
-                    ),
-                ],
+                [header, dbc.Row(card_cols, className="g-2 flex-wrap justify-content-start")],
                 className="p-3 mb-3 border rounded bg-light",
             )
         )
-
     return sections, ""

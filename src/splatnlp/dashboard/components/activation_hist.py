@@ -110,46 +110,16 @@ def update_activation_histogram(
         
         return fig
     
+    # If db_context is not available, it means an issue with its loading or
+    # the command being run did not intend to load it.
+    # The component should gracefully indicate no data.
+    # DASHBOARD_CONTEXT.precomputed_analytics is not expected to be used by 'run' command.
     else:
-        # Fallback to old method if database context not available
-        all_activations = DASHBOARD_CONTEXT.all_sae_hidden_activations
-
-        if selected_feature_id >= all_activations.shape[1]:
-            return {
-                "data": [],
-                "layout": {
-                    "title": f"Feature ID {selected_feature_id} out of range."
-                },
-            }
-
-        feature_activations = all_activations[:, selected_feature_id]
-
-        if filter_type == "nonzero":
-            plot_activations = feature_activations[
-                feature_activations > 1e-6
-            ]
-            title = f"Non-Zero Activations for Feature {selected_feature_id}"
-            if plot_activations.size == 0:
-                plot_activations = np.array([0.0])
-                title = f"No Non-Zero Activations for Feature {selected_feature_id}"
-        else:
-            plot_activations = feature_activations
-            title = f"All Activations for Feature {selected_feature_id}"
-
-        if plot_activations.ndim == 0:
-            plot_activations = np.array([plot_activations.item()])
-
-        fig = px.histogram(
-            x=plot_activations,
-            title=title,
-            labels={"x": "Activation Value", "y": "Count"},
-            nbins=50,
-        )
-
-        fig.update_layout(
-            showlegend=False,
-            margin=dict(l=40, r=40, t=40, b=40),
-            height=300,
-        )
-
-        return fig
+        # This path should ideally not be taken if 'run' command always provides db_context
+        # or exits on failure. This is a safeguard.
+        return {
+            "data": [],
+            "layout": {
+                "title": "Data source (db_context) not available."
+            },
+        }
