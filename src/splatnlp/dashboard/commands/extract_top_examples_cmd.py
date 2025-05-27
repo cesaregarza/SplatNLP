@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Any
 import time
 import logging # Added logging
+import csv # Added CSV module
 
 import h5py
 import numpy as np
@@ -173,47 +174,48 @@ def init_worker(metadata_list_for_worker: List[Dict]):
 def process_single_neuron(args_tuple): # Renamed from 'args' to avoid conflict
     """Process a single neuron - designed for multiprocessing."""
     # Unpack arguments
-    neuron_idx, activations_file_path_str, n_bins, top_k_per_bin, output_dir_path_str = args_tuple
-    
-    # Paths should be converted back to Path objects if needed, or use strings directly
-    activations_file = Path(activations_file_path_str)
-    output_dir = Path(output_dir_path_str)
+    # The output_dir_path_str is still needed for process_single_neuron if it's writing JSON.
+    # We'll pass consolidated_output_file_path as None if not used.
+    neuron_idx, activations_file_path_str, n_bins, top_k_per_bin, output_dir_path_str, consolidated_output_active = args_tuple
 
-    global _metadata_list_global # Use the global metadata
+    activations_file = Path(activations_file_path_str)
+    
+    global _metadata_list_global
 
     try:
-        # Each process opens its own HDF5 file handle
         with h5py.File(activations_file, 'r') as hf:
             if 'activations' not in hf:
-                 return neuron_idx, "Error: 'activations' dataset not found in HDF5 file."
+                return neuron_idx, f"Error: 'activations' dataset not found in HDF5 file for neuron {neuron_idx}."
             if neuron_idx >= hf['activations'].shape[1]:
-                return neuron_idx, f"Error: neuron_idx {neuron_idx} out of bounds."
+                return neuron_idx, f"Error: neuron_idx {neuron_idx} out of bounds for HDF5 file."
             acts = hf['activations'][:, neuron_idx]
         
-        # Extract top examples per range
         range_data = extract_top_examples_per_range(
-            acts, n_bins, top_k_per_bin, _metadata_list_global # Use global metadata
+            acts, n_bins, top_k_per_bin, _metadata_list_global
         )
-        
-        # Compute statistics
         stats = compute_neuron_statistics(acts)
         
-        # Prepare neuron data
-        neuron_data = {
+        neuron_data_payload = {
             'neuron_id': neuron_idx,
             'statistics': stats,
             'range_examples': range_data
         }
-        
-        # Save to file
-        neuron_file = output_dir / f'neuron_{neuron_idx:05d}.json'
-        with open(neuron_file, 'wb') as f: # Use 'wb' for orjson.dumps
-            f.write(json.dumps(neuron_data)) # orjson.dumps returns bytes
-        
-        return neuron_idx, True # Return True for success
+
+        if consolidated_output_active:
+            # If consolidated output is active, we return the data payload directly
+            return neuron_idx, neuron_data_payload
+        else:
+            # Original behavior: write to individual JSON file
+            output_dir = Path(output_dir_path_str) # Ensure output_dir is a Path object
+            output_dir.mkdir(parents=True, exist_ok=True) # Ensure dir exists
+            neuron_file = output_dir / f'neuron_{neuron_idx:05d}.json'
+            with open(neuron_file, 'wb') as f:
+                f.write(json.dumps(neuron_data_payload))
+            return neuron_idx, True # Indicates success for JSON writing
+            
     except Exception as e:
-        logger.error(f"Error processing neuron {neuron_idx}: {e}", exc_info=True) # Log full traceback
-        return neuron_idx, f"Error: {e}"
+        logger.error(f"Error processing neuron {neuron_idx}: {e}", exc_info=True)
+        return neuron_idx, f"Error: {str(e)}"
 
 
 def find_low_activation_examples_optimized(
@@ -264,8 +266,27 @@ def extract_top_examples_command(args: argparse.Namespace):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     logger.info("Executing extract_top_examples_command")
 
-    output_dir = Path(args.output_dir)
+    output_dir = Path(args.output_dir) # Still needed for low_activation_examples.json
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    consolidated_output_active = args.consolidated_output_file is not None
+    csv_writer = None
+    csv_file_handle = None
+
+    if consolidated_output_active:
+        logger.info(f"Consolidated CSV output requested at {args.consolidated_output_file}")
+        try:
+            csv_file_handle = open(args.consolidated_output_file, 'w', newline='')
+            csv_writer = csv.writer(csv_file_handle)
+            csv_writer.writerow([
+                "feature_id", "bin_index", "bin_min_activation", 
+                "bin_max_activation", "example_id", "activation_value", "rank_in_bin"
+            ])
+        except IOError as e:
+            logger.error(f"Failed to open consolidated output file {args.consolidated_output_file} for writing: {e}")
+            if csv_file_handle:
+                csv_file_handle.close()
+            return # Exit if we can't write to the CSV file
     
     activations_file = Path(args.activations)
     metadata_file = Path(args.metadata)
@@ -324,50 +345,82 @@ def extract_top_examples_command(args: argparse.Namespace):
     
     logger.info(f"Processing {n_neurons_to_process} neurons (out of {n_neurons_total} total) with {n_examples_total} examples.")
     
-    processed_neurons_indices = set()
-    if not args.no_resume: # resume is True by default
+    neurons_to_actually_process = list(range(n_neurons_to_process))
+
+    if not consolidated_output_active and not args.no_resume: # Resume logic only for JSON mode
+        processed_neurons_indices = set()
         existing_files = list(output_dir.glob('neuron_*.json'))
         for f_path in existing_files:
             try:
                 idx = int(f_path.stem.split('_')[1])
-                if idx < n_neurons_to_process:
+                if idx < n_neurons_to_process: # only consider neurons within the current scope
                     processed_neurons_indices.add(idx)
-            except (ValueError, IndexError): # Catch parsing errors
+            except (ValueError, IndexError):
                 logger.warning(f"Could not parse neuron index from filename: {f_path}")
         
         if processed_neurons_indices:
-            logger.info(f"Found {len(processed_neurons_indices)} existing neuron files, resuming...")
+            logger.info(f"Found {len(processed_neurons_indices)} existing neuron files, resuming for JSON output...")
+            neurons_to_actually_process = [i for i in range(n_neurons_to_process) if i not in processed_neurons_indices]
     
-    neurons_to_actually_process = [i for i in range(n_neurons_to_process) if i not in processed_neurons_indices]
-    
-    if neurons_to_actually_process:
-        logger.info(f"Actually processing {len(neurons_to_actually_process)} new neurons...")
+    if not neurons_to_actually_process:
+        logger.info("No neurons to process.")
+    else:
+        logger.info(f"Processing {len(neurons_to_actually_process)} neurons...")
         
-        # Prepare arguments for multiprocessing: Pass string paths for better pickling
         mp_args = [
-            (neuron_idx, str(activations_file), args.n_bins, args.top_k, str(output_dir))
+            (neuron_idx, str(activations_file), args.n_bins, args.top_k, str(output_dir), consolidated_output_active)
             for neuron_idx in neurons_to_actually_process
         ]
         
-        successful_count = 0
+        all_neuron_data_for_csv = [] # Used only if consolidated_output_active
+        successful_json_writes = 0
         failed_neurons_info = []
-        
-        # Use initializer to pass metadata_list_for_processing
+
         with mp.Pool(processes=num_workers, initializer=init_worker, initargs=(metadata_list_for_processing,)) as pool:
             with tqdm(total=len(neurons_to_actually_process), desc="Processing neurons") as pbar:
-                for neuron_idx_processed, result_status in pool.imap_unordered(process_single_neuron, mp_args):
-                    if result_status is True: # Explicitly check for True
-                        successful_count += 1
-                    else:
-                        failed_neurons_info.append((neuron_idx_processed, result_status))
+                for neuron_idx_processed, result_payload in pool.imap_unordered(process_single_neuron, mp_args):
+                    if consolidated_output_active:
+                        if isinstance(result_payload, dict): # Successfully got data
+                            all_neuron_data_for_csv.append(result_payload)
+                        else: # Error string
+                            failed_neurons_info.append((neuron_idx_processed, result_payload))
+                    else: # JSON mode
+                        if result_payload is True: # Successfully wrote JSON file
+                            successful_json_writes += 1
+                        else: # Error string
+                            failed_neurons_info.append((neuron_idx_processed, result_payload))
                     pbar.update(1)
         
-        logger.info(f"Successfully processed {successful_count} neurons.")
-        if failed_neurons_info:
-            logger.warning(f"Failed to process {len(failed_neurons_info)} neurons. First 5 errors: {failed_neurons_info[:5]}")
-    else:
-        logger.info("No new neurons to process based on existing files.")
+        if consolidated_output_active:
+            logger.info(f"Collected data for {len(all_neuron_data_for_csv)} neurons for CSV output.")
+            # Sort by neuron_id to ensure consistent output order in CSV
+            all_neuron_data_for_csv.sort(key=lambda x: x['neuron_id'])
+            
+            for neuron_data in tqdm(all_neuron_data_for_csv, desc="Writing to CSV"):
+                feature_id = neuron_data['neuron_id']
+                for bin_idx_str, bin_content in neuron_data['range_examples'].items():
+                    bin_index = int(bin_idx_str)
+                    bin_min_activation, bin_max_activation = bin_content['bounds']
+                    for rank_in_bin, example in enumerate(bin_content['examples'], 1):
+                        example_id = example['index']
+                        activation_value = example['activation']
+                        csv_writer.writerow([
+                            feature_id, bin_index, bin_min_activation,
+                            bin_max_activation, example_id, activation_value, rank_in_bin
+                        ])
+            logger.info(f"Finished writing {len(all_neuron_data_for_csv)} neurons' data to CSV.")
 
+        else: # JSON mode
+            logger.info(f"Successfully wrote JSON for {successful_json_writes} neurons.")
+
+        if failed_neurons_info:
+            logger.warning(f"Failed to process/write {len(failed_neurons_info)} neurons. First 5 errors: {failed_neurons_info[:5]}")
+
+    if csv_file_handle: # Close CSV file if it was opened
+        csv_file_handle.close()
+        logger.info(f"Consolidated CSV file saved to {args.consolidated_output_file}")
+
+    # Low activation examples processing remains unchanged, always outputs to output_dir
     logger.info("\nFinding low activation examples...")
     
     # Max examples to sample globally for low activation
@@ -446,39 +499,35 @@ def extract_top_examples_command(args: argparse.Namespace):
         f.write(json.dumps(low_examples_output_list))
     
     logger.info(f"\nSaved {len(low_examples_output_list)} low activation examples to {low_examples_file_path}")
-    logger.info(f"All results saved to {output_dir}")
+    if not consolidated_output_active:
+        logger.info(f"Per-neuron JSON results saved to {output_dir}")
 
-# Example of how this might be added to a CLI main later:
-# def main_cli():
-#     parser = argparse.ArgumentParser(description="Extract top examples command.")
-#     parser.add_argument("--activations", type=str, required=True, help="Path to HDF5 file with activations")
-#     parser.add_argument("--metadata", type=str, required=True, help="Path to pickle file with metadata")
-#     parser.add_argument("--output-dir", type=str, required=True, help="Output directory for results")
-#     parser.add_argument("--n-bins", type=int, default=10, help="Number of activation ranges")
-#     parser.add_argument("--top-k", type=int, default=1000, help="Top examples per bin")
-#     parser.add_argument("--max-neurons", type=int, default=None, help="Maximum neurons to process")
-#     parser.add_argument("--num-workers", type=int, default=None, help="Number of parallel workers")
-#     parser.add_argument("--no-resume", action="store_true", help="Don't resume from existing files")
-#     parser.add_argument("--low-act-chunk-size", type=int, default=50000, help="Chunk size for finding low activation examples")
-#     parser.add_argument("--low-act-bottom-bins", type=int, default=2, help="Number of bottom bins to define 'low activation'")
-#     cli_args = parser.parse_args()
-#     extract_top_examples_command(cli_args)
 
-# if __name__ == "__main__":
-#     # This is for direct script execution if needed, but the command is designed to be called from a central CLI
-#     # For direct testing, you'd need to simulate argparse.Namespace or create a simple parser here.
-#     # Example:
-#     # test_args = argparse.Namespace(
-#     #     activations="path/to/activations.h5",
-#     #     metadata="path/to/metadata.pkl",
-#     #     output_dir="output/extract_top_examples",
-#     #     n_bins=10,
-#     #     top_k=100,
-#     #     max_neurons=None, # Process all
-#     #     num_workers=None, # Auto-detect
-#     #     no_resume=False,
-#     #     low_act_chunk_size=50000,
-#     #     low_act_bottom_bins=2
-#     # )
-#     # extract_top_examples_command(test_args)
-#     pass
+def main_cli():
+    parser = argparse.ArgumentParser(description="Extract top examples command for activations, supporting per-neuron JSON and consolidated CSV outputs.")
+    parser.add_argument("--activations", type=str, required=True, help="Path to HDF5 file with activations")
+    parser.add_argument("--metadata", type=str, required=True, help="Path to pickle file with metadata")
+    parser.add_argument("--output-dir", type=str, required=True, help="Output directory for results (per-neuron JSONs, low_activation_examples.json).")
+    parser.add_argument("--consolidated-output-file", type=str, default=None, 
+                        help="Optional. Path to a single CSV file for consolidated output. If provided, per-neuron JSONs are not saved.")
+    parser.add_argument("--n-bins", type=int, default=10, help="Number of activation ranges (bins) per neuron.")
+    parser.add_argument("--top-k", type=int, default=1000, help="Number of top examples to extract per bin.")
+    parser.add_argument("--max-neurons", type=int, default=None, help="Maximum number of neurons to process. Processes all by default.")
+    parser.add_argument("--num-workers", type=int, default=None, help="Number of parallel workers. Defaults to CPU count - 2.")
+    parser.add_argument("--no-resume", action="store_true", help="Disable resuming from existing JSON files (only affects JSON output mode).")
+    parser.add_argument("--low-act-chunk-size", type=int, default=50000, help="Chunk size for finding low activation examples.")
+    parser.add_argument("--low-act-bottom-bins", type=int, default=2, help="Number of bottom bins (from the lowest activation) to define 'low activation'.")
+    
+    cli_args = parser.parse_args()
+    extract_top_examples_command(cli_args)
+
+if __name__ == "__main__":
+    # This allows the script to be run directly using command-line arguments.
+    # Example usage:
+    # python src/splatnlp/dashboard/commands/extract_top_examples_cmd.py \
+    #   --activations path/to/activations.h5 \
+    #   --metadata path/to/metadata.pkl \
+    #   --output-dir output/json_results \
+    #   --max-neurons 100 \
+    #   --consolidated-output-file output/consolidated.csv
+    main_cli()

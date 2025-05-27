@@ -25,7 +25,8 @@ from splatnlp.dashboard.commands.compute_correlations_efficient_cmd import compu
 from splatnlp.dashboard.commands.consolidate_activations_efficient_cmd import consolidate_activations_efficient_command
 from splatnlp.dashboard.commands.precompute_analytics_cmd import precompute_analytics_command
 from splatnlp.dashboard.commands.streaming_consolidate_cmd import streaming_consolidate_command
-from splatnlp.dashboard.commands.consolidate_to_db_cmd import consolidate_to_db_command
+from splatnlp.dashboard.commands.consolidate_to_db_cmd import consolidate_to_db_command, setup_consolidate_to_db_parser # Keep existing one
+from splatnlp.dashboard.commands.ingest_binned_samples_cmd import ingest_binned_samples_command, register_ingest_binned_samples_parser # New command
 
 
 logger = logging.getLogger(__name__)
@@ -301,7 +302,8 @@ def main():
     setup_consolidate_activations_parser(subparsers)
     setup_precompute_analytics_parser(subparsers)
     setup_streaming_consolidate_parser(subparsers)
-    setup_consolidate_to_db_parser(subparsers) # Add new parser here
+    setup_consolidate_to_db_parser(subparsers) # Existing command for precomputed analytics
+    register_ingest_binned_samples_parser(subparsers) # New command for binned samples CSV
     
     args = parser.parse_args()
     
@@ -326,10 +328,11 @@ def setup_consolidate_to_db_parser(subparsers):
     p.add_argument('--database-path', type=str, required=True, help='Path to the SQLite database file to create or update.')
     p.add_argument('--input-correlations-path', type=str, help='Path to JSON file with feature correlations (e.g., output of compute-correlations).')
     p.add_argument('--input-precomputed-analytics-path', type=str, help='Path to .joblib file with consolidated precomputed analytics (e.g., output of precompute-analytics). This file is expected to contain feature statistics, top examples, and logit influences.')
-    # Note: Raw activations and example metadata are assumed to be populated by other commands (e.g., generate-activations or streaming-consolidate stream-to-db).
-    # If direct loading from other formats (like per-neuron JSONs from extract-top-examples) is needed,
-    # the consolidate_to_db_command and this parser would need to be extended.
     p.set_defaults(func=consolidate_to_db_command)
+
+
+# Note: register_ingest_binned_samples_parser is defined in ingest_binned_samples_cmd.py
+# and called directly in main() above.
 
 if __name__ == "__main__":
     main()

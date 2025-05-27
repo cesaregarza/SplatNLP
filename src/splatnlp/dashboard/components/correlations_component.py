@@ -175,21 +175,35 @@ def update_correlations_display(selected_feature_id):
         # 2. Top Logit Influences from DB
         # This replaces the old "Token-Logit Correlations" which were calculated on the fly.
         # The database stores precomputed logit influences.
-        top_logit_influences_from_db = db_context.get_logit_influences(selected_feature_id, limit=10) # e.g., 5 positive, 5 negative
+        # The limit in get_logit_influences applies per type (positive/negative)
+        top_logit_influences_data = db_context.get_logit_influences(selected_feature_id, limit=5) 
 
         token_logit_influences_display_children.append(html.H5("Top Logit Influences (from DB)", className="mb-2"))
-        if top_logit_influences_from_db:
-            # The DB schema for logit_influences has: feature_id, token_id, token_name, influence, rank
-            # We can display these directly.
-            for item in top_logit_influences_from_db:
-                token_logit_influences_display_children.append(
-                    html.P(
-                        f"Token '{item['token_name']}' (ID: {item.get('token_id', 'N/A')}): Influence {item['influence']:.3f} (Rank: {item.get('rank', 'N/A')})",
-                        className="ms-3",
+        
+        positive_influences = top_logit_influences_data.get("positive", [])
+        negative_influences = top_logit_influences_data.get("negative", [])
+
+        if positive_influences or negative_influences:
+            if positive_influences:
+                token_logit_influences_display_children.append(html.Strong("Positive Influences:", className="ms-3"))
+                for item in positive_influences:
+                    token_logit_influences_display_children.append(
+                        html.P(
+                            f"Token '{item.get('token_name', 'N/A')}' (ID: {item.get('token_id', 'N/A')}): Influence {item.get('influence_value', 0.0):.3f} (Rank: {item.get('rank', 'N/A')})",
+                            className="ms-4",
+                        )
                     )
-                )
+            if negative_influences:
+                token_logit_influences_display_children.append(html.Strong("Negative Influences:", className="ms-3 mt-2"))
+                for item in negative_influences:
+                    token_logit_influences_display_children.append(
+                        html.P(
+                            f"Token '{item.get('token_name', 'N/A')}' (ID: {item.get('token_id', 'N/A')}): Influence {item.get('influence_value', 0.0):.3f} (Rank: {item.get('rank', 'N/A')})",
+                            className="ms-4",
+                        )
+                    )
         else:
-            token_logit_influences_display_children.append(html.P("No logit influence data found in database for this feature."))
+            token_logit_influences_display_children.append(html.P("No logit influence data found in database for this feature.", className="ms-3"))
 
         final_error_message = " | ".join(error_message_parts) if error_message_parts else ""
         return sae_corr_display_children, token_logit_influences_display_children, final_error_message
