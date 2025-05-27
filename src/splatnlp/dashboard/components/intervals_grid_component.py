@@ -157,54 +157,45 @@ def render_intervals_grid(selected_feature_id: Optional[int]):
     _, id_to_name, _ = generate_maps() # General mapping, should be fine
 
     try:
-        acts_values, example_ids_for_acts = db_context.get_feature_activations(selected_feature_id)
-        if acts_values.size == 0:
-            return [html.P("No activation data found for this feature in the database.")], ""
+        # Fetch pre-binned and pre-sampled data
+        binned_samples_data = db_context.get_binned_feature_samples(selected_feature_id)
+        if not binned_samples_data:
+            return [html.P(f"No binned sample data found for feature {selected_feature_id} in the database.")], ""
     except Exception as e:
-        logger.error(f"IntervalsGrid: Failed to get feature activations for {selected_feature_id} from DB: {e}", exc_info=True)
-        return [], f"Error fetching activations: {str(e)}"
+        logger.error(f"IntervalsGrid: Failed to get binned feature samples for {selected_feature_id} from DB: {e}", exc_info=True)
+        return [], f"Error fetching binned samples: {str(e)}"
 
-    lo, hi = float(np.min(acts_values)), float(np.max(acts_values) + 1e-6) # Ensure hi includes max value
-    bins = 10
-    bounds = np.linspace(lo, hi, bins + 1)
-    per_interval = 5
     sections: List[Any] = []
+    top_tfidf_tokens = set() # TF-IDF analysis is not performed here. Pass empty set.
 
-    # TF-IDF and Top Weapons analysis is removed when using db_context,
-    # as it would require fetching all example texts, which is inefficient.
-    # This kind of global analysis should be precomputed and stored in the DB if needed.
-    top_tfidf_tokens = set() # Pass empty set to _example_card
-
-    # Iterate **high -> low** for bins
-    for bin_idx in reversed(range(bins)):
-        a, b = bounds[bin_idx], bounds[bin_idx + 1]
-        # Ensure the last bin correctly includes the max value if it's exactly on the boundary
-        mask = (acts_values >= a) & (acts_values < b if bin_idx < bins - 1 else acts_values <= b)
+    # Iterate through the bins (already sorted by bin_index by the DB method)
+    # For display, it's often preferred to show highest activation bins first.
+    # The current data is sorted by bin_index ASC. If we want DESC, we reverse here.
+    for bin_data in reversed(binned_samples_data):
+        bin_idx = bin_data["bin_index"]
+        min_act = bin_data["bin_min_activation"]
+        max_act = bin_data["bin_max_activation"]
+        samples_in_bin = bin_data["samples"]
         
-        # Indices relative to the `acts_values` array
-        current_interval_indices_in_acts_array = np.where(mask)[0] 
+        num_examples_in_interval = len(samples_in_bin) # This is the count of *sampled* examples
         
-        num_examples_in_interval = len(current_interval_indices_in_acts_array)
-        header_text = f"Interval {bins - bin_idx}: [{a:.3f}, {b:.3f}) - {num_examples_in_interval} examples"
+        # Note: The 'count' of total examples originally in this bin before sampling by extract-top-examples
+        # is not directly available in `binned_samples_data` structure.
+        # If that count is needed, `feature_stats.sampled_histogram_data` might be a source,
+        # or `extract-top-examples` output CSV/JSON would need to include original bin counts.
+        # For now, we display based on the number of *provided samples* for the bin.
+        header_text = f"Bin {bin_idx}: [{min_act:.3f}, {max_act:.3f}) - {num_examples_in_interval} sampled examples"
         header = html.Div(header_text, className="fw-bold mb-2")
         
         card_cols: List[Any] = []
         if num_examples_in_interval > 0:
-            num_to_sample = min(num_examples_in_interval, per_interval)
-            # Get indices within the `current_interval_indices_in_acts_array` for sampling
-            chosen_indices_for_sampling = np.random.choice(num_examples_in_interval, num_to_sample, replace=False)
-            
-            for chosen_idx in chosen_indices_for_sampling:
-                # Map back to the index in the original `acts_values` and `example_ids_for_acts`
-                original_array_idx = current_interval_indices_in_acts_array[chosen_idx]
-                example_id_to_fetch = int(example_ids_for_acts[original_array_idx]) # Ensure it's Python int
-                activation_val_for_card = float(acts_values[original_array_idx])
+            for sample in samples_in_bin: # These are already the chosen samples
+                example_id_to_fetch = sample["example_id"]
+                activation_val_for_card = sample["activation_value"]
 
                 try:
                     # Fetch full example details from DB using its ID
-                    # This assumes db_context has a method like get_example_details,
-                    # or we build the query here.
-                    with db_context.db.get_connection() as conn: # Access underlying DashboardDatabase instance
+                    with db_context.db.get_connection() as conn:
                         cur = conn.execute("SELECT * FROM examples WHERE id = ?", (example_id_to_fetch,))
                         row = cur.fetchone()
                     
@@ -213,10 +204,9 @@ def render_intervals_grid(selected_feature_id: Optional[int]):
                         # Parse JSON fields if necessary
                         if 'ability_input_tokens' in example_record_dict and isinstance(example_record_dict['ability_input_tokens'], str):
                             example_record_dict['ability_input_tokens'] = json.loads(example_record_dict['ability_input_tokens'])
-                        else: # Ensure it's a list
+                        else:
                             example_record_dict['ability_input_tokens'] = example_record_dict.get('ability_input_tokens', [])
                         
-                        # _example_card expects a pd.Series like object
                         rec_series = pd.Series(example_record_dict)
                         card = _example_card(
                             rec_series,
@@ -234,7 +224,9 @@ def render_intervals_grid(selected_feature_id: Optional[int]):
                     logger.error(f"IntervalsGrid: Error creating card for example {example_id_to_fetch}: {card_ex}", exc_info=True)
                     card_cols.append(dbc.Col(html.P(f"Error for Ex. {example_id_to_fetch}."), width="auto"))
         else:
-            card_cols.append(html.I("No examples in this interval."))
+            # This case should ideally not happen if get_binned_feature_samples filters out bins with no samples.
+            # If it can return bins with an empty "samples" list, this is the correct handling.
+            card_cols.append(html.I("No sampled examples in this bin."))
 
         sections.append(
             html.Div(
@@ -242,4 +234,8 @@ def render_intervals_grid(selected_feature_id: Optional[int]):
                 className="p-3 mb-3 border rounded bg-light",
             )
         )
+        
+    if not sections: # If binned_samples_data was empty or all bins had no samples
+        return [html.P(f"No displayable binned sample data found for feature {selected_feature_id}.") ], ""
+        
     return sections, ""

@@ -66,96 +66,76 @@ def update_top_logits_graph(
             "layout": {"title": "SAE model missing decoder weights"},
         }, "Error: SAE model missing decoder weights"
 
-    if not (0 <= selected_feature_id < sae_model.decoder.weight.shape[1]):
+    # Removed direct model access and on-the-fly calculation.
+    # Now, we fetch precomputed logit influences from the database.
+    # DASHBOARD_CONTEXT.inv_vocab is not needed here if token names are in the DB results.
+    import logging
+    logger = logging.getLogger(__name__)
+
+    db_context = getattr(DASHBOARD_CONTEXT, 'db_context', None)
+    if db_context is None:
+        logger.warning("TopLogits: db_context not available.")
+        return {"data": [], "layout": {"title": "Database context not available"}}, "Error: Database context not available"
+
+    # Define how many top positive/negative influences to show.
+    # This limit is passed to get_logit_influences.
+    # The old code hardcoded 5 positive and 5 negative.
+    limit_per_type = 5 
+
+    try:
+        logit_influences_data = db_context.get_logit_influences(selected_feature_id, limit=limit_per_type)
+    except Exception as e:
+        logger.error(f"TopLogits: Error fetching logit influences for feature {selected_feature_id}: {e}", exc_info=True)
+        return {"data": [], "layout": {"title": f"Error fetching data for feature {selected_feature_id}"}}, f"Error: {str(e)}"
+
+    positive_influences = logit_influences_data.get("positive", [])
+    negative_influences = logit_influences_data.get("negative", [])
+
+    if not positive_influences and not negative_influences:
         return {
             "data": [],
-            "layout": {
-                "title": f"Feature ID {selected_feature_id} out of range"
-            },
-        }, f"Error: Feature ID {selected_feature_id} out of range"
+            "layout": {"title": f"No logit influence data for Feature {selected_feature_id}"},
+        }, ""
 
-    sae_feature_direction = (
-        sae_model.decoder.weight.data.detach()
-        .cpu()
-        .numpy()[:, selected_feature_id]
-    )
+    # Prepare data for DataFrame
+    tokens = []
+    effects = []
+    types = []
 
-    primary_model = DASHBOARD_CONTEXT.primary_model
-    if primary_model is None:
-        return {
+    for item in positive_influences:
+        tokens.append(item.get("token_name", f"ID_{item.get('token_id')}"))
+        effects.append(item.get("influence_value")) # Use 'influence_value' as per DB schema
+        types.append("Positive")
+    
+    for item in negative_influences:
+        tokens.append(item.get("token_name", f"ID_{item.get('token_id')}"))
+        effects.append(item.get("influence_value")) # Use 'influence_value'
+        types.append("Negative")
+        
+    # Ensure all lists have compatible data for DataFrame creation
+    # Filter out any entries where effect might be None if that's possible from DB
+    valid_indices = [i for i, effect in enumerate(effects) if effect is not None]
+    tokens = [tokens[i] for i in valid_indices]
+    effects = [effects[i] for i in valid_indices]
+    types = [types[i] for i in valid_indices]
+
+
+    if not tokens: # If all influences were filtered out (e.g. all had None effect)
+         return {
             "data": [],
-            "layout": {"title": "Primary model not loaded"},
-        }, "Error: Primary model not loaded"
+            "layout": {"title": f"No valid logit influence data to display for Feature {selected_feature_id}"},
+        }, ""
 
-    if not hasattr(primary_model, "output_layer") or not hasattr(
-        primary_model.output_layer, "weight"
-    ):
-        return {
-            "data": [],
-            "layout": {"title": "Primary model missing output layer weights"},
-        }, "Error: Primary model missing output layer weights"
 
-    primary_output_layer_weights = (
-        primary_model.output_layer.weight.data.detach().cpu().numpy()
-    )
-    sae_feature_effect_on_primary_activation = (
-        sae_feature_direction  # This is already a numpy array
-    )
-
-    # Ensure DEVICE is available in DASHBOARD_CONTEXT, otherwise default to 'cpu'
-    DEVICE = getattr(DASHBOARD_CONTEXT, "device", "cpu")
-    if DEVICE is None:  # Handle case where device might be explicitly None
-        DEVICE = "cpu"
-        print(
-            "Warning: DASHBOARD_CONTEXT.device was None, defaulting to 'cpu' for top_logits_component."
-        )
-
-    # Convert numpy arrays to tensors and move to the correct device
-    t_primary_output_layer_weights = torch.as_tensor(
-        primary_output_layer_weights, dtype=torch.float32
-    ).to(DEVICE)
-    t_sae_feature_effect_on_primary_activation = torch.as_tensor(
-        sae_feature_effect_on_primary_activation, dtype=torch.float32
-    ).to(DEVICE)
-
-    # Perform matrix multiplication
-    # primary_output_layer_weights is likely (output_vocab_size, hidden_dim)
-    # sae_feature_effect_on_primary_activation is likely (hidden_dim,)
-    # Resulting effect_on_logits should be (output_vocab_size,)
-    effect_on_logits = torch.matmul(
-        t_primary_output_layer_weights,
-        t_sae_feature_effect_on_primary_activation,
-    )
-
-    inv_vocab = DASHBOARD_CONTEXT.inv_vocab
-    if inv_vocab is None:
-        return {
-            "data": [],
-            "layout": {"title": "Vocabulary not loaded"},
-        }, "Error: Vocabulary not loaded"
-
-    token_names = [
-        inv_vocab.get(str(i), inv_vocab.get(i, f"Token_ID_{i}"))
-        for i in range(len(effect_on_logits))
-    ]
-
-    sorted_indices = torch.argsort(effect_on_logits)
-    top_positive = sorted_indices[-5:].flip(0)  # Changed from -10 to -5
-    top_negative = sorted_indices[:5]  # Changed from :10 to :5
-
-    positive_tokens = [token_names[i] for i in top_positive]
-    negative_tokens = [token_names[i] for i in top_negative]
-    positive_effects = [effect_on_logits[i].item() for i in top_positive]
-    negative_effects = [effect_on_logits[i].item() for i in top_negative]
-
-    # Create DataFrame for plotting
-    df = pd.DataFrame(
-        {
-            "Token": positive_tokens + negative_tokens,
-            "Effect": positive_effects + negative_effects,
-            "Type": ["Positive"] * 5 + ["Negative"] * 5,
-        }
-    )
+    df = pd.DataFrame({"Token": tokens, "Effect": effects, "Type": types})
+    
+    # Sort by Type (Positive first) then by absolute effect for consistent plotting if needed,
+    # though rank from DB should already ensure order within type.
+    # For display, usually positive influences are on one side, negative on other, or intermingled.
+    # Plotly Express bar chart will group by color based on 'Type'.
+    # If we want specific order of bars (e.g. highest positive to lowest positive, then lowest negative to highest negative),
+    # we might need to sort df before passing to px.bar
+    df = df.sort_values(by=['Type', 'Effect'], ascending=[True, False]) # Positive descending, Negative ascending (more negative)
 
     fig = px.bar(
         df,
@@ -165,13 +145,14 @@ def update_top_logits_graph(
         title=f"Top Logit Influences for Feature {selected_feature_id}",
         labels={"Token": "Token", "Effect": "Logit Influence"},
         color_discrete_map={"Positive": "#1f77b4", "Negative": "#ff7f0e"},
+        category_orders={"Token": df["Token"].tolist()} # Preserve sorted order in plot
     )
 
     fig.update_layout(
         showlegend=False,
         margin=dict(l=40, r=40, t=40, b=40),
         height=350,
-        xaxis={"tickangle": 45},  # Rotate labels for better readability
+        xaxis={"tickangle": -45},  # Rotate labels for better readability
     )
 
     return fig, ""
