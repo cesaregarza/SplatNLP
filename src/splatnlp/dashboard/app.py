@@ -15,8 +15,10 @@ from splatnlp.dashboard.components import (
     top_examples_component,
     top_logits_component,
 )
-
-# Feature names functionality is integrated directly
+from splatnlp.dashboard.components.feature_labels import (
+    create_feature_label_editor,
+    create_labeling_statistics,
+)
 
 # THIS IS WHERE THE GLOBAL CONTEXT WILL BE STORED
 # It will be populated by the script that runs the dashboard (e.g., cli.py or run_dashboard.py)
@@ -28,30 +30,9 @@ app = dash.Dash(
     suppress_callback_exceptions=True,
 )
 
-# Create the feature name editor component
-feature_name_editor = html.Div(
-    [
-        dbc.InputGroup(
-            [
-                dbc.InputGroupText("Feature Name:"),
-                dbc.Input(
-                    id="feature-name-input",
-                    placeholder="Enter a descriptive name for this feature",
-                    type="text",
-                    value="",
-                ),
-                dbc.Button(
-                    "Save",
-                    id="save-feature-name-btn",
-                    color="primary",
-                    n_clicks=0,
-                ),
-            ],
-            className="mb-2",
-        ),
-        html.Div(id="feature-name-feedback", className="text-muted small"),
-    ]
-)
+# Placeholder for feature label editor - will be populated dynamically
+feature_label_editor_container = html.Div(id="feature-label-editor-container")
+labeling_statistics_container = html.Div(id="labeling-statistics-container")
 
 app.layout = dbc.Container(
     [
@@ -63,7 +44,8 @@ app.layout = dbc.Container(
                     [
                         html.H2("SAE Feature Dashboard", className="mb-4"),
                         feature_selector_layout,
-                        feature_name_editor,  # Add the editor directly here
+                        feature_label_editor_container,  # Feature labeling editor
+                        labeling_statistics_container,  # Labeling statistics
                     ],
                     width=3,
                 ),
@@ -120,83 +102,123 @@ def trigger_page_load(_pathname: Optional[str]) -> str:
     return time.time()
 
 
-# Feature name callbacks
+# Feature label editor callbacks
 @app.callback(
-    Output("feature-name-input", "value"),
+    Output("feature-label-editor-container", "children"),
     Input("feature-dropdown", "value"),
     prevent_initial_call=True,
 )
-def load_feature_name(feature_id):
-    """Load existing feature name when selection changes."""
-    print(f"Load feature name callback: feature_id={feature_id}")
+def update_feature_label_editor(feature_id):
+    """Update feature label editor when selection changes."""
     if feature_id is None or feature_id == -1:
-        return ""
+        return html.Div("Select a feature to label", className="text-muted")
 
     if (
-        hasattr(DASHBOARD_CONTEXT, "feature_names_manager")
-        and DASHBOARD_CONTEXT.feature_names_manager
+        hasattr(DASHBOARD_CONTEXT, "feature_labels_manager")
+        and DASHBOARD_CONTEXT.feature_labels_manager
     ):
-        name = (
-            DASHBOARD_CONTEXT.feature_names_manager.get_name(feature_id) or ""
+        return create_feature_label_editor(
+            feature_id, DASHBOARD_CONTEXT.feature_labels_manager
         )
-        print(f"Loaded name for feature {feature_id}: {name}")
-        return name
-    return ""
+    return html.Div("Feature labeling not available", className="text-warning")
 
 
 @app.callback(
-    Output("feature-name-feedback", "children"),
-    Output("feature-names-updated", "data"),
-    Input("save-feature-name-btn", "n_clicks"),
+    Output("feature-labels-feedback", "children"),
+    Output("feature-labels-updated", "data"),
+    Output("labeling-statistics-container", "children"),
+    Input("save-feature-labels-btn", "n_clicks"),
+    Input("clear-feature-labels-btn", "n_clicks"),
     State("feature-dropdown", "value"),
     State("feature-name-input", "value"),
-    State("feature-names-updated", "data"),
+    State("feature-category-radio", "value"),
+    State("feature-notes-textarea", "value"),
+    State("feature-labels-updated", "data"),
     prevent_initial_call=True,
 )
-def save_feature_name(n_clicks, feature_id, name, current_counter):
-    """Save feature name when button is clicked."""
-    print(
-        f"Save callback triggered: n_clicks={n_clicks}, feature_id={feature_id}, name={name}"
-    )
+def save_feature_labels(
+    save_clicks,
+    clear_clicks,
+    feature_id,
+    name,
+    category,
+    notes,
+    current_counter,
+):
+    """Save or clear feature labels."""
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return "", current_counter or 0, dash.no_update
 
-    # Always show something when clicked to verify callback is working
-    if n_clicks is None:
-        return "", current_counter or 0
-
-    if n_clicks == 0:
-        return "", current_counter or 0
+    button_id = ctx.triggered[0]["prop_id"].split(".")[0]
 
     if feature_id is None or feature_id == -1:
-        return "Please select a feature first.", current_counter or 0
+        return (
+            "Please select a feature first.",
+            current_counter or 0,
+            dash.no_update,
+        )
 
     if (
-        hasattr(DASHBOARD_CONTEXT, "feature_names_manager")
-        and DASHBOARD_CONTEXT.feature_names_manager
+        hasattr(DASHBOARD_CONTEXT, "feature_labels_manager")
+        and DASHBOARD_CONTEXT.feature_labels_manager
     ):
-        print(f"Setting name for feature {feature_id}: {name}")
-        DASHBOARD_CONTEXT.feature_names_manager.set_name(feature_id, name)
-        print(
-            f"Current feature names: {DASHBOARD_CONTEXT.feature_names_manager.feature_names}"
+        if button_id == "save-feature-labels-btn":
+            # Save labels
+            DASHBOARD_CONTEXT.feature_labels_manager.update_label(
+                feature_id,
+                name=name or "",
+                category=category or "none",
+                notes=notes or "",
+            )
+            new_counter = (current_counter or 0) + 1
+            stats_component = create_labeling_statistics(
+                DASHBOARD_CONTEXT.feature_labels_manager
+            )
+            return (
+                f"✓ Saved labels for Feature {feature_id}",
+                new_counter,
+                stats_component,
+            )
+
+        elif button_id == "clear-feature-labels-btn":
+            # Clear labels
+            DASHBOARD_CONTEXT.feature_labels_manager.update_label(
+                feature_id, name="", category="none", notes=""
+            )
+            new_counter = (current_counter or 0) + 1
+            stats_component = create_labeling_statistics(
+                DASHBOARD_CONTEXT.feature_labels_manager
+            )
+            return (
+                f"✓ Cleared labels for Feature {feature_id}",
+                new_counter,
+                stats_component,
+            )
+
+    return (
+        "Feature labeling not available",
+        current_counter or 0,
+        dash.no_update,
+    )
+
+
+# Update statistics on page load
+@app.callback(
+    Output("labeling-statistics-container", "children", allow_duplicate=True),
+    Input("page-load-trigger", "data"),
+    prevent_initial_call=True,
+)
+def update_statistics_on_load(_):
+    """Update labeling statistics on page load."""
+    if (
+        hasattr(DASHBOARD_CONTEXT, "feature_labels_manager")
+        and DASHBOARD_CONTEXT.feature_labels_manager
+    ):
+        return create_labeling_statistics(
+            DASHBOARD_CONTEXT.feature_labels_manager
         )
-        print(
-            f"Saved to file: {DASHBOARD_CONTEXT.feature_names_manager.storage_path}"
-        )
-
-        # Verify the name was saved
-        saved_name = DASHBOARD_CONTEXT.feature_names_manager.get_name(
-            feature_id
-        )
-        print(f"Verification - saved name: {saved_name}")
-
-        # Increment counter to trigger dropdown refresh
-        new_counter = (current_counter or 0) + 1
-
-        if name.strip():
-            return f"✓ Saved name for Feature {feature_id}", new_counter
-        else:
-            return f"✓ Removed name for Feature {feature_id}", new_counter
-
-    return "Feature naming not available", current_counter or 0
+    return html.Div()
 
 
 if __name__ == "__main__":

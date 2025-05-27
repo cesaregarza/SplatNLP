@@ -15,8 +15,8 @@ feature_selector_layout = html.Div(
             clearable=False,
             searchable=True,
         ),
-        # Store to trigger dropdown refresh when names change
-        dcc.Store(id="feature-names-updated", data=0),
+        # Store to trigger dropdown refresh when labels change
+        dcc.Store(id="feature-labels-updated", data=0),
     ],
     className="mb-4",
 )
@@ -27,23 +27,23 @@ feature_selector_layout = html.Div(
     Output("feature-dropdown", "value"),
     Input("page-load-trigger", "data"),
     Input(
-        "feature-names-updated", "data"
-    ),  # Trigger refresh when names are updated
+        "feature-labels-updated", "data"
+    ),  # Trigger refresh when labels are updated
     State("feature-dropdown", "value"),
     State("url", "search"),
 )
 def populate_feature_options(
     page_load_data: Optional[str],
-    names_updated_counter: Optional[
+    labels_updated_counter: Optional[
         int
-    ],  # Counter that increments when names change
+    ],  # Counter that increments when labels change
     current_value: Optional[int],
     search_query: Optional[str],
 ) -> Tuple[List[dict], Optional[int]]:
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
     # Use the counter to ensure Dash detects changes
-    print(f"Dropdown refresh triggered, counter: {names_updated_counter}")
+    print(f"Dropdown refresh triggered, counter: {labels_updated_counter}")
 
     default_value = 0  # Default to feature 0 if no other value is set
     options: List[dict] = []
@@ -56,25 +56,25 @@ def populate_feature_options(
     ):
         num_features = DASHBOARD_CONTEXT.sae_model.hidden_dim
         if num_features > 0:
-            # Get feature names if available
-            feature_names_manager = getattr(
-                DASHBOARD_CONTEXT, "feature_names_manager", None
+            # Get feature labels if available
+            feature_labels_manager = getattr(
+                DASHBOARD_CONTEXT, "feature_labels_manager", None
             )
             options = []
             for i in range(num_features):
-                if feature_names_manager:
-                    label = feature_names_manager.get_display_name(i)
+                if feature_labels_manager:
+                    label = feature_labels_manager.get_display_name(i)
                 else:
                     label = f"Feature {i}"
                 options.append({"label": label, "value": i})
 
-            # Debug: print some named features
+            # Debug: print some labeled features
             if (
-                feature_names_manager
-                and len(feature_names_manager.feature_names) > 0
+                feature_labels_manager
+                and len(feature_labels_manager.feature_labels) > 0
             ):
                 print(
-                    f"Named features: {list(feature_names_manager.feature_names.items())[:5]}"
+                    f"Labeled features: {list(feature_labels_manager.feature_labels.items())[:5]}"
                 )
         else:  # num_features is 0 or less (e.g. model not fully loaded or invalid)
             options = [

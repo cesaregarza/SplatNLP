@@ -1,12 +1,61 @@
 from typing import Any, Dict, List, Optional, Tuple, Union
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import h5py
+import joblib
 from dash import Input, Output, State, callback, dcc, html
 from scipy.stats import pearsonr
 
 # App context will be monkey-patched by the run script
 # DASHBOARD_CONTEXT = None
+
+# Global cache for precomputed correlations
+_precomputed_correlations = None
+
+
+def load_precomputed_correlations():
+    """Load precomputed correlations if available."""
+    global _precomputed_correlations
+    
+    if _precomputed_correlations is not None:
+        return _precomputed_correlations
+    
+    # Try to load precomputed correlations
+    h5_path = Path("/root/dev/SplatNLP/correlations_sae.h5")
+    joblib_path = Path("/root/dev/SplatNLP/correlations_sae.joblib")
+    
+    if h5_path.exists():
+        try:
+            # Load from HDF5 for efficiency
+            _precomputed_correlations = {}
+            with h5py.File(h5_path, 'r') as f:
+                _precomputed_correlations['indices'] = f['correlation_indices'][:]
+                _precomputed_correlations['values'] = f['correlation_values'][:]
+                _precomputed_correlations['n_features'] = f.attrs['n_features']
+                _precomputed_correlations['top_k'] = f.attrs['top_k']
+                _precomputed_correlations['min_correlation'] = f.attrs['min_correlation']
+            return _precomputed_correlations
+        except Exception as e:
+            print(f"Error loading precomputed correlations from HDF5: {e}")
+    
+    elif joblib_path.exists():
+        try:
+            # Fallback to joblib
+            data = joblib.load(joblib_path)
+            _precomputed_correlations = {
+                'indices': data['correlation_indices'],
+                'values': data['correlation_values'],
+                'n_features': data['n_features'],
+                'top_k': data['top_k'],
+                'min_correlation': data['min_correlation']
+            }
+            return _precomputed_correlations
+        except Exception as e:
+            print(f"Error loading precomputed correlations from joblib: {e}")
+    
+    return None
 
 correlations_component = html.Div(
     id="correlations-content",
@@ -33,6 +82,34 @@ correlations_component = html.Div(
 def calculate_top_correlated_features(
     all_sae_acts, selected_feature_id, top_n=5
 ):
+    # First try to use precomputed correlations
+    precomputed = load_precomputed_correlations()
+    if precomputed is not None:
+        try:
+            # Get precomputed correlations for this feature
+            if selected_feature_id < precomputed['n_features']:
+                indices = precomputed['indices'][selected_feature_id]
+                values = precomputed['values'][selected_feature_id]
+                
+                # Filter valid correlations (indices >= 0)
+                valid_mask = indices >= 0
+                valid_indices = indices[valid_mask]
+                valid_values = values[valid_mask]
+                
+                # Create correlation list
+                correlations = []
+                for idx, val in zip(valid_indices[:top_n], valid_values[:top_n]):
+                    correlations.append({
+                        "feature_id": int(idx),
+                        "correlation": float(val)
+                    })
+                
+                return correlations, None
+        except Exception as e:
+            print(f"Error using precomputed correlations: {e}")
+            # Fall back to computing on the fly
+    
+    # Fall back to computing correlations on the fly
     if not isinstance(all_sae_acts, np.ndarray):
         return [], "SAE activations are not a NumPy array."
     if selected_feature_id >= all_sae_acts.shape[1]:
@@ -212,9 +289,17 @@ def update_correlations_display(selected_feature_id):
         if err:
             error_message_parts.append(f"SAE Feature Corr Error: {err}")
         else:
+            # Check if using precomputed correlations
+            precomputed = load_precomputed_correlations()
+            correlation_label = "Top Correlated SAE Features (Pearson"
+            if precomputed is not None:
+                correlation_label += ", precomputed):"
+            else:
+                correlation_label += "):"
+            
             sae_corr_display_children.append(
                 html.H5(
-                    "Top Correlated SAE Features (Pearson):", className="mb-2"
+                    correlation_label, className="mb-2"
                 )
             )
             if top_sae_features:

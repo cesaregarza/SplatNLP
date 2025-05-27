@@ -85,9 +85,7 @@ top_examples_component = html.Div(
     [Input("feature-dropdown", "value")],
 )
 def update_top_examples_grid(selected_feature_id):
-    from splatnlp.dashboard.app import (  # Ensure this is the correct way context is passed
-        DASHBOARD_CONTEXT,
-    )
+    from splatnlp.dashboard.app import DASHBOARD_CONTEXT
     from splatnlp.preprocessing.transform.mappings import generate_maps
 
     logger.info(
@@ -127,6 +125,36 @@ def update_top_examples_grid(selected_feature_id):
             default_col_defs,
             "Dashboard context not available. Critical error.",
         )
+
+    # Use database-backed context if available
+    if hasattr(DASHBOARD_CONTEXT, 'db_context'):
+        logger.info("TopExamples: Using database-backed context")
+        db_context = DASHBOARD_CONTEXT.db_context
+        
+        try:
+            # Get top examples from database
+            top_examples = db_context.get_top_examples(selected_feature_id, limit=20)
+            
+            if not top_examples:
+                return [], default_col_defs, "No top examples found for this feature."
+            
+            # Convert to grid format
+            grid_data = []
+            for example in top_examples:
+                grid_data.append({
+                    "Rank": example['rank'],
+                    "Weapon": example['weapon_name'],
+                    "Input Abilities": example['input_abilities_str'],
+                    "SAE Feature Activation": f"{example['activation_value']:.4f}",
+                    "Top Predicted Abilities": example['top_predicted_abilities_str'],
+                    "Original Index": example['example_id'],
+                })
+            
+            return grid_data, default_col_defs, ""
+            
+        except Exception as e:
+            logger.error(f"TopExamples: Database error: {e}")
+            return [], default_col_defs, f"Database error: {str(e)}"
 
     current_run_error_messages = []
 
