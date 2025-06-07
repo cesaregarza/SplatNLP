@@ -296,13 +296,15 @@ def create_feature_label_editor(
 def create_labeling_statistics(label_manager: FeatureLabelsManager) -> dbc.Card:
     """Create a statistics display for labeling progress."""
     stats = label_manager.get_statistics()
-    
+
     # Calculate percentages for progress bars
-    total = stats['total_labeled'] or 1  # Avoid division by zero
-    mechanical_pct = (stats['mechanical'] / total) * 100 if total > 0 else 0
-    tactical_pct = (stats['tactical'] / total) * 100 if total > 0 else 0
-    strategic_pct = (stats['strategic'] / total) * 100 if total > 0 else 0
-    uncategorized_pct = (stats['uncategorized'] / total) * 100 if total > 0 else 0
+    total = stats["total_labeled"] or 1  # Avoid division by zero
+    mechanical_pct = (stats["mechanical"] / total) * 100 if total > 0 else 0
+    tactical_pct = (stats["tactical"] / total) * 100 if total > 0 else 0
+    strategic_pct = (stats["strategic"] / total) * 100 if total > 0 else 0
+    uncategorized_pct = (
+        (stats["uncategorized"] / total) * 100 if total > 0 else 0
+    )
 
     return dbc.Card(
         [
@@ -329,36 +331,39 @@ def create_labeling_statistics(label_manager: FeatureLabelsManager) -> dbc.Card:
                             html.P(
                                 html.Strong("Categories:"), className="mb-2"
                             ),
-                            html.Div([
-                                dbc.Progress(
-                                    value=mechanical_pct,
-                                    color="info",
-                                    label=f"Mechanical: {stats['mechanical']}",
-                                    className="mb-1",
-                                    style={"height": "20px"},
-                                ),
-                                dbc.Progress(
-                                    value=tactical_pct,
-                                    color="warning",
-                                    label=f"Tactical: {stats['tactical']}",
-                                    className="mb-1",
-                                    style={"height": "20px"},
-                                ),
-                                dbc.Progress(
-                                    value=strategic_pct,
-                                    color="success",
-                                    label=f"Strategic: {stats['strategic']}",
-                                    className="mb-1",
-                                    style={"height": "20px"},
-                                ),
-                                dbc.Progress(
-                                    value=uncategorized_pct,
-                                    color="secondary",
-                                    label=f"Uncategorized: {stats['uncategorized']}",
-                                    className="mb-1",
-                                    style={"height": "20px"},
-                                ),
-                            ], className="mb-2"),
+                            html.Div(
+                                [
+                                    dbc.Progress(
+                                        value=mechanical_pct,
+                                        color="info",
+                                        label=f"Mechanical: {stats['mechanical']}",
+                                        className="mb-1",
+                                        style={"height": "20px"},
+                                    ),
+                                    dbc.Progress(
+                                        value=tactical_pct,
+                                        color="warning",
+                                        label=f"Tactical: {stats['tactical']}",
+                                        className="mb-1",
+                                        style={"height": "20px"},
+                                    ),
+                                    dbc.Progress(
+                                        value=strategic_pct,
+                                        color="success",
+                                        label=f"Strategic: {stats['strategic']}",
+                                        className="mb-1",
+                                        style={"height": "20px"},
+                                    ),
+                                    dbc.Progress(
+                                        value=uncategorized_pct,
+                                        color="secondary",
+                                        label=f"Uncategorized: {stats['uncategorized']}",
+                                        className="mb-1",
+                                        style={"height": "20px"},
+                                    ),
+                                ],
+                                className="mb-2",
+                            ),
                         ]
                     )
                 ]

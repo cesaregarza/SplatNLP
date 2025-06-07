@@ -86,86 +86,115 @@ top_examples_component = html.Div(
 )
 def update_top_examples_grid(selected_feature_id):
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
-    from splatnlp.preprocessing.transform.mappings import generate_maps
 
     logger.info(
         f"TopExamples: Received selected_feature_id: {selected_feature_id}"
     )
 
-    # Default column definitions for early exit or error
+    # Default column definitions
     default_col_defs = [
-        {"field": "Rank", "maxWidth": 80},
-        {"field": "Weapon"},
+        {"field": "Rank", "headerName": "Rank", "width": 80},
+        {"field": "Weapon", "headerName": "Weapon", "width": 150},
         {
             "field": "Input Abilities",
-            "wrapText": True,
-            "autoHeight": True,
-            "flex": 2,
+            "headerName": "Input Abilities",
+            "width": 200,
         },
-        {"field": "SAE Feature Activation"},
+        {
+            "field": "SAE Feature Activation",
+            "headerName": "SAE Feature Activation",
+            "width": 150,
+        },
         {
             "field": "Top Predicted Abilities",
-            "wrapText": True,
-            "autoHeight": True,
-            "flex": 2,
+            "headerName": "Top Predicted Abilities",
+            "width": 200,
         },
-        {"field": "Original Index", "maxWidth": 120},
+        {
+            "field": "Original Index",
+            "headerName": "Original Index",
+            "width": 120,
+        },
     ]
 
-    if selected_feature_id is None:
-        logger.info(
-            "TopExamples: selected_feature_id is None. No feature selected."
-        )
-        return [], default_col_defs, "Select an SAE feature."
-
-    if DASHBOARD_CONTEXT is None:
-        logger.warning("TopExamples: DASHBOARD_CONTEXT is None.")
-        return (
-            [],
-            default_col_defs,
-            "Dashboard context not available. Critical error.",
-        )
+    if not selected_feature_id:
+        return [], default_col_defs, "No feature selected."
 
     # Use database-backed context if available
-    if hasattr(DASHBOARD_CONTEXT, 'db_context'):
-        logger.info("TopExamples: Using database-backed context")
-        db_context = DASHBOARD_CONTEXT.db_context
-        
+    if hasattr(DASHBOARD_CONTEXT, "db"):
+        logger.info("TopExamples: Using DuckDB database")
+        db = DASHBOARD_CONTEXT.db
+
         try:
             # Get top examples from database
-            top_examples = db_context.get_top_examples(selected_feature_id, limit=20)
-            
-            if not top_examples:
-                return [], default_col_defs, "No top examples found for this feature."
-            
+            activations_df = db.get_feature_activations(
+                selected_feature_id, limit=20
+            )
+
+            if activations_df.empty:
+                return (
+                    [],
+                    default_col_defs,
+                    "No top examples found for this feature.",
+                )
+
             # Convert to grid format
             grid_data = []
-            for example in top_examples:
-                grid_data.append({
-                    "Rank": example['rank'],
-                    "Weapon": example['weapon_name'],
-                    "Input Abilities": example['input_abilities_str'],
-                    "SAE Feature Activation": f"{example['activation_value']:.4f}",
-                    "Top Predicted Abilities": example['top_predicted_abilities_str'],
-                    "Original Index": example['example_id'],
-                })
-            
+            for i, (_, row) in enumerate(activations_df.iterrows(), 1):
+                # Get weapon name from weapon_id
+                weapon_name = f"Weapon_{row['weapon_id']}"
+                if hasattr(DASHBOARD_CONTEXT, "inv_weapon_vocab"):
+                    weapon_name = DASHBOARD_CONTEXT.inv_weapon_vocab.get(
+                        str(row["weapon_id"]), weapon_name
+                    )
+
+                # Get ability tags
+                ability_tags = []
+                if "ability_tags" in row and row["ability_tags"] is not None:
+                    try:
+                        # Handle array format from DuckDB
+                        tags = row["ability_tags"]
+                        if isinstance(tags, str):
+                            # Handle string format (comma-separated)
+                            tags = [
+                                int(t.strip())
+                                for t in tags.strip("[]").split(",")
+                                if t.strip()
+                            ]
+                        elif isinstance(tags, list):
+                            # Already in list format
+                            tags = [int(t) for t in tags if t is not None]
+
+                        # Convert tags to names using vocabulary
+                        if hasattr(DASHBOARD_CONTEXT, "inv_vocab"):
+                            ability_tags = [
+                                DASHBOARD_CONTEXT.inv_vocab.get(
+                                    str(tag), f"Token_{tag}"
+                                )
+                                for tag in tags
+                            ]
+                        else:
+                            ability_tags = [f"Token_{tag}" for tag in tags]
+                    except Exception as e:
+                        logger.warning(f"Error processing ability tags: {e}")
+                        ability_tags = ["Error processing tags"]
+
+                grid_data.append(
+                    {
+                        "Rank": i,
+                        "Weapon": weapon_name,
+                        "Input Abilities": ", ".join(ability_tags),
+                        "SAE Feature Activation": f"{row['activation']:.4f}",
+                        "Top Predicted Abilities": "N/A",  # Not available in new format
+                        "Original Index": row["index"],
+                    }
+                )
+
             return grid_data, default_col_defs, ""
-            
+
         except Exception as e:
             logger.error(f"TopExamples: Database error: {e}")
             return [], default_col_defs, f"Database error: {str(e)}"
-    
-    # The block below using DASHBOARD_CONTEXT.all_sae_hidden_activations and 
-    # DASHBOARD_CONTEXT.analysis_df_records is the fallback/old method.
-    # This should be removed as per the refactoring task to rely solely on db_context
-    # when it's available (which it should be for the 'run' command).
-    
-    # If db_context was not available, the function would have already returned above.
-    # Thus, this part of the code should ideally not be reached if db_context is present.
-    # If precomputed_analytics were an alternative data source for other commands,
-    # that would need explicit handling based on args or context state.
-    # For the 'run' command, precomputed_analytics is None.
 
-    logger.warning("TopExamples: Reached fallback logic that relies on in-memory precomputed_analytics. This should not happen if db_context is used.")
-    return [], default_col_defs, "Error: Fallback to in-memory data not supported when db_context is primary."
+    logger.warning("TopExamples: No database context available.")
+    return [], default_col_defs, "Error: No database context available."

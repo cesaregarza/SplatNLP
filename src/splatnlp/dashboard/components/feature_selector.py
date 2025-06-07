@@ -15,8 +15,6 @@ feature_selector_layout = html.Div(
             clearable=False,
             searchable=True,
         ),
-        # Store to trigger dropdown refresh when labels change
-        dcc.Store(id="feature-labels-updated", data=0),
     ],
     className="mb-4",
 )
@@ -36,44 +34,91 @@ def populate_feature_options(
     current_value: Optional[int],
     search_query: Optional[str],
 ) -> Tuple[List[dict], Optional[int]]:
-    from splatnlp.dashboard.app import DASHBOARD_CONTEXT
     import logging
+
+    from splatnlp.dashboard.app import DASHBOARD_CONTEXT
+
     logger = logging.getLogger(__name__)
 
-    logger.debug(f"Dropdown refresh triggered, labels_updated_counter: {labels_updated_counter}")
+    logger.debug(
+        f"Dropdown refresh triggered, labels_updated_counter: {labels_updated_counter}"
+    )
 
     options: List[dict] = []
-    default_value: Optional[int] = None # Will be set to the first available feature or None
+    default_value: Optional[int] = (
+        None  # Will be set to the first available feature or None
+    )
 
-    if DASHBOARD_CONTEXT is None or not hasattr(DASHBOARD_CONTEXT, 'db_context') or DASHBOARD_CONTEXT.db_context is None:
-        logger.warning("FeatureSelector: Dashboard context or DB context not available.")
-        options = [{"label": "Error: DB context not loaded", "value": -1, "disabled": True}]
+    if (
+        DASHBOARD_CONTEXT is None
+        or not hasattr(DASHBOARD_CONTEXT, "db")
+        or DASHBOARD_CONTEXT.db is None
+    ):
+        logger.warning(
+            "FeatureSelector: Dashboard context or DB context not available."
+        )
+        options = [
+            {
+                "label": "Error: DB context not loaded",
+                "value": -1,
+                "disabled": True,
+            }
+        ]
         default_value = -1
     else:
-        db_context = DASHBOARD_CONTEXT.db_context
+        db = DASHBOARD_CONTEXT.db
         try:
-            feature_ids = db_context.get_all_feature_ids() # Fetch sorted list of feature IDs
+            feature_ids = (
+                db.get_all_feature_ids()
+            )  # Fetch sorted list of feature IDs
             if feature_ids:
-                feature_labels_manager = getattr(DASHBOARD_CONTEXT, "feature_labels_manager", None)
+                feature_labels_manager = getattr(
+                    DASHBOARD_CONTEXT, "feature_labels_manager", None
+                )
                 for feature_id in feature_ids:
                     if feature_labels_manager:
-                        label = feature_labels_manager.get_display_name(feature_id)
+                        label = feature_labels_manager.get_display_name(
+                            feature_id
+                        )
                     else:
                         label = f"Feature {feature_id}"
                     options.append({"label": label, "value": feature_id})
-                
-                if options: # If any valid features were found
-                    default_value = options[0]["value"] # Default to the first feature in the sorted list
-                else: # Should not happen if feature_ids is not empty, but as a safeguard
-                    options = [{"label": "No features found in DB", "value": -1, "disabled": True}]
+
+                if options:  # If any valid features were found
+                    default_value = options[0][
+                        "value"
+                    ]  # Default to the first feature in the sorted list
+                else:  # Should not happen if feature_ids is not empty, but as a safeguard
+                    options = [
+                        {
+                            "label": "No features found in DB",
+                            "value": -1,
+                            "disabled": True,
+                        }
+                    ]
                     default_value = -1
 
-            else: # No feature IDs returned from DB
-                options = [{"label": "No features available in DB", "value": -1, "disabled": True}]
+            else:  # No feature IDs returned from DB
+                options = [
+                    {
+                        "label": "No features available in DB",
+                        "value": -1,
+                        "disabled": True,
+                    }
+                ]
                 default_value = -1
         except Exception as e:
-            logger.error(f"FeatureSelector: Error fetching feature IDs from DB: {e}", exc_info=True)
-            options = [{"label": "Error loading features", "value": -1, "disabled": True}]
+            logger.error(
+                f"FeatureSelector: Error fetching feature IDs from DB: {e}",
+                exc_info=True,
+            )
+            options = [
+                {
+                    "label": "Error loading features",
+                    "value": -1,
+                    "disabled": True,
+                }
+            ]
             default_value = -1
 
     # Determine initial value: URL query param > current_value (if valid) > default_value from DB list
@@ -81,29 +126,50 @@ def populate_feature_options(
 
     if search_query:
         try:
-            query_params = dict(qc.split("=") for qc in search_query.lstrip("?").split("&") if "=" in qc)
+            query_params = dict(
+                qc.split("=")
+                for qc in search_query.lstrip("?").split("&")
+                if "=" in qc
+            )
             feature_val_str = query_params.get("feature")
             if feature_val_str is not None:
                 feature_val_from_url = int(feature_val_str)
-                if any(opt["value"] == feature_val_from_url for opt in options if not opt.get("disabled")):
+                if any(
+                    opt["value"] == feature_val_from_url
+                    for opt in options
+                    if not opt.get("disabled")
+                ):
                     final_value = feature_val_from_url
         except Exception as e:
-            logger.warning(f"FeatureSelector: Error parsing URL query for feature: {e}")
+            logger.warning(
+                f"FeatureSelector: Error parsing URL query for feature: {e}"
+            )
             # Keep final_value as default_value if URL parsing fails or feature is invalid
-    
+
     # If URL did not set a valid feature, and a current_value exists and is valid, keep it.
     # This handles cases where user has selected something, then page reloads for other reasons (e.g. label update).
-    elif current_value is not None and any(opt["value"] == current_value for opt in options if not opt.get("disabled")):
+    elif current_value is not None and any(
+        opt["value"] == current_value
+        for opt in options
+        if not opt.get("disabled")
+    ):
         final_value = current_value
-    
+
     # Ensure final_value is sensible if the list of options is empty or only contains disabled items.
     if not options or all(opt.get("disabled") for opt in options):
-        final_value = -1 # Or some other indicator of no valid selection
-        if not options: # If options list itself is empty, add a placeholder
-             options = [{"label": "No selectable features", "value": -1, "disabled": True}]
+        final_value = -1  # Or some other indicator of no valid selection
+        if not options:  # If options list itself is empty, add a placeholder
+            options = [
+                {
+                    "label": "No selectable features",
+                    "value": -1,
+                    "disabled": True,
+                }
+            ]
 
-
-    logger.debug(f"Populating feature dropdown. Options count: {len(options)}. Final value: {final_value}")
+    logger.debug(
+        f"Populating feature dropdown. Options count: {len(options)}. Final value: {final_value}"
+    )
     return options, final_value
 
 

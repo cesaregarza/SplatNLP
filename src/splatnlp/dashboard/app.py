@@ -1,9 +1,10 @@
+from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional
+from typing import Optional, Union
 
 import dash
 import dash_bootstrap_components as dbc
-from dash import Input, Output, State, dcc, html
+from dash import Input, Output, State, callback_context, dcc, html
 
 # Import components
 from splatnlp.dashboard.components import (
@@ -12,17 +13,39 @@ from splatnlp.dashboard.components import (
     feature_selector_layout,
     feature_summary_component,
     intervals_grid_component,
+    token_analysis,
     top_examples_component,
     top_logits_component,
 )
 from splatnlp.dashboard.components.feature_labels import (
+    FeatureLabelsManager,
     create_feature_label_editor,
     create_labeling_statistics,
 )
+from splatnlp.dashboard.fs_database import FSDatabase
 
 # THIS IS WHERE THE GLOBAL CONTEXT WILL BE STORED
 # It will be populated by the script that runs the dashboard (e.g., cli.py or run_dashboard.py)
 DASHBOARD_CONTEXT = SimpleNamespace()  # Initialize as a SimpleNamespace
+
+
+def init_filesystem_database(
+    meta_path: str = "/mnt/e/activations2/outputs/activations.metadata.joblib",
+    neurons_root: str = "/mnt/e/activations2/outputs/neuron_acts",
+) -> None:
+    """Initialize the filesystem-based database connection.
+
+    Args:
+        meta_path: Path to the metadata joblib file
+        neurons_root: Path to the root directory containing neuron_XXXX folders
+    """
+    DASHBOARD_CONTEXT.db = FSDatabase(meta_path, neurons_root)
+    DASHBOARD_CONTEXT.feature_ids = DASHBOARD_CONTEXT.db.get_all_feature_ids()
+
+    # Make the original analysis_df easily accessible for ancillary logic
+    DASHBOARD_CONTEXT.analysis_df = DASHBOARD_CONTEXT.db.analysis_df
+    DASHBOARD_CONTEXT.metadata = DASHBOARD_CONTEXT.db.metadata
+
 
 app = dash.Dash(
     __name__,
@@ -38,6 +61,7 @@ app.layout = dbc.Container(
     [
         dcc.Location(id="url", refresh=False),
         dcc.Store(id="page-load-trigger", storage_type="memory"),
+        dcc.Store(id="feature-labels-updated", storage_type="memory", data=0),
         dbc.Row(
             [
                 dbc.Col(
@@ -74,6 +98,10 @@ app.layout = dbc.Container(
                                         top_logits_component,
                                         correlations_component,
                                     ],
+                                ),
+                                dbc.Tab(
+                                    label="Token Analysis",
+                                    children=token_analysis.create_token_analysis_tab(),
                                 ),
                             ]
                         )
@@ -219,6 +247,85 @@ def update_statistics_on_load(_):
             DASHBOARD_CONTEXT.feature_labels_manager
         )
     return html.Div()
+
+
+# Add callbacks for new token analysis components
+@app.callback(
+    Output("single-token-examples", "children"),
+    Input("feature-dropdown", "value"),
+)
+def update_single_token_examples(feature_id: Optional[int]):
+    """Update single token examples when feature selection changes."""
+    if feature_id is None:
+        return "Select a feature to see single token examples."
+
+    if DASHBOARD_CONTEXT is None or not hasattr(DASHBOARD_CONTEXT, "db"):
+        return "Database context not available."
+
+    examples = DASHBOARD_CONTEXT.db.get_single_token_examples(feature_id)
+    if examples.empty:
+        return "No single token examples found."
+
+    return dbc.Table.from_dataframe(
+        examples,
+        striped=True,
+        bordered=True,
+        hover=True,
+        size="sm",
+        className="mt-3",
+    )
+
+
+@app.callback(
+    Output("token-pair-examples", "children"),
+    Input("feature-dropdown", "value"),
+)
+def update_token_pair_examples(feature_id: Optional[int]):
+    """Update token pair examples when feature selection changes."""
+    if feature_id is None:
+        return "Select a feature to see token pair examples."
+
+    if DASHBOARD_CONTEXT is None or not hasattr(DASHBOARD_CONTEXT, "db"):
+        return "Database context not available."
+
+    examples = DASHBOARD_CONTEXT.db.get_top_examples(feature_id)
+    if examples.empty:
+        return "No token pair examples found."
+
+    return dbc.Table.from_dataframe(
+        examples,
+        striped=True,
+        bordered=True,
+        hover=True,
+        size="sm",
+        className="mt-3",
+    )
+
+
+@app.callback(
+    Output("token-triple-examples", "children"),
+    Input("feature-dropdown", "value"),
+)
+def update_token_triple_examples(feature_id: Optional[int]):
+    """Update token triple examples when feature selection changes."""
+    if feature_id is None:
+        return "Select a feature to see token triple examples."
+
+    if DASHBOARD_CONTEXT is None or not hasattr(DASHBOARD_CONTEXT, "db"):
+        return "Database context not available."
+
+    examples = DASHBOARD_CONTEXT.db.get_triple_examples(feature_id)
+    if examples.empty:
+        return "No token triple examples found."
+
+    return dbc.Table.from_dataframe(
+        examples,
+        striped=True,
+        bordered=True,
+        hover=True,
+        size="sm",
+        className="mt-3",
+    )
 
 
 if __name__ == "__main__":
