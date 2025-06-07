@@ -108,53 +108,25 @@ def load_dashboard_data(args_ns: argparse.Namespace):
     precomputed_analytics = None  # Will remain None for 'run' command
     db_context = None
 
-    # Handle database initialization based on type
+    # Handle database initialization
     if args_ns.main_command == "run":
-        if args_ns.use_filesystem:
-            # Filesystem database case
-            logger.info(
-                f"Initializing filesystem database with meta_path={args_ns.meta_path} and neurons_root={args_ns.neurons_root}"
+        # Filesystem database case
+        logger.info(
+            f"Initializing filesystem database with meta_path={args_ns.meta_path} and neurons_root={args_ns.neurons_root}"
+        )
+        try:
+            from splatnlp.dashboard.fs_database import FSDatabase
+
+            db_context = FSDatabase(args_ns.meta_path, args_ns.neurons_root)
+            logger.info("Filesystem database initialized successfully")
+        except Exception as e:
+            logger.critical(
+                f"Failed to initialize filesystem database: {e}",
+                exc_info=True,
             )
-            try:
-                from splatnlp.dashboard.fs_database import FSDatabase
-
-                db_context = FSDatabase(args_ns.meta_path, args_ns.neurons_root)
-                logger.info("Filesystem database initialized successfully")
-            except Exception as e:
-                logger.critical(
-                    f"Failed to initialize filesystem database: {e}",
-                    exc_info=True,
-                )
-                raise ConnectionError(
-                    f"Critical: Filesystem database could not be initialized: {e}"
-                ) from e
-        else:
-            # DuckDB case
-            if not args_ns.database_path:
-                logger.critical(
-                    "CRITICAL: database_path not provided for 'run' command, but it is required."
-                )
-                raise ValueError(
-                    "database_path is required for the 'run' command but was not provided to load_dashboard_data."
-                )
-
-            logger.info(
-                f"Attempting to load DuckDB database from {args_ns.database_path}"
-            )
-            try:
-                from splatnlp.dashboard.database_manager import DuckDBDatabase
-
-                db_context = DuckDBDatabase(args_ns.database_path)
-                db_info = db_context.get_database_info()
-                logger.info(f"DuckDB database loaded successfully: {db_info}")
-            except Exception as e:
-                logger.critical(
-                    f"Failed to load DuckDB database from required path {args_ns.database_path}: {e}",
-                    exc_info=True,
-                )
-                raise ConnectionError(
-                    f"Critical: DuckDB database at {args_ns.database_path} could not be loaded."
-                ) from e
+            raise ConnectionError(
+                f"Critical: Filesystem database could not be initialized: {e}"
+            ) from e
 
     # Fallback to precomputed_analytics for commands other than 'run' if they support it
     if (
@@ -218,73 +190,61 @@ def load_dashboard_data(args_ns: argparse.Namespace):
 
 
 def setup_run_parser(subparsers):
-    run_parser = subparsers.add_parser("run", help="Run the dashboard server.")
-
-    # Database type selection
-    db_group = run_parser.add_mutually_exclusive_group(required=True)
-    db_group.add_argument(
-        "--database-path",
-        type=str,
-        help="Path to dashboard database (DuckDB file)",
+    """Set up parser for the 'run' command."""
+    parser = subparsers.add_parser(
+        "run",
+        help="Run the dashboard server",
+        description="Run the dashboard server with the filesystem backend.",
     )
-    db_group.add_argument(
-        "--use-filesystem",
-        action="store_true",
-        help="Use filesystem-based database instead of DuckDB",
-    )
-
-    # Filesystem database specific args
-    run_parser.add_argument(
+    parser.add_argument(
         "--meta-path",
         type=str,
-        help="Path to metadata joblib file (required if --use-filesystem)",
+        required=True,
+        help="Path to metadata joblib file",
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--neurons-root",
         type=str,
-        help="Path to root directory containing neuron_XXXX folders (required if --use-filesystem)",
+        required=True,
+        help="Path to root directory containing neuron_XXXX folders",
     )
-
-    run_parser.add_argument(
+    parser.add_argument(
         "--vocab-path",
         type=str,
         required=True,
         help="Path to vocabulary JSON file",
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--weapon-vocab-path",
         type=str,
         required=True,
         help="Path to weapon vocabulary JSON file",
     )
-
-    run_parser.add_argument(
+    parser.add_argument(
         "--enable-dynamic-tooltips",
         action="store_true",
         help="Enable dynamic tooltip computation (requires model checkpoints)",
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--primary-model-checkpoint",
         type=str,
         help="Path to primary model checkpoint (required if --enable-dynamic-tooltips)",
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--sae-model-checkpoint",
         type=str,
         help="Path to SAE model checkpoint (required if --enable-dynamic-tooltips)",
     )
-
-    run_parser.add_argument("--primary-embedding-dim", type=int, default=32)
-    run_parser.add_argument("--primary-hidden-dim", type=int, default=512)
-    run_parser.add_argument("--primary-num-layers", type=int, default=3)
-    run_parser.add_argument("--primary-num-heads", type=int, default=8)
-    run_parser.add_argument("--primary-num-inducing", type=int, default=32)
-    run_parser.add_argument("--sae-expansion-factor", type=float, default=4.0)
-
-    run_parser.add_argument("--host", type=str, default="127.0.0.1")
-    run_parser.add_argument("--port", type=int, default=8050)
-    run_parser.add_argument("--debug", action="store_true")
-    run_parser.set_defaults(func=run_dashboard_server)
+    parser.add_argument("--primary-embedding-dim", type=int, default=32)
+    parser.add_argument("--primary-hidden-dim", type=int, default=512)
+    parser.add_argument("--primary-num-layers", type=int, default=3)
+    parser.add_argument("--primary-num-heads", type=int, default=8)
+    parser.add_argument("--primary-num-inducing", type=int, default=32)
+    parser.add_argument("--sae-expansion-factor", type=float, default=4.0)
+    parser.add_argument("--host", type=str, default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8050)
+    parser.add_argument("--debug", action="store_true")
+    parser.set_defaults(func=run_dashboard_server)
 
 
 def run_dashboard_server(args):
@@ -292,14 +252,6 @@ def run_dashboard_server(args):
         if not args.primary_model_checkpoint or not args.sae_model_checkpoint:
             logger.error(
                 "--primary-model-checkpoint and --sae-model-checkpoint are required when --enable-dynamic-tooltips is set"
-            )
-            sys.exit(1)
-
-    # Validate filesystem database args if using filesystem
-    if args.use_filesystem:
-        if not args.meta_path or not args.neurons_root:
-            logger.error(
-                "--meta-path and --neurons-root are required when --use-filesystem is set"
             )
             sys.exit(1)
 
@@ -318,16 +270,6 @@ def run_dashboard_server(args):
         dashboard_data_obj.feature_labels_manager
     )
     app_context_ref.device = dashboard_data_obj.device
-
-    # Initialize database based on type
-    if args.use_filesystem:
-        from splatnlp.dashboard.app import init_filesystem_database
-
-        init_filesystem_database(args.meta_path, args.neurons_root)
-    else:
-        from splatnlp.dashboard.app import init_duckdb_database
-
-        init_duckdb_database(args.database_path)
 
     logger.info("Starting Dash dashboard server...")
     app.run(host=args.host, port=args.port, debug=args.debug)

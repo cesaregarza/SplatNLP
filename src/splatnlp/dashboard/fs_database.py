@@ -1,8 +1,10 @@
+#!/usr/bin/env python3
 """
-Filesystem-backed data access for the SAE dashboard.
+Filesystem-based database manager for dashboard data.
 
-The public methods deliberately mirror those of DuckDBDatabase so that none
-of the UI callbacks have to change.
+This module provides a filesystem-based solution to replace memory-intensive 
+data loading patterns in the dashboard. It stores activations, metadata,
+and precomputed analytics in an efficient queryable format.
 """
 
 from __future__ import annotations
@@ -131,7 +133,7 @@ class FSDatabase:
     def get_all_feature_ids(self) -> list[int]:
         return sorted(self.neuron_dirs.keys())
 
-    # Histogram – identical shape to the DuckDB version
+    # Histogram
     def get_feature_histogram(self, nid: int) -> pl.DataFrame:
         return self._histogram_for(nid)
 

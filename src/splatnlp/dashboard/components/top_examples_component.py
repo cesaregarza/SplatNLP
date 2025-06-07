@@ -1,4 +1,6 @@
+import json
 import logging
+from typing import Optional
 
 import dash_ag_grid as dag
 import numpy as np
@@ -122,79 +124,100 @@ def update_top_examples_grid(selected_feature_id):
 
     # Use database-backed context if available
     if hasattr(DASHBOARD_CONTEXT, "db"):
-        logger.info("TopExamples: Using DuckDB database")
-        db = DASHBOARD_CONTEXT.db
+        logger.info("TopExamples: Using filesystem database")
+        examples = DASHBOARD_CONTEXT.db.get_top_examples(selected_feature_id)
+        if not examples:
+            return [], default_col_defs, "No examples found for this feature."
 
-        try:
-            # Get top examples from database
-            activations_df = db.get_feature_activations(
-                selected_feature_id, limit=20
+        # Convert to grid format
+        grid_data = []
+        for i, ex in enumerate(examples, 1):
+            # Handle array format from filesystem database
+            if isinstance(ex.get("ability_input_tokens"), str):
+                try:
+                    ex["ability_input_tokens"] = json.loads(
+                        ex["ability_input_tokens"]
+                    )
+                except json.JSONDecodeError:
+                    ex["ability_input_tokens"] = []
+
+            grid_data.append(
+                {
+                    "Rank": i,
+                    "Weapon": ex.get("weapon_name", "N/A"),
+                    "Input Abilities": ", ".join(
+                        ex.get("ability_input_tokens", [])
+                    )
+                    or "N/A",
+                    "SAE Feature Activation": f"{ex.get('activation_value', 0):.4f}",
+                    "Top Predicted Abilities": ex.get(
+                        "top_predicted_abilities_str", "N/A"
+                    ),
+                    "Original Index": ex["index"],
+                }
             )
 
-            if activations_df.empty:
-                return (
-                    [],
-                    default_col_defs,
-                    "No top examples found for this feature.",
-                )
-
-            # Convert to grid format
-            grid_data = []
-            for i, (_, row) in enumerate(activations_df.iterrows(), 1):
-                # Get weapon name from weapon_id
-                weapon_name = f"Weapon_{row['weapon_id']}"
-                if hasattr(DASHBOARD_CONTEXT, "inv_weapon_vocab"):
-                    weapon_name = DASHBOARD_CONTEXT.inv_weapon_vocab.get(
-                        str(row["weapon_id"]), weapon_name
-                    )
-
-                # Get ability tags
-                ability_tags = []
-                if "ability_tags" in row and row["ability_tags"] is not None:
-                    try:
-                        # Handle array format from DuckDB
-                        tags = row["ability_tags"]
-                        if isinstance(tags, str):
-                            # Handle string format (comma-separated)
-                            tags = [
-                                int(t.strip())
-                                for t in tags.strip("[]").split(",")
-                                if t.strip()
-                            ]
-                        elif isinstance(tags, list):
-                            # Already in list format
-                            tags = [int(t) for t in tags if t is not None]
-
-                        # Convert tags to names using vocabulary
-                        if hasattr(DASHBOARD_CONTEXT, "inv_vocab"):
-                            ability_tags = [
-                                DASHBOARD_CONTEXT.inv_vocab.get(
-                                    str(tag), f"Token_{tag}"
-                                )
-                                for tag in tags
-                            ]
-                        else:
-                            ability_tags = [f"Token_{tag}" for tag in tags]
-                    except Exception as e:
-                        logger.warning(f"Error processing ability tags: {e}")
-                        ability_tags = ["Error processing tags"]
-
-                grid_data.append(
-                    {
-                        "Rank": i,
-                        "Weapon": weapon_name,
-                        "Input Abilities": ", ".join(ability_tags),
-                        "SAE Feature Activation": f"{row['activation']:.4f}",
-                        "Top Predicted Abilities": "N/A",  # Not available in new format
-                        "Original Index": row["index"],
-                    }
-                )
-
-            return grid_data, default_col_defs, ""
-
-        except Exception as e:
-            logger.error(f"TopExamples: Database error: {e}")
-            return [], default_col_defs, f"Database error: {str(e)}"
+        return grid_data, default_col_defs, ""
 
     logger.warning("TopExamples: No database context available.")
     return [], default_col_defs, "Error: No database context available."
+
+
+def update_top_examples(feature_id: Optional[int]):
+    """Update top examples when feature selection changes."""
+    if feature_id is None or feature_id == -1:
+        return html.Div("Select a feature to view top examples")
+
+    try:
+        logger.info("TopExamples: Using filesystem database")
+        examples = DASHBOARD_CONTEXT.db.get_top_examples(feature_id)
+        if not examples:
+            return html.Div("No examples found for this feature")
+
+        # Create table rows
+        rows = []
+        for ex in examples:
+            # Handle array format from filesystem database
+            if isinstance(ex.get("ability_input_tokens"), str):
+                try:
+                    ex["ability_input_tokens"] = json.loads(
+                        ex["ability_input_tokens"]
+                    )
+                except json.JSONDecodeError:
+                    ex["ability_input_tokens"] = []
+
+            rows.append(
+                html.Tr(
+                    [
+                        html.Td(ex.get("weapon_name", "N/A")),
+                        html.Td(
+                            ", ".join(ex.get("ability_input_tokens", []))
+                            or "N/A"
+                        ),
+                        html.Td(ex.get("input_abilities_str", "N/A")),
+                        html.Td(ex.get("top_predicted_abilities_str", "N/A")),
+                        html.Td(f"{ex.get('activation_value', 0):.4f}"),
+                    ]
+                )
+            )
+
+        return html.Table(
+            [
+                html.Thead(
+                    html.Tr(
+                        [
+                            html.Th("Weapon"),
+                            html.Th("Input Tokens"),
+                            html.Th("Input Abilities"),
+                            html.Th("Predicted Abilities"),
+                            html.Th("Activation"),
+                        ]
+                    )
+                ),
+                html.Tbody(rows),
+            ],
+            className="table table-striped",
+        )
+    except Exception as e:
+        logger.error(f"Error updating top examples: {e}", exc_info=True)
+        return html.Div(f"Error loading examples: {str(e)}")

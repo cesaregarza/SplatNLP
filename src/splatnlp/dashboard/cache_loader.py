@@ -1,14 +1,15 @@
 """Helper functions for loading activation caches in different formats."""
 
+import json
 import logging
 import pickle
 from pathlib import Path
 from typing import Any, Dict
 
-import duckdb
 import h5py
 import joblib
 import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -122,37 +123,67 @@ class H5LazyArray:
             return f["activations"][:]
 
 
-def load_duckdb_cache(db_path: Path) -> Dict[str, Any]:
-    """Load activation cache from DuckDB database.
+def load_filesystem_cache(neurons_root: Path) -> Dict[str, Any]:
+    """Load activation cache from filesystem.
 
     Args:
-        db_path: Path to the DuckDB database file
+        neurons_root: Path to the root directory containing neuron folders
 
     Returns:
-        Dictionary with keys:
-        - activations: DataFrame with activation data
-        - histogram: DataFrame with histogram data
-        - stats: DataFrame with statistics
+        Dictionary containing activation data
     """
-    logger.info(f"Loading DuckDB cache from {db_path}")
+    logger.info(f"Loading filesystem cache from {neurons_root}")
 
-    # Connect to database
-    conn = duckdb.connect(str(db_path))
+    cache = {
+        "activations": {},
+        "metadata": {},
+        "feature_stats": {},
+        "feature_correlations": {},
+    }
 
-    try:
-        # Load data from each table
-        activations = conn.execute("SELECT * FROM activations").df()
-        histogram = conn.execute("SELECT * FROM histogram").df()
-        stats = conn.execute("SELECT * FROM stats").df()
+    # Load each neuron's data
+    for neuron_dir in neurons_root.glob("neuron_*"):
+        if not neuron_dir.is_dir():
+            continue
 
-        logger.info(
-            f"Loaded {len(activations)} activations, {len(histogram)} histogram bins, {len(stats)} stats"
-        )
+        neuron_id = int(neuron_dir.name.split("_")[1])
 
-        return {
-            "activations": activations,
-            "histogram": histogram,
-            "stats": stats,
-        }
-    finally:
-        conn.close()
+        # Load activations
+        activations_file = neuron_dir / "activations.npy"
+        if activations_file.exists():
+            cache["activations"][neuron_id] = np.load(str(activations_file))
+
+        # Load metadata
+        metadata_file = neuron_dir / "metadata.json"
+        if metadata_file.exists():
+            with open(metadata_file) as f:
+                cache["metadata"][neuron_id] = json.load(f)
+
+        # Load feature stats
+        stats_file = neuron_dir / "feature_stats.json"
+        if stats_file.exists():
+            with open(stats_file) as f:
+                cache["feature_stats"][neuron_id] = json.load(f)
+
+        # Load correlations
+        corr_file = neuron_dir / "correlations.json"
+        if corr_file.exists():
+            with open(corr_file) as f:
+                cache["feature_correlations"][neuron_id] = json.load(f)
+
+    return cache
+
+
+def load_cache(cache_path: Path) -> Dict[str, Any]:
+    """Load activation cache from the specified path.
+
+    Args:
+        cache_path: Path to the cache file or directory
+
+    Returns:
+        Dictionary containing activation data
+    """
+    if cache_path.is_dir():
+        return load_filesystem_cache(cache_path)
+    else:
+        raise ValueError(f"Unsupported cache path: {cache_path}")
