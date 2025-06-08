@@ -148,7 +148,10 @@ def update_top_examples_grid(selected_feature_id):
 
                 # Get ability tags
                 ability_tags = []
-                if "ability_input_tokens" in example and example["ability_input_tokens"] is not None:
+                if (
+                    "ability_input_tokens" in example
+                    and example["ability_input_tokens"] is not None
+                ):
                     try:
                         # Convert tags to names using vocabulary
                         if hasattr(DASHBOARD_CONTEXT, "inv_vocab"):
@@ -159,7 +162,10 @@ def update_top_examples_grid(selected_feature_id):
                                 for tag in example["ability_input_tokens"]
                             ]
                         else:
-                            ability_tags = [f"Token_{tag}" for tag in example["ability_input_tokens"]]
+                            ability_tags = [
+                                f"Token_{tag}"
+                                for tag in example["ability_input_tokens"]
+                            ]
                     except Exception as e:
                         logger.warning(f"Error processing ability tags: {e}")
                         ability_tags = ["Error processing tags"]
@@ -170,7 +176,9 @@ def update_top_examples_grid(selected_feature_id):
                         "Weapon": weapon_name,
                         "Input Abilities": ", ".join(ability_tags),
                         "SAE Feature Activation": f"{example.get('activation_value', 0):.4f}",
-                        "Top Predicted Abilities": example.get("top_predicted_abilities_str", "N/A"),
+                        "Top Predicted Abilities": example.get(
+                            "top_predicted_abilities_str", "N/A"
+                        ),
                         "Original Index": example.get("example_id", "N/A"),
                     }
                 )
