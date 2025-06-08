@@ -1,15 +1,15 @@
+import re
 from typing import Any
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import torch
-from dash import Input, Output, State, callback, dcc, html
+from dash import Input, Output, callback, dcc, html
 
 from splatnlp.model.models import SetCompletionModel
 
-# App context will be monkey-patched by the run script
-# DASHBOARD_CONTEXT = None # This will be set by run_dashboard.py or cli.py
+HIGH_AP_PATTERN = re.compile(r"_(21|29|38|51|57)$")
+SPECIAL_TOKENS = {"<PAD>", "<NULL>"}
 
 top_logits_component = html.Div(
     id="top-logits-content",
@@ -17,11 +17,50 @@ top_logits_component = html.Div(
         html.H4(
             "Top Output Logits Influenced by SAE Feature", className="mb-3"
         ),
-        dcc.Loading(
-            id="loading-top-logits",
-            type="default",
-            children=dcc.Graph(id="top-logits-graph"),
-            className="mb-2",
+        html.Div(
+            [
+                html.Div(
+                    [
+                        html.H5("Positive Influences", className="mb-2"),
+                        dcc.Loading(
+                            id="loading-top-positive-logits",
+                            type="default",
+                            children=dcc.Graph(id="top-positive-logits-graph"),
+                            className="mb-2",
+                        ),
+                    ],
+                    className="col-6",
+                ),
+                html.Div(
+                    [
+                        html.H5("Negative Influences", className="mb-2"),
+                        dcc.RadioItems(
+                            id="filter-tokens-radio",
+                            options=[
+                                {"label": "Show All Tokens", "value": "all"},
+                                {
+                                    "label": "Filter High AP Tokens",
+                                    "value": "filter",
+                                },
+                            ],
+                            value="all",
+                            labelStyle={
+                                "display": "inline-block",
+                                "margin-right": "10px",
+                            },
+                            className="mb-2",
+                        ),
+                        dcc.Loading(
+                            id="loading-top-negative-logits",
+                            type="default",
+                            children=dcc.Graph(id="top-negative-logits-graph"),
+                            className="mb-2",
+                        ),
+                    ],
+                    className="col-6",
+                ),
+            ],
+            className="row",
         ),
         html.P(id="top-logits-error-message", style={"color": "red"}),
     ],
@@ -46,16 +85,13 @@ def compute_logit_influences(
     Returns:
         Dictionary with 'positive' and 'negative' influence lists
     """
-    # Get the output layer weights
-    output_weights = (
-        model.output_layer.weight.data.cpu().numpy()
-    )  # Shape: (140, 512)
+    output_weights = model.output_layer.weight.data.cpu().numpy()
 
-    # Get top positive and negative influences
-    top_pos_indices = np.argsort(output_weights[:, feature_id])[-limit:][::-1]
-    top_neg_indices = np.argsort(output_weights[:, feature_id])[:limit]
+    top_pos_indices = np.argsort(output_weights[:, feature_id])[-limit * 3 :][
+        ::-1
+    ]
+    top_neg_indices = np.argsort(output_weights[:, feature_id])[: limit * 10]
 
-    # Convert to dictionaries
     positive = [
         {
             "token_id": int(idx),
@@ -63,6 +99,7 @@ def compute_logit_influences(
             "influence_value": float(output_weights[idx, feature_id]),
         }
         for idx in top_pos_indices
+        if inv_vocab.get(int(idx), f"Token_{idx}") not in SPECIAL_TOKENS
     ]
 
     negative = [
@@ -72,6 +109,7 @@ def compute_logit_influences(
             "influence_value": float(output_weights[idx, feature_id]),
         }
         for idx in top_neg_indices
+        if inv_vocab.get(int(idx), f"Token_{idx}") not in SPECIAL_TOKENS
     ]
 
     return {"positive": positive, "negative": negative}
@@ -79,19 +117,24 @@ def compute_logit_influences(
 
 @callback(
     [
-        Output("top-logits-graph", "figure"),
+        Output("top-positive-logits-graph", "figure"),
+        Output("top-negative-logits-graph", "figure"),
         Output("top-logits-error-message", "children"),
     ],
-    [Input("feature-dropdown", "value")],
+    [
+        Input("feature-dropdown", "value"),
+        Input("filter-tokens-radio", "value"),
+    ],
 )
 def update_top_logits_graph(
     selected_feature_id: int | None,
-) -> tuple[dict[str, Any], str]:
-    """Update the top logits graph when a feature is selected."""
+    filter_type: str,
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """Update the top logits graphs when a feature is selected."""
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
     if selected_feature_id is None:
-        return {}, "No feature selected."
+        return {}, {}, "No feature selected."
 
     if (
         not hasattr(DASHBOARD_CONTEXT, "primary_model")
@@ -99,45 +142,71 @@ def update_top_logits_graph(
     ):
         return (
             {},
+            {},
             "Error: Model not available. Dynamic tooltips must be enabled.",
         )
 
     if not hasattr(DASHBOARD_CONTEXT, "inv_vocab"):
-        return {}, "Error: Vocabulary not available."
+        return {}, {}, "Error: Vocabulary not available."
 
     try:
-        # Compute logit influences using model weights
         influences = compute_logit_influences(
             selected_feature_id,
             DASHBOARD_CONTEXT.primary_model,
             DASHBOARD_CONTEXT.inv_vocab,
+            limit=10,
         )
 
-        # Prepare data for plotting
         positive_df = pd.DataFrame(influences["positive"])
         negative_df = pd.DataFrame(influences["negative"])
 
-        # Create figure
-        fig = px.bar(
-            pd.concat(
-                [
-                    positive_df.assign(direction="Positive"),
-                    negative_df.assign(direction="Negative"),
-                ]
-            ),
+        if filter_type == "filter":
+            positive_df = positive_df[
+                ~positive_df["token_name"].str.contains(
+                    HIGH_AP_PATTERN, regex=True
+                )
+            ]
+            negative_df = negative_df[
+                ~negative_df["token_name"].str.contains(
+                    HIGH_AP_PATTERN, regex=True
+                )
+            ]
+
+        positive_df = positive_df.head(10)
+        negative_df = negative_df.head(10)
+
+        positive_fig = px.bar(
+            positive_df,
             x="token_name",
             y="influence_value",
-            color="direction",
-            barmode="group",
-            title=f"Top Logit Influences for Feature {selected_feature_id}",
+            title=f"Top Positive Logit Influences for Feature {selected_feature_id}",
             labels={
                 "token_name": "Token",
                 "influence_value": "Influence Value",
-                "direction": "Direction",
             },
+            color_discrete_sequence=["#2ecc71"],
         )
 
-        return fig, ""
+        negative_fig = px.bar(
+            negative_df,
+            x="token_name",
+            y="influence_value",
+            title=f"Top Negative Logit Influences for Feature {selected_feature_id}",
+            labels={
+                "token_name": "Token",
+                "influence_value": "Influence Value",
+            },
+            color_discrete_sequence=["#e74c3c"],
+        )
+
+        for fig in [positive_fig, negative_fig]:
+            fig.update_layout(
+                showlegend=False,
+                margin=dict(l=20, r=20, t=40, b=20),
+                height=400,
+            )
+
+        return positive_fig, negative_fig, ""
 
     except Exception as e:
-        return {}, f"Error computing logit influences: {str(e)}"
+        return {}, {}, f"Error computing logit influences: {str(e)}"
