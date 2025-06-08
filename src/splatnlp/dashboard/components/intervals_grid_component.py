@@ -18,7 +18,6 @@ from splatnlp.dashboard.utils.converters import (
     AbilityTagParser,
     generate_weapon_name_mapping,
 )
-from splatnlp.dashboard.utils.debug import profile_operation
 from splatnlp.dashboard.utils.tfidf import compute_tf_idf
 from splatnlp.preprocessing.transform.mappings import generate_maps
 
@@ -402,12 +401,11 @@ class IntervalsGridRenderer:
         self.analyzer = TFIDFAnalyzer(
             self.context.inv_vocab,
             self.context.inv_weapon_vocab,
-            generate_maps()[1],  # id_to_name mapping
+            generate_maps()[1],
             self.db.idf,
         )
         self._cache: Optional[FeatureAnalysisCache] = None
 
-    @profile_operation("render_intervals_grid")
     def render(self, selected_feature_id: int) -> tuple[list[Any], str]:
         """Render the intervals grid for the selected feature."""
         try:
@@ -442,7 +440,6 @@ class IntervalsGridRenderer:
             logger.error(f"Error rendering intervals grid: {e}", exc_info=True)
             return [], f"Error rendering intervals grid: {str(e)}"
 
-    @profile_operation("load_feature_data")
     def _load_feature_data(self, feature_id: int) -> None:
         """Load and cache all data for a feature."""
         # Get data
@@ -469,7 +466,6 @@ class IntervalsGridRenderer:
         # Cache weapon names
         self._cache_weapon_names()
 
-    @profile_operation("perform_top_bins_analysis")
     def _perform_top_bins_analysis(self) -> None:
         """Perform TF-IDF analysis on samples from top bins."""
         # Get bounds of top bins
@@ -504,7 +500,6 @@ class IntervalsGridRenderer:
             self._cache.feature_id,
         )
 
-    @profile_operation("cache_weapon_names")
     def _cache_weapon_names(self) -> None:
         """Cache weapon ID to name mappings for all weapons in the data."""
         # Get unique weapon IDs and create mapping in one operation
@@ -527,7 +522,6 @@ class IntervalsGridRenderer:
             )
         )
 
-    @profile_operation("build_all_bin_sections")
     def _build_all_bin_sections(self) -> list[html.Div]:
         """Build sections for all histogram bins."""
         sections = []
@@ -664,7 +658,6 @@ intervals_grid_component = html.Div(
     ],
     Input("feature-dropdown", "value"),
 )
-@profile_operation("render_intervals_grid_callback")
 def render_intervals_grid(selected_feature_id: int | None):
     """Callback to render the intervals grid based on selected feature."""
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
