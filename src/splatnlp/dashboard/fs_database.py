@@ -140,9 +140,10 @@ class FSDatabase:
         self, nid: int, limit: int | None = None
     ) -> pl.DataFrame:
         df = self._load_single_neuron_df(nid)
+        df = df.sort("activation", descending=True)
         if limit:
             df = df.head(limit)
-        return df.sort("activation", descending=True)
+        return df
 
     def get_feature_stats(
         self, nid: int, with_zeros: bool = False

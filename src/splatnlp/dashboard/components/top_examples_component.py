@@ -5,6 +5,9 @@ import numpy as np
 import pandas as pd
 from dash import Input, Output, callback, dcc, html
 
+from splatnlp.dashboard.fs_database import FSDatabase
+from splatnlp.dashboard.utils.converters import generate_weapon_name_mapping
+
 logger = logging.getLogger(__name__)
 
 
@@ -117,77 +120,61 @@ def update_top_examples_grid(selected_feature_id):
         },
     ]
 
-    if not selected_feature_id:
+    if selected_feature_id is None:
         return [], default_col_defs, "No feature selected."
 
-    # Use database-backed context if available
-    if hasattr(DASHBOARD_CONTEXT, "db"):
-        logger.info("TopExamples: Using database")
-        db = DASHBOARD_CONTEXT.db
+    logger.info("TopExamples: Using database")
+    db: FSDatabase = DASHBOARD_CONTEXT.db
 
-        try:
-            # Get top examples from database
-            top_examples = db.get_top_examples(selected_feature_id, limit=20)
+    # Generate weapon name mapping
+    weapon_name_mapping = generate_weapon_name_mapping(
+        DASHBOARD_CONTEXT.inv_weapon_vocab
+    )
 
-            if not top_examples:
-                return (
-                    [],
-                    default_col_defs,
-                    "No top examples found for this feature.",
-                )
+    # Get top examples from database
+    top_examples = db.get_feature_activations(selected_feature_id, limit=20)
 
-            # Convert to grid format
-            grid_data = []
-            for i, example in enumerate(top_examples, 1):
-                # Get weapon name from weapon_id
-                weapon_name = f"Weapon_{example.get('weapon_id', 'unknown')}"
-                if hasattr(DASHBOARD_CONTEXT, "inv_weapon_vocab"):
-                    weapon_name = DASHBOARD_CONTEXT.inv_weapon_vocab.get(
-                        str(example.get("weapon_id")), weapon_name
-                    )
+    if len(top_examples) == 0:
+        return (
+            [],
+            default_col_defs,
+            "No top examples found for this feature.",
+        )
 
-                # Get ability tags
-                ability_tags = []
-                if (
-                    "ability_input_tokens" in example
-                    and example["ability_input_tokens"] is not None
-                ):
-                    try:
-                        # Convert tags to names using vocabulary
-                        if hasattr(DASHBOARD_CONTEXT, "inv_vocab"):
-                            ability_tags = [
-                                DASHBOARD_CONTEXT.inv_vocab.get(
-                                    str(tag), f"Token_{tag}"
-                                )
-                                for tag in example["ability_input_tokens"]
-                            ]
-                        else:
-                            ability_tags = [
-                                f"Token_{tag}"
-                                for tag in example["ability_input_tokens"]
-                            ]
-                    except Exception as e:
-                        logger.warning(f"Error processing ability tags: {e}")
-                        ability_tags = ["Error processing tags"]
+    # Convert to grid format
+    grid_data = []
+    for i, example in enumerate(top_examples.to_dicts(), 1):
+        # Get weapon name from weapon_id
+        weapon_name = weapon_name_mapping.get(
+            int(example.get("weapon_id")),
+            f"Weapon_{example.get('weapon_id', 'unknown')}",
+        )
 
-                grid_data.append(
-                    {
-                        "Rank": i,
-                        "Weapon": weapon_name,
-                        "Input Abilities": ", ".join(ability_tags),
-                        "SAE Feature Activation": f"{example.get('activation_value', 0):.4f}",
-                        "Top Predicted Abilities": example.get(
-                            "top_predicted_abilities_str", "N/A"
-                        ),
-                        "Original Index": example.get("example_id", "N/A"),
-                    }
-                )
+        # Get ability tags
+        ability_tags = []
+        if (
+            "ability_input_tokens" in example
+            and example["ability_input_tokens"] is not None
+        ):
+            try:
+                # Convert tags to names using vocabulary
+                ability_tags = [
+                    DASHBOARD_CONTEXT.inv_vocab.get(int(tag), f"Token_{tag}")
+                    for tag in example["ability_input_tokens"]
+                ]
+            except Exception as e:
+                logger.warning(f"Error processing ability tags: {e}")
+                ability_tags = ["Error processing tags"]
 
-            return grid_data, default_col_defs, ""
+        grid_data.append(
+            {
+                "Rank": i,
+                "Weapon": weapon_name,
+                "Input Abilities": ", ".join(ability_tags),
+                "SAE Feature Activation": f"{example.get('activation', 0):.4f}",
+                "Top Predicted Abilities": "N/A",  # Not available in activation data
+                "Original Index": example.get("index", "N/A"),
+            }
+        )
 
-        except Exception as e:
-            logger.error(f"TopExamples: Database error: {e}")
-            return [], default_col_defs, f"Database error: {str(e)}"
-
-    logger.warning("TopExamples: No database context available.")
-    return [], default_col_defs, "Error: No database context available."
+    return grid_data, default_col_defs, ""
