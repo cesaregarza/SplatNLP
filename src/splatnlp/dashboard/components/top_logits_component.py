@@ -1,4 +1,5 @@
 import re
+import warnings
 from typing import Any
 
 import numpy as np
@@ -7,6 +8,8 @@ import plotly.express as px
 from dash import Input, Output, callback, dcc, html
 
 from splatnlp.model.models import SetCompletionModel
+
+warnings.filterwarnings("ignore", category=UserWarning)
 
 HIGH_AP_PATTERN = re.compile(r"_(21|29|38|51|57)$")
 SPECIAL_TOKENS = {"<PAD>", "<NULL>"}
