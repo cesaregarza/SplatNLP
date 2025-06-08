@@ -7,11 +7,11 @@ of the UI callbacks have to change.
 
 from __future__ import annotations
 
+import json
 import logging
 from functools import lru_cache
 from pathlib import Path
 
-import joblib
 import numpy as np
 import pandas as pd
 import polars as pl
@@ -25,7 +25,7 @@ class FSDatabase:
     # ---------- construction ------------------------------------------------
     def __init__(
         self,
-        meta_path: str = "/mnt/e/activations2/outputs/activations.metadata.joblib",
+        meta_path: str = "/mnt/e/activations2/outputs/",
         neurons_root: str = "/mnt/e/activations2/outputs/neuron_acts",
         num_bins: int = 20,
     ):
@@ -43,14 +43,12 @@ class FSDatabase:
         if not self.neurons_root.exists():
             raise FileNotFoundError(self.neurons_root)
 
-        # Load metadata
-        metadata: dict[str, pd.DataFrame] = joblib.load(self.meta_path)
-        self.analysis_df = pl.from_pandas(
-            metadata["analysis_df_records"].drop(
-                columns=["is_null_token", "weapon_name"]
-            )
-        ).with_row_index("index")
-        self.metadata = metadata["metadata"]
+        self.analysis_df = (
+            pl.read_ipc(self.meta_path / "analysis_df_records.ipc")
+            .drop(["is_null_token", "weapon_name"])
+            .with_row_index("index")
+        )
+        self.metadata = json.load(open(self.meta_path / "metadata.json"))
         self.idf = compute_idf(self.analysis_df)
 
         # Find all neuron directories
