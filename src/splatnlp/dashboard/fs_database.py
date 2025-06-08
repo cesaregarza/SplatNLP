@@ -52,10 +52,6 @@ class FSDatabase:
         ).with_row_index("index")
         self.metadata = metadata["metadata"]
         self.idf = compute_idf(self.analysis_df)
-        logger.info(f"Analysis DataFrame columns: {self.analysis_df.columns}")
-        logger.info(f"Analysis DataFrame sample:\n{self.analysis_df.head()}")
-        logger.info(f"IDF DataFrame columns: {self.idf.columns}")
-        logger.info(f"IDF DataFrame sample:\n{self.idf.head()}")
 
         # Find all neuron directories
         self.neuron_dirs = {
