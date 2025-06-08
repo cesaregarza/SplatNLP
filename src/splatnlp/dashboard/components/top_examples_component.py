@@ -10,41 +10,6 @@ from splatnlp.dashboard.utils.converters import generate_weapon_name_mapping
 
 logger = logging.getLogger(__name__)
 
-
-# Helper function for predictions (ensure this is robust)
-def get_top_k_predictions(logits, inv_vocab, k=5):
-    if logits is None or not isinstance(logits, np.ndarray):
-        return "Logits not available"
-
-    # Ensure logits is 1D
-    if logits.ndim > 1:
-        if (
-            logits.shape[0] == 1 and logits.ndim == 2
-        ):  # common case (1, vocab_size)
-            logits = logits.squeeze(0)
-        elif logits.ndim == 1:  # Already 1D
-            pass
-        else:  # Unexpected shape
-            return f"Logits have unexpected shape {logits.shape}"
-
-    if logits.size == 0:
-        return "Logits are empty"
-
-    actual_k = min(k, logits.size)
-    if actual_k == 0:
-        return "No logits to rank"
-
-    top_k_indices = np.argsort(logits)[-actual_k:][::-1]
-    predictions = []
-    for idx in top_k_indices:
-        token_name = inv_vocab.get(
-            str(idx), inv_vocab.get(idx, f"Token_ID_{idx}")
-        )
-        score = logits[idx]
-        predictions.append(f"{token_name} ({score:.2f})")
-    return ", ".join(predictions)
-
-
 # Main component layout
 top_examples_component = html.Div(
     id="top-examples-content",
@@ -109,11 +74,6 @@ def update_top_examples_grid(selected_feature_id):
             "width": 150,
         },
         {
-            "field": "Top Predicted Abilities",
-            "headerName": "Top Predicted Abilities",
-            "width": 200,
-        },
-        {
             "field": "Original Index",
             "headerName": "Original Index",
             "width": 120,
@@ -172,7 +132,6 @@ def update_top_examples_grid(selected_feature_id):
                 "Weapon": weapon_name,
                 "Input Abilities": ", ".join(ability_tags),
                 "SAE Feature Activation": f"{example.get('activation', 0):.4f}",
-                "Top Predicted Abilities": "N/A",  # Not available in activation data
                 "Original Index": example.get("index", "N/A"),
             }
         )
