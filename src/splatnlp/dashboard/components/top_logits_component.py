@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -32,9 +32,9 @@ top_logits_component = html.Div(
 def compute_logit_influences(
     feature_id: int,
     model: SetCompletionModel,
-    inv_vocab: Dict[str, str],
+    inv_vocab: dict[str, str],
     limit: int = 10,
-) -> Dict[str, list[Dict[str, Any]]]:
+) -> dict[str, list[dict[str, Any]]]:
     """Compute logit influences for a feature using the model's weights.
 
     Args:
@@ -47,18 +47,20 @@ def compute_logit_influences(
         Dictionary with 'positive' and 'negative' influence lists
     """
     # Get the output layer weights
-    output_weights = model.output_layer.weight.data.cpu().numpy()
+    output_weights = (
+        model.output_layer.weight.data.cpu().numpy()
+    )  # Shape: (140, 512)
 
     # Get top positive and negative influences
-    top_pos_indices = np.argsort(output_weights[feature_id])[-limit:][::-1]
-    top_neg_indices = np.argsort(output_weights[feature_id])[:limit]
+    top_pos_indices = np.argsort(output_weights[:, feature_id])[-limit:][::-1]
+    top_neg_indices = np.argsort(output_weights[:, feature_id])[:limit]
 
     # Convert to dictionaries
     positive = [
         {
             "token_id": int(idx),
-            "token_name": inv_vocab.get(str(idx), f"Token_{idx}"),
-            "influence_value": float(output_weights[feature_id, idx]),
+            "token_name": inv_vocab.get(int(idx), f"Token_{idx}"),
+            "influence_value": float(output_weights[idx, feature_id]),
         }
         for idx in top_pos_indices
     ]
@@ -66,8 +68,8 @@ def compute_logit_influences(
     negative = [
         {
             "token_id": int(idx),
-            "token_name": inv_vocab.get(str(idx), f"Token_{idx}"),
-            "influence_value": float(output_weights[feature_id, idx]),
+            "token_name": inv_vocab.get(int(idx), f"Token_{idx}"),
+            "influence_value": float(output_weights[idx, feature_id]),
         }
         for idx in top_neg_indices
     ]
@@ -83,8 +85,8 @@ def compute_logit_influences(
     [Input("feature-dropdown", "value")],
 )
 def update_top_logits_graph(
-    selected_feature_id: Optional[int],
-) -> Tuple[Dict[str, Any], str]:
+    selected_feature_id: int | None,
+) -> tuple[dict[str, Any], str]:
     """Update the top logits graph when a feature is selected."""
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
