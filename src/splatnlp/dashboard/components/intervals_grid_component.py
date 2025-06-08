@@ -18,6 +18,7 @@ from splatnlp.dashboard.utils.converters import (
     AbilityTagParser,
     generate_weapon_name_mapping,
 )
+from splatnlp.dashboard.utils.debug import profile_operation
 from splatnlp.dashboard.utils.tfidf import compute_tf_idf
 from splatnlp.preprocessing.transform.mappings import generate_maps
 
@@ -228,15 +229,24 @@ class UIComponentBuilder:
                         weapon_name,
                         className="card-title mb-2 text-truncate",
                         title=weapon_name,
+                        style={
+                            "minHeight": "1.5rem"
+                        },  # Ensure consistent height for title
                     ),
                     html.Div(
                         ability_display,
                         className="flex-grow-1 overflow-auto mb-2",
-                        style={"fontSize": "0.9rem"},
+                        style={
+                            "fontSize": "0.9rem",
+                            "maxHeight": "calc(100% - 3rem)",
+                        },  # Reserve space for title and activation
                     ),
                     html.P(
                         f"Activation: {activation_val:.4f}",
                         className="mb-0 fw-semibold text-primary",
+                        style={
+                            "minHeight": "1.5rem"
+                        },  # Ensure consistent height for activation
                     ),
                 ],
                 className="d-flex flex-column",
@@ -397,6 +407,7 @@ class IntervalsGridRenderer:
         )
         self._cache: Optional[FeatureAnalysisCache] = None
 
+    @profile_operation("render_intervals_grid")
     def render(self, selected_feature_id: int) -> tuple[list[Any], str]:
         """Render the intervals grid for the selected feature."""
         try:
@@ -431,6 +442,7 @@ class IntervalsGridRenderer:
             logger.error(f"Error rendering intervals grid: {e}", exc_info=True)
             return [], f"Error rendering intervals grid: {str(e)}"
 
+    @profile_operation("load_feature_data")
     def _load_feature_data(self, feature_id: int) -> None:
         """Load and cache all data for a feature."""
         # Get data
@@ -457,6 +469,7 @@ class IntervalsGridRenderer:
         # Cache weapon names
         self._cache_weapon_names()
 
+    @profile_operation("perform_top_bins_analysis")
     def _perform_top_bins_analysis(self) -> None:
         """Perform TF-IDF analysis on samples from top bins."""
         # Get bounds of top bins
@@ -491,6 +504,7 @@ class IntervalsGridRenderer:
             self._cache.feature_id,
         )
 
+    @profile_operation("cache_weapon_names")
     def _cache_weapon_names(self) -> None:
         """Cache weapon ID to name mappings for all weapons in the data."""
         # Get unique weapon IDs and create mapping in one operation
@@ -513,6 +527,7 @@ class IntervalsGridRenderer:
             )
         )
 
+    @profile_operation("build_all_bin_sections")
     def _build_all_bin_sections(self) -> list[html.Div]:
         """Build sections for all histogram bins."""
         sections = []
@@ -538,28 +553,80 @@ class IntervalsGridRenderer:
             .cast(pl.Int32)
             .alias("assigned_bin")
         )
-        groups = activations_with_bins.group_by("assigned_bin")
-        for bin_idx, bin_df in groups:
-            # Get the corresponding histogram row for this bin
-            bin_row = histogram_sorted.filter(
-                pl.col("bin_idx") == bin_idx[0]
-            ).row(0)
 
-            # Convert bin samples to dict format
-            bin_samples = bin_df.drop("assigned_bin").to_dicts()
+        # Pre-filter bins with too few samples and get limited samples per bin
+        # First get bin counts to filter empty bins
+        bin_counts = activations_with_bins.group_by("assigned_bin").agg(
+            pl.count().alias("count")
+        )
+        valid_bins = bin_counts.filter(pl.col("count") > 0)[
+            "assigned_bin"
+        ].to_list()
+
+        # Then get limited samples for each valid bin
+        grouped_samples = (
+            activations_with_bins.filter(
+                pl.col("assigned_bin").is_in(valid_bins)
+            )
+            .group_by("assigned_bin")
+            .agg(
+                [
+                    pl.col("activation")
+                    .head(MAX_SAMPLES_PER_BIN)
+                    .alias("activation_samples"),
+                    pl.col("weapon_id_token")
+                    .head(MAX_SAMPLES_PER_BIN)
+                    .alias("weapon_samples"),
+                    pl.col("ability_input_tokens")
+                    .head(MAX_SAMPLES_PER_BIN)
+                    .alias("ability_samples"),
+                ]
+            )
+        )
+
+        # Pre-compute histogram row lookups for valid bins
+        bin_rows = {
+            row[0]: (row[1], row[2])  # bin_idx -> (lower_bound, upper_bound)
+            for row in histogram_sorted.filter(
+                pl.col("bin_idx").is_in(valid_bins)
+            ).iter_rows()
+        }
+
+        # Process each bin
+        for row in grouped_samples.iter_rows():
+            bin_idx = row[0]
+            activation_samples = row[1]
+            weapon_samples = row[2]
+            ability_samples = row[3]
+
+            # Combine samples into list of dicts
+            bin_samples = [
+                {
+                    "activation": act,
+                    "weapon_id_token": weap,
+                    "ability_input_tokens": abil,
+                }
+                for act, weap, abil in zip(
+                    activation_samples, weapon_samples, ability_samples
+                )
+            ]
+
+            # Get pre-computed bin bounds
+            lower_bound, upper_bound = bin_rows[bin_idx]
 
             # Build section for this bin
             section = UIComponentBuilder.build_bin_section(
-                bin_idx,
-                bin_row[1],
-                bin_row[2],
+                (bin_idx,),  # Wrap in tuple to match expected format
+                lower_bound,
+                upper_bound,
                 bin_samples,
                 self._cache.weapon_id_to_name,
                 top_tfidf_tokens,
                 self.context.inv_vocab,
             )
-            sections.append((section, bin_idx[0]))
+            sections.append((section, bin_idx))
 
+        # Sort sections
         return [
             section
             for section, _ in sorted(sections, key=lambda x: x[1], reverse=True)
@@ -597,6 +664,7 @@ intervals_grid_component = html.Div(
     ],
     Input("feature-dropdown", "value"),
 )
+@profile_operation("render_intervals_grid_callback")
 def render_intervals_grid(selected_feature_id: int | None):
     """Callback to render the intervals grid based on selected feature."""
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
