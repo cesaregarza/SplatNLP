@@ -1,7 +1,9 @@
 from typing import Any
 
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+import polars as pl
 from dash import Input, Output, State, callback, dcc, html
 
 from splatnlp.dashboard.fs_database import FSDatabase
@@ -74,9 +76,9 @@ def update_activation_histogram(
 
     # Filter bins if needed
     if filter_type == "nonzero":
-        histogram_df = histogram_df[histogram_df["lower_bound"] > 1e-6]
+        histogram_df = histogram_df.filter(pl.col("lower_bound") > 1e-6)
 
-    if histogram_df.empty:
+    if len(histogram_df) == 0:
         return {
             "data": [],
             "layout": {
@@ -87,10 +89,13 @@ def update_activation_histogram(
     # Create the histogram directly from the binned data
     fig = go.Figure()
 
+    # Add small epsilon to avoid log(0)
+    log_counts = np.log10(histogram_df["count"] + 1)
+
     fig.add_trace(
         go.Bar(
             x=(histogram_df["lower_bound"] + histogram_df["upper_bound"]) / 2,
-            y=histogram_df["count"],
+            y=log_counts,
             width=histogram_df["upper_bound"] - histogram_df["lower_bound"],
             hovertext=[
                 f"Range: [{min_act:.3g} - {max_act:.3g})<br>Count: {count}"
@@ -106,9 +111,9 @@ def update_activation_histogram(
     )
 
     fig.update_layout(
-        title=f"Activation Distribution for Feature {selected_feature_id} {('(Non-Zero Activations)' if filter_type == 'nonzero' else '')}",
+        title=f"Log Activation Distribution for Feature {selected_feature_id} {('(Non-Zero Activations)' if filter_type == 'nonzero' else '')}",
         xaxis_title="Activation Value",
-        yaxis_title="Count",
+        yaxis_title="Log10(Count + 1)",
         showlegend=False,
         margin=dict(l=40, r=40, t=40, b=40),
         height=300,
