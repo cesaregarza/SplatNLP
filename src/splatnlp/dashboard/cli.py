@@ -35,9 +35,6 @@ from splatnlp.dashboard.commands.ingest_binned_samples_cmd import (
     ingest_binned_samples_command,
     register_ingest_binned_samples_parser,
 )
-from splatnlp.dashboard.commands.load_neuron_data_cmd import (
-    register_load_neuron_data_parser,
-)
 from splatnlp.dashboard.commands.minimize_examples_cmd import (
     setup_minimize_examples_parser,
 )
@@ -130,33 +127,6 @@ def load_dashboard_data(args_ns: argparse.Namespace):
                 )
                 raise ConnectionError(
                     f"Critical: Filesystem database could not be initialized: {e}"
-                ) from e
-        else:
-            # DuckDB case
-            if not args_ns.database_path:
-                logger.critical(
-                    "CRITICAL: database_path not provided for 'run' command, but it is required."
-                )
-                raise ValueError(
-                    "database_path is required for the 'run' command but was not provided to load_dashboard_data."
-                )
-
-            logger.info(
-                f"Attempting to load DuckDB database from {args_ns.database_path}"
-            )
-            try:
-                from splatnlp.dashboard.database_manager import DuckDBDatabase
-
-                db_context = DuckDBDatabase(args_ns.database_path)
-                db_info = db_context.get_database_info()
-                logger.info(f"DuckDB database loaded successfully: {db_info}")
-            except Exception as e:
-                logger.critical(
-                    f"Failed to load DuckDB database from required path {args_ns.database_path}: {e}",
-                    exc_info=True,
-                )
-                raise ConnectionError(
-                    f"Critical: DuckDB database at {args_ns.database_path} could not be loaded."
                 ) from e
 
     # Fallback to precomputed_analytics for commands other than 'run' if they support it
@@ -791,9 +761,6 @@ def main():
     setup_minimize_examples_parser(
         subparsers
     )  # New command for minimizing examples
-    register_load_neuron_data_parser(
-        subparsers
-    )  # New command for loading neuron data
 
     args = parser.parse_args()
 
