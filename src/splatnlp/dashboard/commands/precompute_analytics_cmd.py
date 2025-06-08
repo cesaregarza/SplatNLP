@@ -181,8 +181,11 @@ def precompute_analytics_command(args: argparse.Namespace):
         "pad_token_id": vocab_map.get(args.pad_token_name, 0),
     }
     sae_model_params = {
-        "input_dim": args.hidden_dim,
-        "expansion_factor": args.sae_expansion_factor,
+        "input_dim": 2048,  # From sae_params_v3.json
+        "expansion_factor": 4,  # From sae_params_v3.json
+        "l1_coefficient": 0.001,  # From sae_params_v3.json
+        "target_usage": 0.0,  # Default value
+        "usage_coeff": 0.0,  # Default value
     }
 
     primary_model = SetCompletionModel(**primary_model_params)

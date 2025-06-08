@@ -202,8 +202,11 @@ def _generate_dashboard_activations_no_chunk(args: argparse.Namespace):
 
     logger.info("Loading SAE model...")
     sae_model = SparseAutoencoder(
-        input_dim=args.hidden_dim,
-        expansion_factor=args.sae_expansion_factor,
+        input_dim=2048,  # From sae_params_v3.json
+        expansion_factor=4,  # From sae_params_v3.json
+        l1_coefficient=0.001,  # From sae_params_v3.json
+        target_usage=0.0,  # Default value
+        usage_coeff=0.0,  # Default value
     )
     sae_model.load_state_dict(
         torch.load(args.sae_model_checkpoint, map_location=torch.device("cpu"))
@@ -586,8 +589,11 @@ def _generate_dashboard_activations_chunked(args: argparse.Namespace):
     primary_model.to(device).eval()
 
     sae_model = SparseAutoencoder(
-        input_dim=args.hidden_dim,
-        expansion_factor=args.sae_expansion_factor,
+        input_dim=2048,  # From sae_params_v3.json
+        expansion_factor=4,  # From sae_params_v3.json
+        l1_coefficient=0.001,  # From sae_params_v3.json
+        target_usage=0.0,  # Default value
+        usage_coeff=0.0,  # Default value
     )
     sae_model.load_state_dict(
         torch.load(args.sae_model_checkpoint, map_location="cpu")

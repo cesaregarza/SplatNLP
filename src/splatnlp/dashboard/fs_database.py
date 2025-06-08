@@ -172,11 +172,3 @@ class FSDatabase:
 
     def get_triple_examples(self, nid: int, limit: int = 50) -> pd.DataFrame:
         return self._read_example_csv(nid, "triple_df.csv", limit)
-
-    # ----- logit influences -------------------------------------------------
-    def get_logit_influences(self, nid: int) -> dict[str, list[dict]]:
-        """
-        Placeholder - adapt as soon as you have per-neuron logit influence files.
-        Keeps UI happy by returning empty lists.
-        """
-        return {"positive": [], "negative": []}

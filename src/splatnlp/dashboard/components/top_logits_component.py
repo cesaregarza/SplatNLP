@@ -6,6 +6,8 @@ import plotly.express as px
 import torch
 from dash import Input, Output, State, callback, dcc, html
 
+from splatnlp.model.models import SetCompletionModel
+
 # App context will be monkey-patched by the run script
 # DASHBOARD_CONTEXT = None # This will be set by run_dashboard.py or cli.py
 
@@ -27,6 +29,52 @@ top_logits_component = html.Div(
 )
 
 
+def compute_logit_influences(
+    feature_id: int,
+    model: SetCompletionModel,
+    inv_vocab: Dict[str, str],
+    limit: int = 10,
+) -> Dict[str, list[Dict[str, Any]]]:
+    """Compute logit influences for a feature using the model's weights.
+
+    Args:
+        feature_id: The feature ID to compute influences for
+        model: The SetCompletionModel containing the weights
+        inv_vocab: Inverse vocabulary mapping token IDs to names
+        limit: Number of top positive and negative influences to return
+
+    Returns:
+        Dictionary with 'positive' and 'negative' influence lists
+    """
+    # Get the output layer weights
+    output_weights = model.output_layer.weight.data.cpu().numpy()
+
+    # Get top positive and negative influences
+    top_pos_indices = np.argsort(output_weights[feature_id])[-limit:][::-1]
+    top_neg_indices = np.argsort(output_weights[feature_id])[:limit]
+
+    # Convert to dictionaries
+    positive = [
+        {
+            "token_id": int(idx),
+            "token_name": inv_vocab.get(str(idx), f"Token_{idx}"),
+            "influence_value": float(output_weights[feature_id, idx]),
+        }
+        for idx in top_pos_indices
+    ]
+
+    negative = [
+        {
+            "token_id": int(idx),
+            "token_name": inv_vocab.get(str(idx), f"Token_{idx}"),
+            "influence_value": float(output_weights[feature_id, idx]),
+        }
+        for idx in top_neg_indices
+    ]
+
+    return {"positive": positive, "negative": negative}
+
+
 @callback(
     [
         Output("top-logits-graph", "figure"),
@@ -37,64 +85,57 @@ top_logits_component = html.Div(
 def update_top_logits_graph(
     selected_feature_id: Optional[int],
 ) -> Tuple[Dict[str, Any], str]:
+    """Update the top logits graph when a feature is selected."""
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
     if selected_feature_id is None:
-        return {
-            "data": [],
-            "layout": {"title": "Select a feature to see its logit influences"},
-        }, ""
+        return {}, "No feature selected."
 
-    if DASHBOARD_CONTEXT is None:
-        return {
-            "data": [],
-            "layout": {"title": "Dashboard context not initialized"},
-        }, "Error: Dashboard context not initialized"
+    if (
+        not hasattr(DASHBOARD_CONTEXT, "primary_model")
+        or DASHBOARD_CONTEXT.primary_model is None
+    ):
+        return (
+            {},
+            "Error: Model not available. Dynamic tooltips must be enabled.",
+        )
 
-    # Get logit influences from database
-    influences = DASHBOARD_CONTEXT.db.get_logit_influences(selected_feature_id)
+    if not hasattr(DASHBOARD_CONTEXT, "inv_vocab"):
+        return {}, "Error: Vocabulary not available."
 
-    if not influences["positive"] and not influences["negative"]:
-        return {
-            "data": [],
-            "layout": {"title": "No logit influences found for this feature"},
-        }, ""
+    try:
+        # Compute logit influences using model weights
+        influences = compute_logit_influences(
+            selected_feature_id,
+            DASHBOARD_CONTEXT.primary_model,
+            DASHBOARD_CONTEXT.inv_vocab,
+        )
 
-    # Prepare data for plotting
-    positive_tokens = [item["token_name"] for item in influences["positive"]]
-    negative_tokens = [item["token_name"] for item in influences["negative"]]
-    positive_effects = [
-        item["influence_value"] for item in influences["positive"]
-    ]
-    negative_effects = [
-        item["influence_value"] for item in influences["negative"]
-    ]
+        # Prepare data for plotting
+        positive_df = pd.DataFrame(influences["positive"])
+        negative_df = pd.DataFrame(influences["negative"])
 
-    # Create DataFrame for plotting
-    df = pd.DataFrame(
-        {
-            "Token": positive_tokens + negative_tokens,
-            "Effect": positive_effects + negative_effects,
-            "Type": ["Positive"] * len(positive_tokens)
-            + ["Negative"] * len(negative_tokens),
-        }
-    )
+        # Create figure
+        fig = px.bar(
+            pd.concat(
+                [
+                    positive_df.assign(direction="Positive"),
+                    negative_df.assign(direction="Negative"),
+                ]
+            ),
+            x="token_name",
+            y="influence_value",
+            color="direction",
+            barmode="group",
+            title=f"Top Logit Influences for Feature {selected_feature_id}",
+            labels={
+                "token_name": "Token",
+                "influence_value": "Influence Value",
+                "direction": "Direction",
+            },
+        )
 
-    fig = px.bar(
-        df,
-        x="Token",
-        y="Effect",
-        color="Type",
-        title=f"Top Logit Influences for Feature {selected_feature_id}",
-        labels={"Token": "Token", "Effect": "Logit Influence"},
-        color_discrete_map={"Positive": "#1f77b4", "Negative": "#ff7f0e"},
-    )
+        return fig, ""
 
-    fig.update_layout(
-        showlegend=False,
-        margin=dict(l=40, r=40, t=40, b=40),
-        height=350,
-        xaxis={"tickangle": 45},  # Rotate labels for better readability
-    )
-
-    return fig, ""
+    except Exception as e:
+        return {}, f"Error computing logit influences: {str(e)}"

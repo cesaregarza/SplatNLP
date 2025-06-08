@@ -83,13 +83,13 @@ def load_dashboard_data(args_ns: argparse.Namespace):
             num_heads=args_ns.primary_num_heads,
             num_inducing_points=args_ns.primary_num_inducing,
             use_layer_norm=True,
-            dropout=0.0,
+            dropout=0.3,
             pad_token_id=pad_token_id,
         )
         primary_model.load_state_dict(
             torch.load(
                 args_ns.primary_model_checkpoint,
-                map_location=torch.device("cpu"),
+                map_location=torch.device("cuda"),
             )
         )
         primary_model.to(DEVICE).eval()
@@ -97,10 +97,13 @@ def load_dashboard_data(args_ns: argparse.Namespace):
         sae_model = SparseAutoencoder(
             input_dim=args_ns.primary_hidden_dim,
             expansion_factor=args_ns.sae_expansion_factor,
+            l1_coefficient=0.001,
+            target_usage=0.0,
+            usage_coeff=0.0,
         )
         sae_model.load_state_dict(
             torch.load(
-                args_ns.sae_model_checkpoint, map_location=torch.device("cpu")
+                args_ns.sae_model_checkpoint, map_location=torch.device("cuda")
             )
         )
         sae_model.to(DEVICE).eval()
