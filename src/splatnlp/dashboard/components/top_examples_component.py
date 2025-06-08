@@ -122,16 +122,14 @@ def update_top_examples_grid(selected_feature_id):
 
     # Use database-backed context if available
     if hasattr(DASHBOARD_CONTEXT, "db"):
-        logger.info("TopExamples: Using DuckDB database")
+        logger.info("TopExamples: Using database")
         db = DASHBOARD_CONTEXT.db
 
         try:
             # Get top examples from database
-            activations_df = db.get_feature_activations(
-                selected_feature_id, limit=20
-            )
+            top_examples = db.get_top_examples(selected_feature_id, limit=20)
 
-            if activations_df.empty:
+            if not top_examples:
                 return (
                     [],
                     default_col_defs,
@@ -140,41 +138,28 @@ def update_top_examples_grid(selected_feature_id):
 
             # Convert to grid format
             grid_data = []
-            for i, (_, row) in enumerate(activations_df.iterrows(), 1):
+            for i, example in enumerate(top_examples, 1):
                 # Get weapon name from weapon_id
-                weapon_name = f"Weapon_{row['weapon_id']}"
+                weapon_name = f"Weapon_{example.get('weapon_id', 'unknown')}"
                 if hasattr(DASHBOARD_CONTEXT, "inv_weapon_vocab"):
                     weapon_name = DASHBOARD_CONTEXT.inv_weapon_vocab.get(
-                        str(row["weapon_id"]), weapon_name
+                        str(example.get("weapon_id")), weapon_name
                     )
 
                 # Get ability tags
                 ability_tags = []
-                if "ability_tags" in row and row["ability_tags"] is not None:
+                if "ability_input_tokens" in example and example["ability_input_tokens"] is not None:
                     try:
-                        # Handle array format from DuckDB
-                        tags = row["ability_tags"]
-                        if isinstance(tags, str):
-                            # Handle string format (comma-separated)
-                            tags = [
-                                int(t.strip())
-                                for t in tags.strip("[]").split(",")
-                                if t.strip()
-                            ]
-                        elif isinstance(tags, list):
-                            # Already in list format
-                            tags = [int(t) for t in tags if t is not None]
-
                         # Convert tags to names using vocabulary
                         if hasattr(DASHBOARD_CONTEXT, "inv_vocab"):
                             ability_tags = [
                                 DASHBOARD_CONTEXT.inv_vocab.get(
                                     str(tag), f"Token_{tag}"
                                 )
-                                for tag in tags
+                                for tag in example["ability_input_tokens"]
                             ]
                         else:
-                            ability_tags = [f"Token_{tag}" for tag in tags]
+                            ability_tags = [f"Token_{tag}" for tag in example["ability_input_tokens"]]
                     except Exception as e:
                         logger.warning(f"Error processing ability tags: {e}")
                         ability_tags = ["Error processing tags"]
@@ -184,9 +169,9 @@ def update_top_examples_grid(selected_feature_id):
                         "Rank": i,
                         "Weapon": weapon_name,
                         "Input Abilities": ", ".join(ability_tags),
-                        "SAE Feature Activation": f"{row['activation']:.4f}",
-                        "Top Predicted Abilities": "N/A",  # Not available in new format
-                        "Original Index": row["index"],
+                        "SAE Feature Activation": f"{example.get('activation_value', 0):.4f}",
+                        "Top Predicted Abilities": example.get("top_predicted_abilities_str", "N/A"),
+                        "Original Index": example.get("example_id", "N/A"),
                     }
                 )
 
