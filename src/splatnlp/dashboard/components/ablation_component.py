@@ -163,7 +163,7 @@ def run_ablation_analysis(n_clicks, primary_data, secondary_build_string, select
         return html.Div("Models not loaded. Ablation analysis unavailable.", style={'color': 'red'})
 
     if pad_token_id is None:
-        return html.Div("PAD token ID not configured. Ablation analysis unavailable.", style={'color': 'red'})
+        return html.Div("PAD token ID not configured in dashboard context. This might be due to the '<PAD>' token missing from the vocabulary file used at startup. Ablation analysis unavailable.", style={'color': 'red'})
 
     if not primary_data:
         return "Please select a primary build first."
