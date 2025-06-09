@@ -19,6 +19,8 @@ from splatnlp.dashboard.components.top_examples_component import (
 from splatnlp.dashboard.components.top_logits_component import (
     top_logits_component,
 )
+from splatnlp.dashboard.components.ablation_component import ablation_component
+
 
 __all__ = [
     "activation_hist_component",
@@ -28,4 +30,5 @@ __all__ = [
     "top_examples_component",
     "intervals_grid_component",
     "correlations_component",
+    "ablation_component",
 ]
