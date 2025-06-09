@@ -77,9 +77,12 @@ app.layout = dbc.Container(
                 dbc.Col(
                     [
                         dbc.Tabs(
-                            [
+                            id="analysis-tabs",
+                            active_tab="tab-overview",
+                            children=[
                                 dbc.Tab(
                                     label="Overview",
+                                    tab_id="tab-overview",
                                     children=[
                                         feature_summary_component,
                                         activation_hist_component,
@@ -87,14 +90,17 @@ app.layout = dbc.Container(
                                 ),
                                 dbc.Tab(
                                     label="Top Examples",
+                                    tab_id="tab-examples",
                                     children=top_examples_component,
                                 ),
                                 dbc.Tab(
                                     label="Intervals Grid",
+                                    tab_id="tab-grid",
                                     children=intervals_grid_component,
                                 ),
                                 dbc.Tab(
                                     label="Top Logits & Correlations",
+                                    tab_id="tab-logits",
                                     children=[
                                         top_logits_component,
                                         correlations_component,
@@ -102,13 +108,15 @@ app.layout = dbc.Container(
                                 ),
                                 dbc.Tab(
                                     label="Token Analysis",
+                                    tab_id="tab-tokens",
                                     children=token_analysis.create_token_analysis_tab(),
                                 ),
                                 dbc.Tab(
                                     label="Ablation",
+                                    tab_id="tab-ablation",
                                     children=ablation_component,
                                 ),
-                            ]
+                            ],
                         )
                     ],
                     width=9,

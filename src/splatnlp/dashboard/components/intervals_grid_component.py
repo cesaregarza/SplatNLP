@@ -851,6 +851,7 @@ def render_intervals_grid(selected_feature_id: int | None):
 
 @callback(
     Output("ablation-load-store", "data"),
+    Output("analysis-tabs", "active_tab"),
     Input({"type": "ablation-load-btn", "index": dash.ALL}, "n_clicks"),
     prevent_initial_call=True,
 )
@@ -859,7 +860,10 @@ def send_to_ablation(_):
     if not ctx.triggered or ctx.triggered_id is None:
         raise dash.exceptions.PreventUpdate
     button_id = ctx.triggered_id
-    return {
-        "build_tokens": button_id.get("build", "").split(),
-        "weapon_name": button_id.get("weapon"),
-    }
+    return (
+        {
+            "build_tokens": button_id.get("build", "").split(),
+            "weapon_name": button_id.get("weapon"),
+        },
+        "tab-ablation",
+    )

@@ -57,12 +57,7 @@ ablation_component = html.Div(
                     width=3,
                 ),
                 dbc.Col(
-                    dcc.Input(
-                        id="ablation-build",
-                        type="text",
-                        placeholder="Ability tokens space separated",
-                        style={"width": "100%"},
-                    ),
+                    dcc.Dropdown(id="ablation-build", options=[], multi=True),
                     width=5,
                 ),
                 dbc.Col(
@@ -110,6 +105,25 @@ def _populate_weapon_dropdown(_timestamp):
 
 
 @callback(
+    Output("ablation-build", "options"), Input("page-load-trigger", "data")
+)
+def _populate_ability_dropdown(_timestamp):
+    from splatnlp.dashboard.app import DASHBOARD_CONTEXT
+
+    if (
+        not hasattr(DASHBOARD_CONTEXT, "vocab")
+        or DASHBOARD_CONTEXT.vocab is None
+    ):
+        return []
+
+    return [
+        {"label": tok, "value": tok}
+        for tok in sorted(DASHBOARD_CONTEXT.vocab.keys())
+        if not tok.startswith("<")
+    ]
+
+
+@callback(
     Output("ablation-primary-store", "data"),
     Output("ablation-results", "children"),
     Input("ablation-primary-btn", "n_clicks"),
@@ -118,8 +132,8 @@ def _populate_weapon_dropdown(_timestamp):
     State("feature-dropdown", "value"),
     prevent_initial_call=True,
 )
-def _set_primary(_, build_text, weapon_name, feature_id):
-    build_tokens = build_text.split() if build_text else []
+def _set_primary(_, build_tokens, weapon_name, feature_id):
+    build_tokens = build_tokens or []
     act = _compute_feature_activation(build_tokens, weapon_name, feature_id)
     if act is None:
         return dash.no_update, "Model context unavailable"
@@ -135,8 +149,8 @@ def _set_primary(_, build_text, weapon_name, feature_id):
     State("feature-dropdown", "value"),
     prevent_initial_call=True,
 )
-def _set_secondary(_, build_text, weapon_name, feature_id):
-    build_tokens = build_text.split() if build_text else []
+def _set_secondary(_, build_tokens, weapon_name, feature_id):
+    build_tokens = build_tokens or []
     act = _compute_feature_activation(build_tokens, weapon_name, feature_id)
     if act is None:
         return dash.no_update, "Model context unavailable"
@@ -165,4 +179,4 @@ def _display_difference(primary_act, secondary_act):
 def _load_from_store(data):
     if not data:
         raise dash.exceptions.PreventUpdate
-    return " ".join(data.get("build_tokens", [])), data.get("weapon_name")
+    return data.get("build_tokens", []), data.get("weapon_name")
