@@ -28,7 +28,7 @@ from splatnlp.dashboard.components.feature_labels import (  # For context
     FeatureLabelsManager,
 )
 from splatnlp.dashboard.components.intervals_grid_component import (
-    _example_card,
+    UIComponentBuilder,
     render_intervals_grid,
 )
 from splatnlp.dashboard.components.top_examples_component import (
@@ -416,7 +416,7 @@ class TestDashboardAppDataSourceDB(unittest.TestCase):
             found_card, "Did not find any example cards in intervals."
         )
 
-        # Test _example_card directly as it's a critical part of intervals_grid
+        # Test build_example_card directly as it's a critical part of intervals_grid
         sample_example_data_from_db = {
             "id": 0,
             "weapon_id_token": 0,
@@ -428,13 +428,13 @@ class TestDashboardAppDataSourceDB(unittest.TestCase):
             "metadata": "{}",
         }
         record_series = pd.Series(sample_example_data_from_db)
-        card = _example_card(
+        card = UIComponentBuilder.build_example_card(
             record_series,
-            MOCK_INV_VOCAB,
-            MOCK_INV_WEAPON_VOCAB,
+            "Splatana Wiper",
             0.95,
-            self.id_to_name_map,
             set(),
+            MOCK_INV_VOCAB,
+            0,
         )
         self.assertIsNotNone(card)
         self.assertIn("Splatana Wiper", str(card))
