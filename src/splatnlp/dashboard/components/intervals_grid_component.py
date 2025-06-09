@@ -26,9 +26,9 @@ logger = logging.getLogger(__name__)
 
 # Constants
 MAX_TFIDF_FEATURES = 10
-MAX_SAMPLES_PER_BIN = 5
+MAX_SAMPLES_PER_BIN = 14
 TOP_WEAPONS_COUNT = 5
-TOP_BINS_FOR_ANALYSIS = 4
+TOP_BINS_FOR_ANALYSIS = 8
 CARD_WIDTH = "250px"
 CARD_HEIGHT = "180px"
 
@@ -134,7 +134,7 @@ class TFIDFAnalyzer:
         self, df: pl.DataFrame, inv_weapon_vocab: dict[int, str]
     ) -> dict[str, list[dict[str, str | float]]]:
         """Calculate weapon frequencies in the dataframe."""
-        total = len(df)
+        total = df.select(pl.col("activation").sum()).item()
 
         df = df.with_columns(
             pl.col("weapon_id_token")
@@ -150,7 +150,7 @@ class TFIDFAnalyzer:
         # Group by weapon, count, and compute percentages in one go
         weapon_stats = (
             df.group_by("weapon_id_token")
-            .agg(pl.count().alias("count"))
+            .agg(pl.col("activation").sum().alias("count"))
             .with_columns(
                 [
                     pl.col("weapon_id_token")
@@ -168,7 +168,7 @@ class TFIDFAnalyzer:
 
         sub_stats = (
             df.group_by("sub")
-            .agg(pl.count().alias("count"))
+            .agg(pl.col("activation").sum().alias("count"))
             .with_columns(
                 (pl.col("count") / total).alias("percentage"),
             )
@@ -180,7 +180,7 @@ class TFIDFAnalyzer:
 
         special_stats = (
             df.group_by("special")
-            .agg(pl.count().alias("count"))
+            .agg(pl.col("activation").sum().alias("count"))
             .with_columns(
                 (pl.col("count") / total).alias("percentage"),
             )
@@ -192,7 +192,7 @@ class TFIDFAnalyzer:
 
         class_stats = (
             df.group_by("class")
-            .agg(pl.count().alias("count"))
+            .agg(pl.col("activation").sum().alias("count"))
             .with_columns(
                 (pl.col("count") / total).alias("percentage"),
             )
@@ -494,22 +494,22 @@ class UIComponentBuilder:
         min_act: float,
         max_act: float,
         samples: list[dict],
+        count: int,
         weapon_names: dict[int, str],
         top_tfidf_tokens: set[str],
         inv_vocab: dict[str, str],
     ) -> html.Div:
         """Build a section for a histogram bin."""
-        num_examples = len(samples)
-        header_text = f"Bin {bin_idx[0]}: [{min_act:.3f}, {max_act:.3f}) - {num_examples} examples"
+        header_text = f"Bin {bin_idx[0]}: [{min_act:.3f}, {max_act:.3f}) - {count:,} examples"
 
         # Build example cards
         card_cols = []
-        if num_examples > 0:
+        if count > 0:
             # Sample directly from the list
             import random
 
             samples_to_show = random.sample(
-                samples, min(MAX_SAMPLES_PER_BIN, num_examples)
+                samples, min(MAX_SAMPLES_PER_BIN, count)
             )
 
             for sample in samples_to_show:
@@ -720,6 +720,7 @@ class IntervalsGridRenderer:
                     pl.col("ability_input_tokens")
                     .head(MAX_SAMPLES_PER_BIN)
                     .alias("ability_samples"),
+                    pl.col("activation").count().alias("count"),
                 ]
             )
         )
@@ -738,7 +739,7 @@ class IntervalsGridRenderer:
             activation_samples = row[1]
             weapon_samples = row[2]
             ability_samples = row[3]
-
+            count = row[4]
             # Combine samples into list of dicts
             bin_samples = [
                 {
@@ -760,6 +761,7 @@ class IntervalsGridRenderer:
                 lower_bound,
                 upper_bound,
                 bin_samples,
+                count,
                 self._cache.weapon_id_to_name,
                 top_tfidf_tokens,
                 self.context.inv_vocab,

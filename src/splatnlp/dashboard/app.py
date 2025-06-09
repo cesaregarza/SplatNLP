@@ -231,24 +231,6 @@ def save_feature_labels(
     )
 
 
-# Update statistics on page load
-@app.callback(
-    Output("labeling-statistics-container", "children", allow_duplicate=True),
-    Input("page-load-trigger", "data"),
-    prevent_initial_call=True,
-)
-def update_statistics_on_load(_):
-    """Update labeling statistics on page load."""
-    if (
-        hasattr(DASHBOARD_CONTEXT, "feature_labels_manager")
-        and DASHBOARD_CONTEXT.feature_labels_manager
-    ):
-        return create_labeling_statistics(
-            DASHBOARD_CONTEXT.feature_labels_manager
-        )
-    return html.Div()
-
-
 # Add callbacks for new token analysis components
 @app.callback(
     Output("single-token-examples", "children"),
