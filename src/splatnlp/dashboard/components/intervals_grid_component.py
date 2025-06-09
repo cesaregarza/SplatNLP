@@ -869,50 +869,64 @@ def render_intervals_grid(selected_feature_id: int | None):
 )
 def update_ablation_primary_store(n_clicks_list, example_data_list): # Arguments remain the same name for clarity
     """Update the ablation-primary-store with data from the clicked example card."""
-    triggered = callback_context.triggered
-    if not triggered or not any(n_clicks_list): # Check if any button was clicked
+    logger.info("update_ablation_primary_store triggered.")
+    logger.info(f"Initial n_clicks_list: {n_clicks_list}")
+    # logger.info(f"Initial example_data_list: {example_data_list}") # Can be very verbose
+    logger.info(f"Callback triggered: {callback_context.triggered}")
+    logger.info(f"Triggered ID (button_id_dict): {callback_context.triggered_id}")
+
+    if not callback_context.triggered_id:
+        logger.info("No triggered_id (e.g., initial load or no relevant Input fired), returning dash.no_update.")
         return dash.no_update
 
-    # Get the id of the button that was clicked
-    button_id_dict = callback_context.triggered_id
-    if not isinstance(button_id_dict, dict) or 'index' not in button_id_dict:
-         # This might happen if using a non-pattern-matching callback or if id is not a dict
+    # Ensure triggered_id is a dict and has 'index' (expected for pattern-matching callbacks)
+    if not isinstance(callback_context.triggered_id, dict) or 'index' not in callback_context.triggered_id:
+        logger.warning(f"Triggered ID is not a dict or does not contain 'index': {callback_context.triggered_id}. Returning dash.no_update.")
         return dash.no_update
 
-    clicked_button_index_str = button_id_dict['index']
-
-    # Find the corresponding data
-    # The n_clicks_list and example_data_list are ordered by the 'index' key values
-    # when `ALL` is used. We need to find which button's n_click is > 0 and get its data.
-    # A more robust way is to iterate through `callback_context.inputs_list[0]` which contains
-    # the full details of the inputs that triggered the callback.
+    clicked_button_index_str = callback_context.triggered_id['index']
+    logger.info(f"Clicked button index string: {clicked_button_index_str}")
 
     clicked_idx = -1
-    for i, input_def in enumerate(callback_context.inputs_list[0]): # inputs_list[0] for the first Input
-        if input_def['id']['index'] == clicked_button_index_str:
+    # Ensure inputs_list[0] (corresponding to the Input) is not empty and is a list of dicts
+    if not callback_context.inputs_list or not isinstance(callback_context.inputs_list[0], list):
+        logger.error(f"callback_context.inputs_list[0] is not as expected: {callback_context.inputs_list}. Returning dash.no_update.")
+        return dash.no_update
+
+    for i, input_def in enumerate(callback_context.inputs_list[0]):
+        # logger.info(f"Looping to find clicked_idx: i={i}, input_def_id_index={input_def.get('id', {}).get('index')}") # Potentially verbose
+        if isinstance(input_def.get('id'), dict) and input_def['id'].get('index') == clicked_button_index_str:
             # Check if this specific button's n_clicks is what triggered the callback
-            # (i.e., its n_clicks is not None and greater than previous if applicable)
-            # For simplicity, we assume the first triggered button is the one.
-            # Dash ensures that only one n_clicks changes at a time to trigger the callback.
             if n_clicks_list[i] is not None and n_clicks_list[i] > 0:
                  clicked_idx = i
                  break
 
-    if clicked_idx != -1 and example_data_list[clicked_idx]:
-        try:
-            example_data = json.loads(example_data_list[clicked_idx])
-            # Store only specified fields
-            data_to_store = {
-                'ability_input_tokens': example_data.get('ability_input_tokens'),
-                'weapon_id_token': example_data.get('weapon_id_token'),
-                'activation': example_data.get('activation')
-            }
-            return data_to_store
-        except json.JSONDecodeError:
-            logger.error(f"Failed to parse example_data_json: {example_data_list[clicked_idx]}")
-            return dash.no_update
-        except IndexError:
-            logger.error(f"Index out of bounds accessing example_data_list at index {clicked_idx}")
-            return dash.no_update
+    logger.info(f"Identified clicked_idx: {clicked_idx}")
 
-    return dash.no_update
+    if clicked_idx != -1:
+        if clicked_idx < len(example_data_list):
+            raw_data_str = example_data_list[clicked_idx]
+            logger.info(f"Raw example_data string for index {clicked_idx}: {raw_data_str}")
+            if raw_data_str:
+                try:
+                    example_data = json.loads(raw_data_str)
+                    logger.info(f"Parsed example_data: {example_data}")
+                    data_to_store = {
+                        'ability_input_tokens': example_data.get('ability_input_tokens'),
+                        'weapon_id_token': example_data.get('weapon_id_token'),
+                        'activation': example_data.get('activation')
+                    }
+                    logger.info(f"Data to store: {data_to_store}")
+                    return data_to_store
+                except json.JSONDecodeError:
+                    logger.error(f"JSONDecodeError: Failed to parse example_data_json: {raw_data_str}")
+                    return dash.no_update
+            else:
+                logger.warning(f"example_data_list[{clicked_idx}] is empty or None. Returning dash.no_update.")
+                return dash.no_update
+        else:
+            logger.error(f"Error: clicked_idx {clicked_idx} is out of bounds for example_data_list (len {len(example_data_list)})")
+            return dash.no_update
+    else:
+        logger.info("clicked_idx is -1 (no specific button click identified as the trigger or n_clicks was 0/None). Returning dash.no_update.")
+        return dash.no_update
