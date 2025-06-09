@@ -864,7 +864,7 @@ def render_intervals_grid(selected_feature_id: int | None):
 @callback(
     Output('ablation-primary-store', 'data'),
     Input({'type': 'select-ablation-primary', 'index': ALL}, 'n_clicks'),
-    State({'type': 'ablation-card-data-wrapper', 'index': ALL}, 'data_example_data'), # Changed State target
+    State({'type': 'ablation-card-data-wrapper', 'index': ALL}, 'data-example-data'), # Changed to hyphen
     prevent_initial_call=True
 )
 def update_ablation_primary_store(n_clicks_list, example_data_list): # Arguments remain the same name for clarity
