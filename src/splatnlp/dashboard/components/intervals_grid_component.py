@@ -4,6 +4,7 @@ Feature Intervals Grid Dashboard Component
 A refactored version of the intervals grid visualization for feature analysis.
 """
 
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -312,7 +313,7 @@ class UIComponentBuilder:
                         id={
                             "type": "ablation-load-btn",
                             "index": index,
-                            "build_tokens": ability_names,
+                            "build_tokens": json.dumps(ability_names),
                             "weapon": weapon_name,
                         },
                         color="info",
@@ -860,9 +861,14 @@ def send_to_ablation(_):
     if not ctx.triggered or ctx.triggered_id is None:
         raise dash.exceptions.PreventUpdate
     button_id = ctx.triggered_id
+    tokens_json = button_id.get("build_tokens", "[]")
+    try:
+        tokens = json.loads(tokens_json)
+    except Exception:  # noqa: BLE001
+        tokens = []
     return (
         {
-            "build_tokens": button_id.get("build_tokens", []),
+            "build_tokens": tokens,
             "weapon_name": button_id.get("weapon"),
         },
         "tab-ablation",
