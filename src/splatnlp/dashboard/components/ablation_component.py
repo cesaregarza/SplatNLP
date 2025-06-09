@@ -86,6 +86,7 @@ ablation_component = html.Div(
         ),
         dcc.Store(id="ablation-primary-store"),
         dcc.Store(id="ablation-secondary-store"),
+        dcc.Store(id="ablation-load-store"),
         html.Div(id="ablation-results"),
     ]
 )
@@ -153,3 +154,15 @@ def _display_difference(primary_act, secondary_act):
         return dash.no_update
     diff = secondary_act - primary_act
     return f"Difference: {diff:.4f}"
+
+
+@callback(
+    Output("ablation-build", "value"),
+    Output("ablation-weapon", "value"),
+    Input("ablation-load-store", "data"),
+    prevent_initial_call=True,
+)
+def _load_from_store(data):
+    if not data:
+        raise dash.exceptions.PreventUpdate
+    return " ".join(data.get("build_tokens", [])), data.get("weapon_name")

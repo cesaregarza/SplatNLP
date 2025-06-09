@@ -8,6 +8,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+import dash
 import dash_bootstrap_components as dbc
 import polars as pl
 from dash import Input, Output, callback, dcc, html
@@ -257,6 +258,7 @@ class UIComponentBuilder:
         activation_val: float,
         top_tfidf_tokens: set[str],
         inv_vocab: dict[str, str],
+        index: int,
     ) -> dbc.Card:
         """Build a card displaying an example activation."""
         # Get ability names
@@ -282,7 +284,7 @@ class UIComponentBuilder:
             else "N/A"
         )
 
-        # Build card
+        # Build card with ablation button
         return dbc.Card(
             dbc.CardBody(
                 [
@@ -290,24 +292,32 @@ class UIComponentBuilder:
                         weapon_name,
                         className="card-title mb-2 text-truncate",
                         title=weapon_name,
-                        style={
-                            "minHeight": "1.5rem"
-                        },  # Ensure consistent height for title
+                        style={"minHeight": "1.5rem"},
                     ),
                     html.Div(
                         ability_display,
                         className="flex-grow-1 overflow-auto mb-2",
                         style={
                             "fontSize": "0.9rem",
-                            "maxHeight": "calc(100% - 3rem)",
-                        },  # Reserve space for title and activation
+                            "maxHeight": "calc(100% - 3.5rem)",
+                        },
                     ),
                     html.P(
                         f"Activation: {activation_val:.4f}",
-                        className="mb-0 fw-semibold text-primary",
-                        style={
-                            "minHeight": "1.5rem"
-                        },  # Ensure consistent height for activation
+                        className="mb-2 fw-semibold text-primary",
+                        style={"minHeight": "1.5rem"},
+                    ),
+                    dbc.Button(
+                        "Use for Ablation",
+                        id={
+                            "type": "ablation-load-btn",
+                            "index": index,
+                            "build": " ".join(ability_names),
+                            "weapon": weapon_name,
+                        },
+                        color="info",
+                        size="sm",
+                        className="mt-auto",
                     ),
                 ],
                 className="d-flex flex-column",
@@ -498,7 +508,8 @@ class UIComponentBuilder:
         weapon_names: dict[int, str],
         top_tfidf_tokens: set[str],
         inv_vocab: dict[str, str],
-    ) -> html.Div:
+        start_idx: int = 0,
+    ) -> tuple[html.Div, int]:
         """Build a section for a histogram bin."""
         header_text = f"Bin {bin_idx[0]}: [{min_act:.3f}, {max_act:.3f}) - {count:,} examples"
 
@@ -512,6 +523,7 @@ class UIComponentBuilder:
                 samples, min(MAX_SAMPLES_PER_BIN, count)
             )
 
+            idx = start_idx
             for sample in samples_to_show:
                 # Get weapon name from cache
                 weapon_id = sample.get("weapon_id_token")
@@ -523,10 +535,12 @@ class UIComponentBuilder:
                     sample["activation"],
                     top_tfidf_tokens,
                     inv_vocab,
+                    idx,
                 )
                 card_cols.append(dbc.Col(card, width="auto", className="p-1"))
+                idx += 1
 
-        return html.Div(
+        section = html.Div(
             [
                 html.Div(header_text, className="fw-bold mb-2"),
                 dbc.Row(
@@ -536,6 +550,7 @@ class UIComponentBuilder:
             ],
             className="p-3 mb-3 border rounded bg-light",
         )
+        return section, idx
 
 
 class IntervalsGridRenderer:
@@ -671,6 +686,7 @@ class IntervalsGridRenderer:
     def _build_all_bin_sections(self) -> list[html.Div]:
         """Build sections for all histogram bins."""
         sections = []
+        idx_counter = 0
 
         # Get top TF-IDF tokens for highlighting
         top_tfidf_tokens = (
@@ -756,7 +772,7 @@ class IntervalsGridRenderer:
             lower_bound, upper_bound = bin_rows[bin_idx]
 
             # Build section for this bin
-            section = UIComponentBuilder.build_bin_section(
+            section, idx_counter = UIComponentBuilder.build_bin_section(
                 (bin_idx,),  # Wrap in tuple to match expected format
                 lower_bound,
                 upper_bound,
@@ -765,6 +781,7 @@ class IntervalsGridRenderer:
                 self._cache.weapon_id_to_name,
                 top_tfidf_tokens,
                 self.context.inv_vocab,
+                idx_counter,
             )
             sections.append((section, bin_idx))
 
@@ -830,3 +847,19 @@ def render_intervals_grid(selected_feature_id: int | None):
     except Exception as e:
         logger.error(f"Failed to render intervals grid: {e}", exc_info=True)
         return [], f"Error: {str(e)}"
+
+
+@callback(
+    Output("ablation-load-store", "data"),
+    Input({"type": "ablation-load-btn", "index": dash.ALL}, "n_clicks"),
+    prevent_initial_call=True,
+)
+def send_to_ablation(_):
+    ctx = dash.callback_context
+    if not ctx.triggered or ctx.triggered_id is None:
+        raise dash.exceptions.PreventUpdate
+    button_id = ctx.triggered_id
+    return {
+        "build_tokens": button_id.get("build", "").split(),
+        "weapon_name": button_id.get("weapon"),
+    }
