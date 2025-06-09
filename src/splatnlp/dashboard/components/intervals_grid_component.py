@@ -4,13 +4,15 @@ Feature Intervals Grid Dashboard Component
 A refactored version of the intervals grid visualization for feature analysis.
 """
 
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+import dash
 import dash_bootstrap_components as dbc
 import polars as pl
-from dash import Input, Output, callback, dcc, html
+from dash import ALL, Input, Output, State, callback, dcc, html
 
 from splatnlp.dashboard.components.feature_labels import FeatureLabelsManager
 from splatnlp.dashboard.fs_database import FSDatabase
@@ -259,6 +261,23 @@ class UIComponentBuilder:
         inv_vocab: dict[str, str],
     ) -> dbc.Card:
         """Build a card displaying an example activation."""
+        # Generate a unique ID for the button's index
+        # Using weapon_id_token and a formatted activation value
+        weapon_id_token_str = str(record.get("weapon_id_token", "unknown"))
+        activation_str = f"{record.get('activation', 0.0):.4f}"  # Format to avoid overly long/problematic strings
+        unique_example_id = f"{weapon_id_token_str}_{activation_str}"
+
+        # Prepare data for the data-attribute
+        example_data_to_store = {
+            "ability_input_tokens": record.get("ability_input_tokens"),
+            "weapon_id_token": record.get("weapon_id_token"),
+            "activation": record.get("activation"),
+        }
+        example_data_json = json.dumps(example_data_to_store)
+
+        logger.info(
+            f"Building card wrapper for index {unique_example_id}. JSON data to be assigned: '{example_data_json}'"
+        )
         # Get ability names
         ability_names = [
             inv_vocab[token]
@@ -309,11 +328,37 @@ class UIComponentBuilder:
                             "minHeight": "1.5rem"
                         },  # Ensure consistent height for activation
                     ),
+                    html.Div(
+                        id={
+                            "type": "ablation-card-data-wrapper",
+                            "index": unique_example_id,
+                        },
+                        **{
+                            "data-example": example_data_json
+                        },  # Store data in wrapper
+                        children=[
+                            dbc.Button(
+                                "Use as Primary for Ablation",
+                                id={
+                                    "type": "select-ablation-primary",
+                                    "index": unique_example_id,
+                                },
+                                color="primary",
+                                size="sm",
+                                className="mt-auto",
+                            )
+                        ],
+                    ),
                 ],
                 className="d-flex flex-column",
-                style={"height": CARD_HEIGHT},
+                style={
+                    "height": CARD_HEIGHT
+                },  # Adjusted height if needed due to button
             ),
-            style={"width": CARD_WIDTH, "height": CARD_HEIGHT},
+            style={
+                "width": CARD_WIDTH,
+                "height": "auto",
+            },  # Adjusted height to auto
             className="shadow-sm h-100",
         )
 
@@ -830,3 +875,64 @@ def render_intervals_grid(selected_feature_id: int | None):
     except Exception as e:
         logger.error(f"Failed to render intervals grid: {e}", exc_info=True)
         return [], f"Error: {str(e)}"
+
+
+@callback(
+    Output("ablation-primary-store", "data"),
+    Output("analysis-tabs", "active_tab"),
+    Input({"type": "select-ablation-primary", "index": dash.ALL}, "n_clicks"),
+    State(
+        {"type": "ablation-card-data-wrapper", "index": dash.ALL},
+        "data-example",
+    ),
+    prevent_initial_call=True,
+)
+def update_ablation_primary_store(n_clicks_list, example_data_list):
+    """Update the ablation-primary-store with data from the clicked example card."""
+    ctx = dash.callback_context
+
+    if not ctx.triggered_id:
+        return dash.no_update, dash.no_update
+
+    # Ensure triggered_id is a dict and has 'index' (expected for pattern-matching callbacks)
+    if (
+        not isinstance(ctx.triggered_id, dict)
+        or "index" not in ctx.triggered_id
+    ):
+        return dash.no_update, dash.no_update
+
+    clicked_button_index_str = ctx.triggered_id["index"]
+
+    clicked_idx = -1
+    # Find which button was clicked based on the index
+    if ctx.inputs_list and isinstance(ctx.inputs_list[0], list):
+        for i, input_def in enumerate(ctx.inputs_list[0]):
+            if (
+                isinstance(input_def.get("id"), dict)
+                and input_def["id"].get("index") == clicked_button_index_str
+            ):
+                # Check if this specific button's n_clicks is what triggered the callback
+                if n_clicks_list[i] is not None and n_clicks_list[i] > 0:
+                    clicked_idx = i
+                    break
+
+    if clicked_idx != -1 and clicked_idx < len(example_data_list):
+        raw_data_str = example_data_list[clicked_idx]
+        if raw_data_str:
+            try:
+                example_data = json.loads(raw_data_str)
+                data_to_store = {
+                    "ability_input_tokens": example_data.get(
+                        "ability_input_tokens"
+                    ),
+                    "weapon_id_token": example_data.get("weapon_id_token"),
+                    "activation": example_data.get("activation"),
+                }
+                return (
+                    data_to_store,
+                    "tab-ablation",
+                )  # Also switch to ablation tab
+            except json.JSONDecodeError:
+                return dash.no_update, dash.no_update
+
+    return dash.no_update, dash.no_update
