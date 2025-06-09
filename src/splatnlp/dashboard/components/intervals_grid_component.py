@@ -324,13 +324,18 @@ class UIComponentBuilder:
                             "minHeight": "1.5rem"
                         },  # Ensure consistent height for activation
                     ),
-                    dbc.Button(
-                        "Use as Primary for Ablation",
-                        id={'type': 'select-ablation-primary', 'index': unique_example_id},
-                        color="primary",
-                        size="sm",
-                        className="mt-auto",
-                        **{'data-example_data': example_data_json}
+                    html.Div(
+                        id={'type': 'ablation-card-data-wrapper', 'index': unique_example_id},
+                        data_example_data=example_data_json,
+                        children=[
+                            dbc.Button(
+                                "Use as Primary for Ablation",
+                                id={'type': 'select-ablation-primary', 'index': unique_example_id},
+                                color="primary",
+                                size="sm",
+                                className="mt-auto",
+                            )
+                        ]
                     ),
                 ],
                 className="d-flex flex-column",
@@ -859,10 +864,10 @@ def render_intervals_grid(selected_feature_id: int | None):
 @callback(
     Output('ablation-primary-store', 'data'),
     Input({'type': 'select-ablation-primary', 'index': ALL}, 'n_clicks'),
-    State({'type': 'select-ablation-primary', 'index': ALL}, 'data-example_data'),
+    State({'type': 'ablation-card-data-wrapper', 'index': ALL}, 'data_example_data'), # Changed State target
     prevent_initial_call=True
 )
-def update_ablation_primary_store(n_clicks_list, example_data_list):
+def update_ablation_primary_store(n_clicks_list, example_data_list): # Arguments remain the same name for clarity
     """Update the ablation-primary-store with data from the clicked example card."""
     triggered = callback_context.triggered
     if not triggered or not any(n_clicks_list): # Check if any button was clicked
