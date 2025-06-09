@@ -4,14 +4,15 @@ Feature Intervals Grid Dashboard Component
 A refactored version of the intervals grid visualization for feature analysis.
 """
 
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+import dash
 import dash_bootstrap_components as dbc
 import polars as pl
-from dash import Input, Output, State, callback, dcc, html, ALL, callback_context
-import json
+from dash import ALL, Input, Output, State, callback, dcc, html
 
 from splatnlp.dashboard.components.feature_labels import FeatureLabelsManager
 from splatnlp.dashboard.fs_database import FSDatabase
@@ -262,19 +263,21 @@ class UIComponentBuilder:
         """Build a card displaying an example activation."""
         # Generate a unique ID for the button's index
         # Using weapon_id_token and a formatted activation value
-        weapon_id_token_str = str(record.get('weapon_id_token', 'unknown'))
-        activation_str = f"{record.get('activation', 0.0):.4f}" # Format to avoid overly long/problematic strings
+        weapon_id_token_str = str(record.get("weapon_id_token", "unknown"))
+        activation_str = f"{record.get('activation', 0.0):.4f}"  # Format to avoid overly long/problematic strings
         unique_example_id = f"{weapon_id_token_str}_{activation_str}"
 
         # Prepare data for the data-attribute
         example_data_to_store = {
-            'ability_input_tokens': record.get('ability_input_tokens'),
-            'weapon_id_token': record.get('weapon_id_token'),
-            'activation': record.get('activation')
+            "ability_input_tokens": record.get("ability_input_tokens"),
+            "weapon_id_token": record.get("weapon_id_token"),
+            "activation": record.get("activation"),
         }
         example_data_json = json.dumps(example_data_to_store)
 
-        logger.info(f"Building card wrapper for index {unique_example_id}. JSON data to be assigned: '{example_data_json}'")
+        logger.info(
+            f"Building card wrapper for index {unique_example_id}. JSON data to be assigned: '{example_data_json}'"
+        )
         # Get ability names
         ability_names = [
             inv_vocab[token]
@@ -326,23 +329,36 @@ class UIComponentBuilder:
                         },  # Ensure consistent height for activation
                     ),
                     html.Div(
-                        id={'type': 'ablation-card-data-wrapper', 'index': unique_example_id},
-                        **{'data-example': example_data_json}, # Changed attribute name
+                        id={
+                            "type": "ablation-card-data-wrapper",
+                            "index": unique_example_id,
+                        },
+                        **{
+                            "data-example": example_data_json
+                        },  # Store data in wrapper
                         children=[
                             dbc.Button(
                                 "Use as Primary for Ablation",
-                                id={'type': 'select-ablation-primary', 'index': unique_example_id},
+                                id={
+                                    "type": "select-ablation-primary",
+                                    "index": unique_example_id,
+                                },
                                 color="primary",
                                 size="sm",
                                 className="mt-auto",
                             )
-                        ]
+                        ],
                     ),
                 ],
                 className="d-flex flex-column",
-                style={"height": CARD_HEIGHT}, # Adjusted height if needed due to button
+                style={
+                    "height": CARD_HEIGHT
+                },  # Adjusted height if needed due to button
             ),
-            style={"width": CARD_WIDTH, "height": "auto"}, # Adjusted height to auto
+            style={
+                "width": CARD_WIDTH,
+                "height": "auto",
+            },  # Adjusted height to auto
             className="shadow-sm h-100",
         )
 
@@ -817,7 +833,6 @@ intervals_grid_component = html.Div(
             children=html.Div(id="intervals-grid-display"),
         ),
         html.P(id="intervals-grid-error-message", style={"color": "red"}),
-        dcc.Store(id='ablation-primary-store') # Added store for ablation data
     ],
     id="intervals-grid-content",
     className="mb-4",
@@ -863,71 +878,61 @@ def render_intervals_grid(selected_feature_id: int | None):
 
 
 @callback(
-    Output('ablation-primary-store', 'data'),
-    Input({'type': 'select-ablation-primary', 'index': ALL}, 'n_clicks'),
-    State({'type': 'ablation-card-data-wrapper', 'index': ALL}, 'data-example'), # Changed property name
-    prevent_initial_call=True
+    Output("ablation-primary-store", "data"),
+    Output("analysis-tabs", "active_tab"),
+    Input({"type": "select-ablation-primary", "index": dash.ALL}, "n_clicks"),
+    State(
+        {"type": "ablation-card-data-wrapper", "index": dash.ALL},
+        "data-example",
+    ),
+    prevent_initial_call=True,
 )
-def update_ablation_primary_store(n_clicks_list, example_data_list): # Arguments remain the same name for clarity
+def update_ablation_primary_store(n_clicks_list, example_data_list):
     """Update the ablation-primary-store with data from the clicked example card."""
-    logger.info("update_ablation_primary_store triggered.")
-    logger.info(f"Initial n_clicks_list: {n_clicks_list}")
-    # logger.info(f"Initial example_data_list: {example_data_list}") # Can be very verbose
-    logger.info(f"Callback triggered: {callback_context.triggered}")
-    logger.info(f"Triggered ID (button_id_dict): {callback_context.triggered_id}")
+    ctx = dash.callback_context
 
-    if not callback_context.triggered_id:
-        logger.info("No triggered_id (e.g., initial load or no relevant Input fired), returning dash.no_update.")
-        return dash.no_update
+    if not ctx.triggered_id:
+        return dash.no_update, dash.no_update
 
     # Ensure triggered_id is a dict and has 'index' (expected for pattern-matching callbacks)
-    if not isinstance(callback_context.triggered_id, dict) or 'index' not in callback_context.triggered_id:
-        logger.warning(f"Triggered ID is not a dict or does not contain 'index': {callback_context.triggered_id}. Returning dash.no_update.")
-        return dash.no_update
+    if (
+        not isinstance(ctx.triggered_id, dict)
+        or "index" not in ctx.triggered_id
+    ):
+        return dash.no_update, dash.no_update
 
-    clicked_button_index_str = callback_context.triggered_id['index']
-    logger.info(f"Clicked button index string: {clicked_button_index_str}")
+    clicked_button_index_str = ctx.triggered_id["index"]
 
     clicked_idx = -1
-    # Ensure inputs_list[0] (corresponding to the Input) is not empty and is a list of dicts
-    if not callback_context.inputs_list or not isinstance(callback_context.inputs_list[0], list):
-        logger.error(f"callback_context.inputs_list[0] is not as expected: {callback_context.inputs_list}. Returning dash.no_update.")
-        return dash.no_update
+    # Find which button was clicked based on the index
+    if ctx.inputs_list and isinstance(ctx.inputs_list[0], list):
+        for i, input_def in enumerate(ctx.inputs_list[0]):
+            if (
+                isinstance(input_def.get("id"), dict)
+                and input_def["id"].get("index") == clicked_button_index_str
+            ):
+                # Check if this specific button's n_clicks is what triggered the callback
+                if n_clicks_list[i] is not None and n_clicks_list[i] > 0:
+                    clicked_idx = i
+                    break
 
-    for i, input_def in enumerate(callback_context.inputs_list[0]):
-        # logger.info(f"Looping to find clicked_idx: i={i}, input_def_id_index={input_def.get('id', {}).get('index')}") # Potentially verbose
-        if isinstance(input_def.get('id'), dict) and input_def['id'].get('index') == clicked_button_index_str:
-            # Check if this specific button's n_clicks is what triggered the callback
-            if n_clicks_list[i] is not None and n_clicks_list[i] > 0:
-                 clicked_idx = i
-                 break
+    if clicked_idx != -1 and clicked_idx < len(example_data_list):
+        raw_data_str = example_data_list[clicked_idx]
+        if raw_data_str:
+            try:
+                example_data = json.loads(raw_data_str)
+                data_to_store = {
+                    "ability_input_tokens": example_data.get(
+                        "ability_input_tokens"
+                    ),
+                    "weapon_id_token": example_data.get("weapon_id_token"),
+                    "activation": example_data.get("activation"),
+                }
+                return (
+                    data_to_store,
+                    "tab-ablation",
+                )  # Also switch to ablation tab
+            except json.JSONDecodeError:
+                return dash.no_update, dash.no_update
 
-    logger.info(f"Identified clicked_idx: {clicked_idx}")
-
-    if clicked_idx != -1:
-        if clicked_idx < len(example_data_list):
-            raw_data_str = example_data_list[clicked_idx]
-            logger.info(f"Raw example_data string for index {clicked_idx}: {raw_data_str}")
-            if raw_data_str:
-                try:
-                    example_data = json.loads(raw_data_str)
-                    logger.info(f"Parsed example_data: {example_data}")
-                    data_to_store = {
-                        'ability_input_tokens': example_data.get('ability_input_tokens'),
-                        'weapon_id_token': example_data.get('weapon_id_token'),
-                        'activation': example_data.get('activation')
-                    }
-                    logger.info(f"Data to store: {data_to_store}")
-                    return data_to_store
-                except json.JSONDecodeError:
-                    logger.error(f"JSONDecodeError: Failed to parse example_data_json: {raw_data_str}")
-                    return dash.no_update
-            else:
-                logger.warning(f"example_data_list[{clicked_idx}] is empty or None. Returning dash.no_update.")
-                return dash.no_update
-        else:
-            logger.error(f"Error: clicked_idx {clicked_idx} is out of bounds for example_data_list (len {len(example_data_list)})")
-            return dash.no_update
-    else:
-        logger.info("clicked_idx is -1 (no specific button click identified as the trigger or n_clicks was 0/None). Returning dash.no_update.")
-        return dash.no_update
+    return dash.no_update, dash.no_update

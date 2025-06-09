@@ -1,3 +1,4 @@
+from splatnlp.dashboard.components.ablation_component import ablation_component
 from splatnlp.dashboard.components.activation_hist import (
     activation_hist_component,
 )
@@ -19,8 +20,6 @@ from splatnlp.dashboard.components.top_examples_component import (
 from splatnlp.dashboard.components.top_logits_component import (
     top_logits_component,
 )
-from splatnlp.dashboard.components.ablation_component import ablation_component
-
 
 __all__ = [
     "activation_hist_component",
