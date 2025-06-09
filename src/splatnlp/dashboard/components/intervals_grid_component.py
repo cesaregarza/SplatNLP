@@ -274,6 +274,7 @@ class UIComponentBuilder:
         }
         example_data_json = json.dumps(example_data_to_store)
 
+        logger.info(f"Building card wrapper for index {unique_example_id}. JSON data to be assigned: '{example_data_json}'")
         # Get ability names
         ability_names = [
             inv_vocab[token]
@@ -326,7 +327,7 @@ class UIComponentBuilder:
                     ),
                     html.Div(
                         id={'type': 'ablation-card-data-wrapper', 'index': unique_example_id},
-                        **{'data-example_data': example_data_json}, # Corrected way to pass hyphenated data attributes
+                        **{'data-example': example_data_json}, # Changed attribute name
                         children=[
                             dbc.Button(
                                 "Use as Primary for Ablation",
@@ -864,7 +865,7 @@ def render_intervals_grid(selected_feature_id: int | None):
 @callback(
     Output('ablation-primary-store', 'data'),
     Input({'type': 'select-ablation-primary', 'index': ALL}, 'n_clicks'),
-    State({'type': 'ablation-card-data-wrapper', 'index': ALL}, 'data-example-data'), # Changed to hyphen
+    State({'type': 'ablation-card-data-wrapper', 'index': ALL}, 'data-example'), # Changed property name
     prevent_initial_call=True
 )
 def update_ablation_primary_store(n_clicks_list, example_data_list): # Arguments remain the same name for clarity
