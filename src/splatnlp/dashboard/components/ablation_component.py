@@ -3,7 +3,7 @@ import dash_bootstrap_components as dbc
 from dash import dcc, html, Input, Output, State, callback_context
 import json # For potentially displaying dicts or if data is stored as JSON string
 import torch # Import PyTorch
-from splatnlp.dashboard.app import DASHBOARD_CONTEXT # Import DASHBOARD_CONTEXT
+# Removed: from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
 # Define the layout for the Ablation tab
 layout = html.Div(
@@ -61,6 +61,7 @@ layout = html.Div(
     Input('ablation-primary-store', 'data')
 )
 def display_primary_build(primary_data):
+    from splatnlp.dashboard.app import DASHBOARD_CONTEXT # Moved import here
     if primary_data:
         inv_vocab = DASHBOARD_CONTEXT.inv_vocab if hasattr(DASHBOARD_CONTEXT, 'inv_vocab') else {}
         weapon_id = primary_data.get('weapon_id_token', 'N/A')
@@ -145,6 +146,7 @@ def get_sae_activations(primary_model, sae_model, ability_token_ids: list[int], 
     State('feature-dropdown', 'value')  # Added state for selected feature
 )
 def run_ablation_analysis(n_clicks, primary_data, secondary_build_string, selected_feature_id): # Added argument
+    from splatnlp.dashboard.app import DASHBOARD_CONTEXT # Moved import here
     if not n_clicks:
         # Return a default message if the button hasn't been clicked yet in the session
         return html.P("Enter primary and secondary build details, then click 'Run Ablation Analysis'. Select a feature from the dropdown on the left to see its specific ablation.")

@@ -50,6 +50,7 @@ class TestAblationComponent(unittest.TestCase):
         self.mock_context_object.pad_token_id = self.pad_token_id
         self.mock_context_object.device = self.device
         self.mock_context_object.vocab = {"AbilityX": 101, "AbilityY": 102, "AbilityKnown": 103}
+        self.mock_context_object.inv_vocab = {v: k for k, v in self.mock_context_object.vocab.items()} # For display_primary_build tests
 
         # Setup feature_labels_manager mock on this object
         self.mock_context_object.feature_labels_manager = MagicMock()
@@ -105,11 +106,14 @@ class TestAblationComponent(unittest.TestCase):
         self.assertEqual(output_display, "No primary build selected.")
         self.assertEqual(output_input_val, "")
 
-    @patch('splatnlp.dashboard.components.ablation_component.DASHBOARD_CONTEXT', SimpleNamespace())
-    def test_display_primary_build_with_data(self, mock_dashboard_context):
-        mock_dashboard_context.inv_vocab = {101: "AbilityA", 102: "AbilityB"}
+    @patch('splatnlp.dashboard.app.DASHBOARD_CONTEXT')
+    def test_display_primary_build_with_data(self, mock_dashboard_context_obj):
+        mock_dashboard_context_obj.inv_vocab = {101: "AbilityA", 102: "AbilityB"}
+        # Ensure other potentially accessed attributes are available or mocked if necessary
+        # For display_primary_build, only inv_vocab is directly used.
+
         primary_data = {
-            'weapon_id_token': "WeaponX", # Assuming weapon_id is already a name/str
+            'weapon_id_token': "WeaponX",
             'ability_input_tokens': [101, 102],
             'activation': 0.75123
         }
@@ -119,15 +123,15 @@ class TestAblationComponent(unittest.TestCase):
         self.assertIsInstance(output_display, list)
         self.assertIn("Weapon ID: WeaponX", str(output_display[0]))
         self.assertIn("Abilities: AbilityA, AbilityB", str(output_display[1]))
-        self.assertIn("Original Activation: 0.7512", str(output_display[2])) # Check formatting
+        self.assertIn("Original Activation: 0.7512", str(output_display[2]))
         self.assertEqual(output_input_val, "AbilityA, AbilityB")
 
-    @patch('splatnlp.dashboard.components.ablation_component.DASHBOARD_CONTEXT', SimpleNamespace())
-    def test_display_primary_build_unknown_token(self, mock_dashboard_context):
-        mock_dashboard_context.inv_vocab = {101: "AbilityA"}
+    @patch('splatnlp.dashboard.app.DASHBOARD_CONTEXT')
+    def test_display_primary_build_unknown_token(self, mock_dashboard_context_obj):
+        mock_dashboard_context_obj.inv_vocab = {101: "AbilityA"}
         primary_data = {
             'weapon_id_token': "WeaponY",
-            'ability_input_tokens': [101, 999], # 999 is unknown
+            'ability_input_tokens': [101, 999],
             'activation': 0.5
         }
 
@@ -139,12 +143,11 @@ class TestAblationComponent(unittest.TestCase):
     # --- Tests for run_ablation_analysis callback ---
 
     @patch('splatnlp.dashboard.components.ablation_component.get_sae_activations')
-    @patch('splatnlp.dashboard.components.ablation_component.DASHBOARD_CONTEXT')
+    @patch('splatnlp.dashboard.app.DASHBOARD_CONTEXT')
     def test_run_ablation_no_models_in_context(self, mock_dashboard_context_obj, mock_get_sae_activations):
         mock_dashboard_context_obj.primary_model = None
         mock_dashboard_context_obj.sae_model = self.mock_context_object.sae_model
         mock_dashboard_context_obj.pad_token_id = self.mock_context_object.pad_token_id
-        # Ensure feature_labels_manager is part of the mock, even if not used in this specific error path
         mock_dashboard_context_obj.feature_labels_manager = self.mock_context_object.feature_labels_manager
 
         result = run_ablation_analysis(n_clicks=1, primary_data={'weapon_id_token': 1}, secondary_build_string="Test", selected_feature_id=0)
@@ -152,11 +155,11 @@ class TestAblationComponent(unittest.TestCase):
         self.assertIn("Models not loaded", result.children)
 
     @patch('splatnlp.dashboard.components.ablation_component.get_sae_activations')
-    @patch('splatnlp.dashboard.components.ablation_component.DASHBOARD_CONTEXT')
+    @patch('splatnlp.dashboard.app.DASHBOARD_CONTEXT')
     def test_run_ablation_no_pad_id_in_context(self, mock_dashboard_context_obj, mock_get_sae_activations):
         mock_dashboard_context_obj.primary_model = self.mock_context_object.primary_model
         mock_dashboard_context_obj.sae_model = self.mock_context_object.sae_model
-        mock_dashboard_context_obj.pad_token_id = None # Critical part of this test
+        mock_dashboard_context_obj.pad_token_id = None
         mock_dashboard_context_obj.feature_labels_manager = self.mock_context_object.feature_labels_manager
 
         result = run_ablation_analysis(n_clicks=1, primary_data={'weapon_id_token': 1}, secondary_build_string="Test", selected_feature_id=0)
@@ -164,9 +167,8 @@ class TestAblationComponent(unittest.TestCase):
         self.assertIn("PAD token ID not configured", result.children)
 
     @patch('splatnlp.dashboard.components.ablation_component.get_sae_activations')
-    @patch('splatnlp.dashboard.components.ablation_component.DASHBOARD_CONTEXT')
+    @patch('splatnlp.dashboard.app.DASHBOARD_CONTEXT')
     def test_run_ablation_no_primary_data(self, mock_dashboard_context_obj, mock_get_sae_activations):
-        # Configure the context fully, even though it's not the main part being tested for this case
         mock_dashboard_context_obj.primary_model = self.mock_context_object.primary_model
         mock_dashboard_context_obj.sae_model = self.mock_context_object.sae_model
         mock_dashboard_context_obj.pad_token_id = self.mock_context_object.pad_token_id
@@ -176,7 +178,7 @@ class TestAblationComponent(unittest.TestCase):
         self.assertEqual(result, "Please select a primary build first.")
 
     @patch('splatnlp.dashboard.components.ablation_component.get_sae_activations')
-    @patch('splatnlp.dashboard.components.ablation_component.DASHBOARD_CONTEXT')
+    @patch('splatnlp.dashboard.app.DASHBOARD_CONTEXT')
     def test_run_ablation_no_secondary_input(self, mock_dashboard_context_obj, mock_get_sae_activations):
         mock_dashboard_context_obj.primary_model = self.mock_context_object.primary_model
         mock_dashboard_context_obj.sae_model = self.mock_context_object.sae_model
@@ -188,7 +190,7 @@ class TestAblationComponent(unittest.TestCase):
         self.assertEqual(result, "Please provide secondary ability tokens.")
 
     @patch('splatnlp.dashboard.components.ablation_component.get_sae_activations')
-    @patch('splatnlp.dashboard.components.ablation_component.DASHBOARD_CONTEXT')
+    @patch('splatnlp.dashboard.app.DASHBOARD_CONTEXT')
     def test_run_ablation_get_primary_activations_fails(self, mock_dashboard_context_obj, mock_get_sae_activations):
         mock_dashboard_context_obj.primary_model = self.mock_context_object.primary_model
         mock_dashboard_context_obj.sae_model = self.mock_context_object.sae_model
@@ -204,7 +206,7 @@ class TestAblationComponent(unittest.TestCase):
         self.assertEqual(result, "Could not compute primary activations. Check model and inputs.")
 
     @patch('splatnlp.dashboard.components.ablation_component.get_sae_activations')
-    @patch('splatnlp.dashboard.components.ablation_component.DASHBOARD_CONTEXT')
+    @patch('splatnlp.dashboard.app.DASHBOARD_CONTEXT')
     def test_run_ablation_get_secondary_activations_fails(self, mock_dashboard_context_obj, mock_get_sae_activations):
         mock_dashboard_context_obj.primary_model = self.mock_context_object.primary_model
         mock_dashboard_context_obj.sae_model = self.mock_context_object.sae_model
@@ -222,7 +224,7 @@ class TestAblationComponent(unittest.TestCase):
         self.assertTrue(any("Could not compute secondary activations" in str(child) for child in result.children))
 
     @patch('splatnlp.dashboard.components.ablation_component.get_sae_activations')
-    @patch('splatnlp.dashboard.components.ablation_component.DASHBOARD_CONTEXT')
+    @patch('splatnlp.dashboard.app.DASHBOARD_CONTEXT')
     def test_run_ablation_success_feature_selected(self, mock_dashboard_context_obj, mock_get_sae_activations):
         mock_dashboard_context_obj.primary_model = self.mock_context_object.primary_model
         mock_dashboard_context_obj.sae_model = self.mock_context_object.sae_model
@@ -257,10 +259,9 @@ class TestAblationComponent(unittest.TestCase):
         self.assertNotIn("Top Feature Activation Changes", result_str)
 
     @patch('splatnlp.dashboard.components.ablation_component.get_sae_activations')
-    @patch('splatnlp.dashboard.components.ablation_component.DASHBOARD_CONTEXT')
+    @patch('splatnlp.dashboard.app.DASHBOARD_CONTEXT')
     def test_run_ablation_no_feature_selected(self, mock_dashboard_context_obj, mock_get_sae_activations):
         mock_dashboard_context_obj.primary_model = self.mock_context_object.primary_model
-        # ... copy other necessary attributes from self.mock_context_object
         mock_dashboard_context_obj.sae_model = self.mock_context_object.sae_model
         mock_dashboard_context_obj.vocab = self.mock_context_object.vocab
         mock_dashboard_context_obj.pad_token_id = self.mock_context_object.pad_token_id
@@ -275,21 +276,19 @@ class TestAblationComponent(unittest.TestCase):
         result = run_ablation_analysis(n_clicks=1, primary_data=primary_data, secondary_build_string="AbilityX", selected_feature_id=None)
 
         self.assertIsInstance(result, html.Div)
-        # The message is wrapped in a list, then a P, then the string
         self.assertIn("Please select a feature from the dropdown", str(result.children[0].children))
 
     @patch('splatnlp.dashboard.components.ablation_component.get_sae_activations')
-    @patch('splatnlp.dashboard.components.ablation_component.DASHBOARD_CONTEXT')
+    @patch('splatnlp.dashboard.app.DASHBOARD_CONTEXT')
     def test_run_ablation_selected_feature_out_of_bounds(self, mock_dashboard_context_obj, mock_get_sae_activations):
         mock_dashboard_context_obj.primary_model = self.mock_context_object.primary_model
-        # ... copy other context attributes
         mock_dashboard_context_obj.sae_model = self.mock_context_object.sae_model
         mock_dashboard_context_obj.vocab = self.mock_context_object.vocab
         mock_dashboard_context_obj.pad_token_id = self.mock_context_object.pad_token_id
         mock_dashboard_context_obj.device = self.mock_context_object.device
         mock_dashboard_context_obj.feature_labels_manager = self.mock_context_object.feature_labels_manager
 
-        primary_acts = torch.randn(4) # Max index 3
+        primary_acts = torch.randn(4)
         secondary_acts = torch.randn(4)
         mock_get_sae_activations.side_effect = [primary_acts, secondary_acts]
 
@@ -300,10 +299,9 @@ class TestAblationComponent(unittest.TestCase):
         self.assertIn("Error: Selected feature ID 10 is out of bounds", result.children)
 
     @patch('splatnlp.dashboard.components.ablation_component.get_sae_activations')
-    @patch('splatnlp.dashboard.components.ablation_component.DASHBOARD_CONTEXT')
+    @patch('splatnlp.dashboard.app.DASHBOARD_CONTEXT')
     def test_run_ablation_selected_feature_invalid_format(self, mock_dashboard_context_obj, mock_get_sae_activations):
         mock_dashboard_context_obj.primary_model = self.mock_context_object.primary_model
-        # ... copy other context attributes
         mock_dashboard_context_obj.sae_model = self.mock_context_object.sae_model
         mock_dashboard_context_obj.vocab = self.mock_context_object.vocab
         mock_dashboard_context_obj.pad_token_id = self.mock_context_object.pad_token_id
@@ -322,15 +320,14 @@ class TestAblationComponent(unittest.TestCase):
 
 
     @patch('splatnlp.dashboard.components.ablation_component.get_sae_activations')
-    @patch('splatnlp.dashboard.components.ablation_component.DASHBOARD_CONTEXT')
+    @patch('splatnlp.dashboard.app.DASHBOARD_CONTEXT')
     def test_run_ablation_feature_labels_manager_missing(self, mock_dashboard_context_obj, mock_get_sae_activations):
         mock_dashboard_context_obj.primary_model = self.mock_context_object.primary_model
-        # ... copy other context attributes
         mock_dashboard_context_obj.sae_model = self.mock_context_object.sae_model
         mock_dashboard_context_obj.vocab = self.mock_context_object.vocab
         mock_dashboard_context_obj.pad_token_id = self.mock_context_object.pad_token_id
         mock_dashboard_context_obj.device = self.mock_context_object.device
-        mock_dashboard_context_obj.feature_labels_manager = None # Manager is None
+        mock_dashboard_context_obj.feature_labels_manager = None
 
         selected_idx = 0
         primary_acts = torch.tensor([0.1, 0.2])
@@ -347,15 +344,15 @@ class TestAblationComponent(unittest.TestCase):
 
 
     @patch('splatnlp.dashboard.components.ablation_component.get_sae_activations')
-    @patch('splatnlp.dashboard.components.ablation_component.DASHBOARD_CONTEXT')
+    @patch('splatnlp.dashboard.app.DASHBOARD_CONTEXT')
     def test_run_ablation_unknown_secondary_tokens(self, mock_dashboard_context_obj, mock_get_sae_activations):
         mock_dashboard_context_obj.primary_model = self.mock_context_object.primary_model
         mock_dashboard_context_obj.sae_model = self.mock_context_object.sae_model
-        mock_dashboard_context_obj.vocab = {"AbilityKnown": 103} # Limited vocab for this test
+        mock_dashboard_context_obj.vocab = {"AbilityKnown": 103}
         mock_dashboard_context_obj.pad_token_id = self.mock_context_object.pad_token_id
         mock_dashboard_context_obj.device = self.mock_context_object.device
         mock_dashboard_context_obj.feature_labels_manager = self.mock_context_object.feature_labels_manager
-        mock_dashboard_context_obj.feature_labels_manager.get_display_name.return_value = "Known Feature 0" # For selected_idx 0
+        mock_dashboard_context_obj.feature_labels_manager.get_display_name.return_value = "Known Feature 0"
 
         selected_idx = 0
         primary_acts = torch.tensor([0.1, 0.2])
@@ -363,34 +360,31 @@ class TestAblationComponent(unittest.TestCase):
         mock_get_sae_activations.side_effect = [primary_acts, secondary_acts]
 
         primary_data = {'weapon_id_token': 1, 'ability_input_tokens': [100]}
-        secondary_input = "AbilityKnown,UnknownAbility" # UnknownAbility will be skipped
+        secondary_input = "AbilityKnown,UnknownAbility"
 
         result = run_ablation_analysis(n_clicks=1, primary_data=primary_data, secondary_build_string=secondary_input, selected_feature_id=selected_idx)
 
         self.assertIsInstance(result, html.Div)
-        # Warning message is the first part of the Div's children list
         self.assertIn("Warning: The following ability names were not found in vocabulary and will be skipped: UnknownAbility", str(result.children[0]))
-        # The focused result is the second part
         focused_result_div = result.children[1]
-        self.assertIn("Ablation for Known Feature 0:", str(focused_result_div.children[0])) # H5
+        self.assertIn("Ablation for Known Feature 0:", str(focused_result_div.children[0]))
 
         mock_get_sae_activations.assert_has_calls([
             call(self.mock_context_object.primary_model, self.mock_context_object.sae_model, [100], 1, self.mock_context_object.pad_token_id, self.mock_context_object.device),
-            call(self.mock_context_object.primary_model, self.mock_context_object.sae_model, [103], 1, self.mock_context_object.pad_token_id, self.mock_context_object.device) # Only AbilityKnown (103)
+            call(self.mock_context_object.primary_model, self.mock_context_object.sae_model, [103], 1, self.mock_context_object.pad_token_id, self.mock_context_object.device)
         ])
 
     @patch('splatnlp.dashboard.components.ablation_component.get_sae_activations')
-    @patch('splatnlp.dashboard.components.ablation_component.DASHBOARD_CONTEXT')
+    @patch('splatnlp.dashboard.app.DASHBOARD_CONTEXT')
     def test_run_ablation_no_valid_secondary_tokens_after_parse(self, mock_dashboard_context_obj, mock_get_sae_activations):
         mock_dashboard_context_obj.primary_model = self.mock_context_object.primary_model
         mock_dashboard_context_obj.sae_model = self.mock_context_object.sae_model
-        mock_dashboard_context_obj.vocab = {} # Vocab is empty
+        mock_dashboard_context_obj.vocab = {}
         mock_dashboard_context_obj.pad_token_id = self.mock_context_object.pad_token_id
         mock_dashboard_context_obj.device = self.mock_context_object.device
         mock_dashboard_context_obj.feature_labels_manager = self.mock_context_object.feature_labels_manager
 
         primary_acts = torch.tensor([0.1, 0.2])
-        # get_sae_activations will only be called for primary if secondary tokens are invalid
         mock_get_sae_activations.return_value = primary_acts
 
         primary_data = {'weapon_id_token': 1, 'ability_input_tokens': [100]}
@@ -399,9 +393,7 @@ class TestAblationComponent(unittest.TestCase):
         result = run_ablation_analysis(n_clicks=1, primary_data=primary_data, secondary_build_string=secondary_input, selected_feature_id=0)
 
         self.assertIsInstance(result, html.Div)
-        # Warning about unknown tokens should be present
         self.assertTrue(any("Warning: The following ability names were not found" in str(child) for child in result.children if isinstance(child, html.P)))
-        # Error about no valid tokens should be present
         self.assertTrue(any("No valid secondary ability tokens to process" in str(child) for child in result.children if isinstance(child, html.P)))
 
         mock_get_sae_activations.assert_called_once_with(
