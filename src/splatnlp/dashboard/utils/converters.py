@@ -1,9 +1,16 @@
 import logging
-from typing import Sequence
+from functools import lru_cache
+from typing import Sequence, TypedDict
 
 import numpy as np
+import polars as pl
+import requests
 
-from splatnlp.preprocessing.transform.mappings import generate_maps
+from splatnlp.preprocessing.transform.mappings import (
+    FINAL_REF_URL,
+    TRANSLATION_URL,
+    generate_maps,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,3 +80,63 @@ def generate_weapon_name_mapping(
     return {
         k: id_to_name[v.split("_")[-1]] for k, v in inv_weapon_vocab.items()
     }
+
+
+class WeaponProperties(TypedDict):
+    season: int
+    sub: str
+    special: str
+    class_: str
+    kit: str
+    reference_kit: str
+    reference_id: str
+
+
+@lru_cache(maxsize=None)
+def get_weapon_properties() -> dict[str, WeaponProperties]:
+    """Get properties of a weapon."""
+    weapon_ref: dict[str, dict[str, int | str]] = requests.get(
+        FINAL_REF_URL
+    ).json()
+    out = {}
+    for k, v in weapon_ref.items():
+        out[k] = {kk if kk != "class" else "class_": vv for kk, vv in v.items()}
+    return out
+
+
+@lru_cache(maxsize=None)
+def get_translation() -> dict[str, dict[str, str]]:
+    """Get translation of a weapon."""
+    translation = requests.get(TRANSLATION_URL).json()
+    return translation
+
+
+@lru_cache(maxsize=None)
+def get_weapon_properties_df() -> pl.DataFrame:
+    """Get properties of a weapon."""
+    props = get_weapon_properties()
+    translation = get_translation()
+    subs = translation["USen"]["WeaponName_Sub"]
+    specials = translation["USen"]["WeaponName_Special"]
+    classes = translation["USen"]["WeaponTypeName"]
+    rows = [{"weapon_id": k, **v} for k, v in props.items()]
+    return (
+        pl.DataFrame(rows)
+        .with_columns(
+            pl.lit("weapon_id_").add(pl.col("weapon_id")).alias("weapon_id"),
+            pl.col("sub").replace(subs),
+            pl.col("special").replace(specials),
+            pl.col("class_").replace(classes).alias("class"),
+        )
+        .drop(["class_", "reference_kit", "reference_id", "season", "kit"])
+    )
+
+
+def get_weapon_properties_for_id(
+    weapon_id: int | str,
+) -> WeaponProperties:
+    """Get properties of a weapon."""
+    weapon_ref = get_weapon_properties()
+    if str(weapon_id).startswith("weapon_id_"):
+        weapon_id = int(weapon_id[len("weapon_id_") :])
+    return weapon_ref[str(weapon_id)]

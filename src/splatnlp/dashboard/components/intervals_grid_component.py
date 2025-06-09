@@ -17,6 +17,7 @@ from splatnlp.dashboard.fs_database import FSDatabase
 from splatnlp.dashboard.utils.converters import (
     AbilityTagParser,
     generate_weapon_name_mapping,
+    get_weapon_properties_df,
 )
 from splatnlp.dashboard.utils.tfidf import compute_tf_idf
 from splatnlp.preprocessing.transform.mappings import generate_maps
@@ -38,6 +39,9 @@ class TFIDFAnalysis:
 
     top_tokens: list[dict[str, Any]]
     top_weapons: list[dict[str, Any]]
+    sub_stats: list[dict[str, Any]]
+    special_stats: list[dict[str, Any]]
+    class_stats: list[dict[str, Any]]
     feature_display_name: str
     top_tfidf_token_names: set[str]  # Cache for UI highlighting
 
@@ -77,6 +81,7 @@ class TFIDFAnalyzer:
         self.parser = AbilityTagParser()
         self.idf = idf
         self.id_to_name_mapping = generate_weapon_name_mapping(inv_weapon_vocab)
+        self.weapon_properties = get_weapon_properties_df()
 
     def analyze(
         self,
@@ -106,7 +111,9 @@ class TFIDFAnalyzer:
         top_tfidf_token_names = {token["ability_name"] for token in top_tokens}
 
         # Compute weapon frequencies
-        top_weapons = self._compute_weapon_frequencies(activations_df)
+        all_stats = self._compute_weapon_frequencies(
+            activations_df, self.inv_weapon_vocab
+        )
 
         # Get feature display name
         feature_display_name = self._get_feature_display_name(
@@ -115,16 +122,30 @@ class TFIDFAnalyzer:
 
         return TFIDFAnalysis(
             top_tokens=top_tokens,
-            top_weapons=top_weapons,
+            top_weapons=all_stats["weapon_stats"],
+            sub_stats=all_stats["sub_stats"],
+            special_stats=all_stats["special_stats"],
+            class_stats=all_stats["class_stats"],
             feature_display_name=feature_display_name,
             top_tfidf_token_names=top_tfidf_token_names,
         )
 
     def _compute_weapon_frequencies(
-        self, df: pl.DataFrame
-    ) -> list[dict[str, Any]]:
+        self, df: pl.DataFrame, inv_weapon_vocab: dict[int, str]
+    ) -> dict[str, list[dict[str, str | float]]]:
         """Calculate weapon frequencies in the dataframe."""
         total = len(df)
+
+        df = df.with_columns(
+            pl.col("weapon_id_token")
+            .cast(pl.Utf8)
+            .replace(inv_weapon_vocab)
+            .alias("weapon_id")
+        ).join(
+            self.weapon_properties,
+            on="weapon_id",
+            how="left",
+        )
 
         # Group by weapon, count, and compute percentages in one go
         weapon_stats = (
@@ -145,7 +166,48 @@ class TFIDFAnalyzer:
             .to_dicts()
         )
 
-        return weapon_stats
+        sub_stats = (
+            df.group_by("sub")
+            .agg(pl.count().alias("count"))
+            .with_columns(
+                (pl.col("count") / total).alias("percentage"),
+            )
+            .sort("count", descending=True)
+            .head(TOP_WEAPONS_COUNT)
+            .select(["sub", "percentage"])
+            .to_dicts()
+        )
+
+        special_stats = (
+            df.group_by("special")
+            .agg(pl.count().alias("count"))
+            .with_columns(
+                (pl.col("count") / total).alias("percentage"),
+            )
+            .sort("count", descending=True)
+            .head(TOP_WEAPONS_COUNT)
+            .select(["special", "percentage"])
+            .to_dicts()
+        )
+
+        class_stats = (
+            df.group_by("class")
+            .agg(pl.count().alias("count"))
+            .with_columns(
+                (pl.col("count") / total).alias("percentage"),
+            )
+            .sort("count", descending=True)
+            .head(TOP_WEAPONS_COUNT)
+            .select(["class", "percentage"])
+            .to_dicts()
+        )
+
+        return {
+            "weapon_stats": weapon_stats,
+            "sub_stats": sub_stats,
+            "special_stats": special_stats,
+            "class_stats": class_stats,
+        }
 
     def _get_feature_display_name(
         self,
@@ -274,30 +336,114 @@ class UIComponentBuilder:
         ]
 
         # Weapons section
-        weapon_bars = [
-            html.Div(
-                [
+        weapon_bars = []
+        colors = [
+            "primary",
+            "success",
+            "warning",
+            "danger",
+        ]  # Different colors for each category
+        for stat, name, column_name, color in zip(
+            [
+                analysis.top_weapons,
+                analysis.sub_stats,
+                analysis.special_stats,
+                analysis.class_stats,
+            ],
+            ["Top Weapons", "Subs", "Specials", "Classes"],
+            ["weapon_name", "sub", "special", "class"],
+            colors,
+        ):
+            weapon_bars.append(
+                dbc.Col(
                     html.Div(
                         [
-                            html.Span(weapon["weapon_name"], className="me-2"),
-                            html.Small(
-                                f"({weapon['percentage']:.0%})",
-                                className="text-muted",
-                            ),
+                            html.H6(name, className="text-muted mb-2"),
+                            *[
+                                html.Div(
+                                    [
+                                        html.Div(
+                                            [
+                                                html.Span(
+                                                    item[column_name],
+                                                    className="me-2",
+                                                ),
+                                                html.Small(
+                                                    f"({item['percentage']:.0%})",
+                                                    className="text-muted",
+                                                ),
+                                            ],
+                                            className="d-flex justify-content-between",
+                                        ),
+                                        html.Div(
+                                            [
+                                                dbc.Progress(
+                                                    value=item["percentage"]
+                                                    * 100,
+                                                    color=color,
+                                                    className="mb-1",
+                                                    style={
+                                                        "height": "15px",
+                                                        "position": "relative",
+                                                        "backgroundImage": "linear-gradient(to right, rgba(0,0,0,0.1) 1px, transparent 1px)",
+                                                        "backgroundSize": "25% 100%",
+                                                    },
+                                                ),
+                                                # Add tick marks
+                                                html.Div(
+                                                    [
+                                                        html.Div(
+                                                            style={
+                                                                "position": "absolute",
+                                                                "left": f"{i * 25}%",
+                                                                "top": "0",
+                                                                "bottom": "0",
+                                                                "width": "1px",
+                                                                "backgroundColor": "rgba(0,0,0,0.2)",
+                                                            }
+                                                        )
+                                                        for i in range(
+                                                            1, 4
+                                                        )  # Add 3 vertical lines at 25%, 50%, 75%
+                                                    ],
+                                                    style={
+                                                        "position": "relative",
+                                                        "height": "15px",
+                                                    },
+                                                ),
+                                            ],
+                                            style={"position": "relative"},
+                                        ),
+                                    ],
+                                    className="mb-2",
+                                )
+                                for item in stat
+                            ],
                         ],
-                        className="d-flex justify-content-between",
+                        className="mb-3",
                     ),
-                    dbc.Progress(
-                        value=weapon["percentage"] * 100,
-                        color="success",
-                        className="mb-1",
-                        style={"height": "15px"},
-                    ),
-                ],
-                className="mb-2",
+                    width=6,
+                )
             )
-            for weapon in analysis.top_weapons
-        ]
+
+        # Create a 2x2 grid layout
+        stats_grid = dbc.Row(
+            [
+                dbc.Row(
+                    [
+                        weapon_bars[0],  # Top Weapons
+                        weapon_bars[1],  # Subs
+                    ],
+                    className="mb-3",
+                ),
+                dbc.Row(
+                    [
+                        weapon_bars[2],  # Specials
+                        weapon_bars[3],  # Classes
+                    ],
+                ),
+            ]
+        )
 
         return dbc.Card(
             dbc.CardBody(
@@ -325,10 +471,10 @@ class UIComponentBuilder:
                                 dbc.Col(
                                     [
                                         html.H6(
-                                            "Top Activating Weapons",
+                                            "Activation Statistics",
                                             className="text-muted mb-2",
                                         ),
-                                        html.Div(weapon_bars),
+                                        stats_grid,
                                     ],
                                     md=6,
                                 )
