@@ -326,7 +326,7 @@ class UIComponentBuilder:
                     ),
                     html.Div(
                         id={'type': 'ablation-card-data-wrapper', 'index': unique_example_id},
-                        data_example_data=example_data_json,
+                        **{'data-example_data': example_data_json}, # Corrected way to pass hyphenated data attributes
                         children=[
                             dbc.Button(
                                 "Use as Primary for Ablation",
