@@ -16,6 +16,7 @@ from splatnlp.dashboard.components import (
     token_analysis,
     top_examples_component,
     top_logits_component,
+    ablation_component,
 )
 from splatnlp.dashboard.components.feature_labels import (
     FeatureLabelsManager,
@@ -102,6 +103,10 @@ app.layout = dbc.Container(
                                 dbc.Tab(
                                     label="Token Analysis",
                                     children=token_analysis.create_token_analysis_tab(),
+                                ),
+                                dbc.Tab(
+                                    label="Ablation",
+                                    children=ablation_component,
                                 ),
                             ]
                         )
