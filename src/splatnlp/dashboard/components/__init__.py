@@ -1,3 +1,4 @@
+from splatnlp.dashboard.components.ablation_component import ablation_component
 from splatnlp.dashboard.components.activation_hist import (
     activation_hist_component,
 )
@@ -28,4 +29,5 @@ __all__ = [
     "top_examples_component",
     "intervals_grid_component",
     "correlations_component",
+    "ablation_component",
 ]

@@ -8,6 +8,7 @@ from dash import Input, Output, State, callback_context, dcc, html
 
 # Import components
 from splatnlp.dashboard.components import (
+    ablation_component,
     activation_hist_component,
     correlations_component,
     feature_selector_layout,
@@ -102,6 +103,10 @@ app.layout = dbc.Container(
                                 dbc.Tab(
                                     label="Token Analysis",
                                     children=token_analysis.create_token_analysis_tab(),
+                                ),
+                                dbc.Tab(
+                                    label="Ablation",
+                                    children=ablation_component,
                                 ),
                             ]
                         )
