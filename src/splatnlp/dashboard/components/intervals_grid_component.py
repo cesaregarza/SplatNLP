@@ -312,7 +312,7 @@ class UIComponentBuilder:
                         id={
                             "type": "ablation-load-btn",
                             "index": index,
-                            "build": " ".join(ability_names),
+                            "build_tokens": ability_names,
                             "weapon": weapon_name,
                         },
                         color="info",
@@ -862,7 +862,7 @@ def send_to_ablation(_):
     button_id = ctx.triggered_id
     return (
         {
-            "build_tokens": button_id.get("build", "").split(),
+            "build_tokens": button_id.get("build_tokens", []),
             "weapon_name": button_id.get("weapon"),
         },
         "tab-ablation",
