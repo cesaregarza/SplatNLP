@@ -275,9 +275,6 @@ class UIComponentBuilder:
         }
         example_data_json = json.dumps(example_data_to_store)
 
-        logger.info(
-            f"Building card wrapper for index {unique_example_id}. JSON data to be assigned: '{example_data_json}'"
-        )
         # Get ability names
         ability_names = [
             inv_vocab[token]
@@ -863,7 +860,7 @@ def render_intervals_grid(selected_feature_id: int | None):
         or not hasattr(DASHBOARD_CONTEXT, "db")
         or not DASHBOARD_CONTEXT.db
     ):
-        logger.warning("Dashboard context or database not available")
+        logger.debug("Dashboard context or database not available")
         return (
             [],
             "Error: Database context not available. Ensure data is loaded correctly.",
