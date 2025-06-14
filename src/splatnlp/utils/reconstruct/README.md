@@ -15,10 +15,37 @@ To determine the single best, legal gear build for a given weapon, potentially i
 - Game Constants: Imported definitions for main-only abilities, abilities exclusive to certain gear types, maximum sub-slots, etc.
 
 ### 3. Beam Search (`reconstruct_build`)
-- The system iteratively builds up a set of "capstone" abilities using beam search.
-- A capstone `AbilityToken` represents a target ability. For standard abilities (e.g., Ink Saver Main, Swim Speed Up), it specifies a `family` (e.g., "ink_saver_main") and a `min_ap` (minimum Ability Points to achieve). For main-only abilities (e.g., Stealth Jump), it represents the specific ability.
-- The search expands states in the beam by adding new capstone abilities suggested by the `predict` function.
-- The search avoids adding duplicate standard ability families or duplicate main-only ability names but allows a standard ability family's `min_ap` to be updated if a higher-AP token for that family is chosen.
+- The system uses a two-phase approach to build optimal gear configurations:
+  1. Greedy closure to establish an initial set of capstones
+  2. Beam search for refinements to explore alternative builds
+
+#### Phase 1: Greedy Closure
+- Takes the initial context and greedily adds all tokens that:
+  - Have probability ≥ 0.5 (matching the training decision boundary)
+  - Improve the build (higher AP for standard abilities)
+- Adds multiple tokens per step, respecting the set-valued nature of the model
+- Continues until no more tokens can be added
+- No special handling needed for empty context (uses NULL token)
+
+#### Phase 2: Beam Search Refinements
+- Takes the result of greedy closure as the initial state
+- Explores alternative builds by considering token replacements
+- Uses beam search to maintain diversity in the search
+- Each state in the beam:
+  1. Gets predictions from the model
+  2. Considers replacing existing tokens with higher-AP variants
+  3. Adds token bonus to encourage exploration
+  4. Evaluates the resulting build using the allocator
+
+#### Scoring and Thresholds
+- `TOKEN_BONUS = log(2.0)`: Bonus added when adding new tokens
+- `ALPHA = 0.3`: Weight for the penalty term in final scoring
+- Final score combines:
+  - Cumulative log probability of the sequence
+  - Token bonus for each added token
+  - Penalty term weighted by alpha
+
+The search avoids adding duplicate standard ability families or duplicate main-only ability names but allows a standard ability family's `min_ap` to be updated if a higher-AP token for that family is chosen.
 
 ### 4. Build Allocation and Legality (`Allocator` class)
 - For each set of capstones explored by the beam search, the `Allocator` attempts to assign them to a legal gear configuration.

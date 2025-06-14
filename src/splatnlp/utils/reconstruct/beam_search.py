@@ -1,6 +1,6 @@
 import math
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Any, Literal, Mapping, Optional, Sequence, overload
 
 from splatnlp.utils.constants import NULL, TOKEN_BONUS
 from splatnlp.utils.reconstruct.allocator import Allocator
@@ -22,6 +22,111 @@ class BeamState:
     ]  # Maps family names to their best log probability
 
 
+@dataclass
+class TraceFrame:
+    """One snapshot of the beam‑search loop."""
+
+    step: int
+    partial_caps: Mapping[str, AbilityToken]
+    logits: Mapping[str, float]
+    activations: Optional[Sequence[float]] = None
+    beam_rank: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(
+            step=self.step,
+            beam_rank=self.beam_rank,
+            partial_caps=list(self.partial_caps.keys()),
+            logits=self.logits,
+            activations=(
+                self.activations.tolist()
+                if self.activations is not None
+                else None
+            ),
+        )
+
+
+def greedy_closure(
+    predict_fn,
+    weapon_id: str,
+    capstones: dict[str, AbilityToken],
+    threshold: float = 0.5,
+) -> dict[str, AbilityToken]:
+    """
+    Greedily add all tokens that exceed the threshold and improve the build.
+    Returns when no more tokens can be added.
+    """
+    while True:
+        # Run model on current context (or NULL if empty)
+        current_tokens = list(capstones.keys()) or [NULL]
+        raw_predictions = predict_fn(current_tokens, weapon_id)
+
+        # Handle case where predict_fn returns (predictions, activations)
+        if isinstance(raw_predictions, tuple) and len(raw_predictions) == 2:
+            probs = raw_predictions[0]
+        else:
+            probs = raw_predictions
+
+        # Find tokens to add
+        to_add = []
+        for tok, p in probs.items():
+            if p < threshold:
+                continue
+
+            try:
+                next_cap = AbilityToken.from_vocab_entry(tok)
+            except ValueError:
+                continue  # skip invalid tokens
+
+            # Check if we should add this token
+            if next_cap.main_only:
+                # For main-only, only add if not already present
+                if tok not in capstones:
+                    to_add.append(tok)
+            else:
+                # For standard abilities, check if we should add/replace
+                existing_tokens = [
+                    k
+                    for k, v in capstones.items()
+                    if v.family == next_cap.family
+                ]
+                if not existing_tokens:
+                    # No token for this family => add
+                    to_add.append(tok)
+                else:
+                    # Only add if min_ap is higher than existing
+                    should_add = False
+                    for old_tok in existing_tokens:
+                        old_cap = capstones[old_tok]
+                        if next_cap.min_ap > old_cap.min_ap:
+                            should_add = True
+                            break
+                    if should_add:
+                        to_add.append(tok)
+
+        if not to_add:
+            break
+
+        # Add all selected tokens at once
+        for tok in to_add:
+            cap = AbilityToken.from_vocab_entry(tok)
+            if cap.main_only:
+                capstones[tok] = cap
+            else:
+                # Remove any existing tokens of same family with lower min_ap
+                existing_tokens = [
+                    k
+                    for k, v in capstones.items()
+                    if v.family == cap.family and v.min_ap < cap.min_ap
+                ]
+                for old_tok in existing_tokens:
+                    del capstones[old_tok]
+                capstones[tok] = cap
+
+    return capstones
+
+
+@overload
 def reconstruct_build(
     predict_fn,
     weapon_id: str,
@@ -32,7 +137,40 @@ def reconstruct_build(
     token_bonus: float = TOKEN_BONUS,
     alpha: float = 0.1,
     top_k: int = 1,
-) -> Optional[list[Build]]:
+    record_traces: Literal[False] = False,
+) -> Optional[list[Build]]: ...
+
+
+@overload
+def reconstruct_build(
+    predict_fn,
+    weapon_id: str,
+    initial_context: list[str],
+    allocator: Allocator,
+    beam_size: int = 5,
+    max_steps: int = 6,
+    token_bonus: float = TOKEN_BONUS,
+    alpha: float = 0.1,
+    top_k: int = 1,
+    record_traces: Literal[True] = True,
+) -> tuple[Optional[list[Build]], Optional[list[TraceFrame]]]: ...
+
+
+def reconstruct_build(
+    predict_fn,
+    weapon_id: str,
+    initial_context: list[str],
+    allocator: Allocator,
+    beam_size: int = 5,
+    max_steps: int = 6,
+    token_bonus: float = TOKEN_BONUS,
+    alpha: float = 0.1,
+    top_k: int = 1,
+    record_traces: bool = False,
+) -> (
+    Optional[list[Build]]
+    | tuple[Optional[list[Build]], Optional[list[TraceFrame]]]
+):
     """
     Multi-label beam search: at each step, expand each state by considering
     new tokens predicted by the model. We do NOT rely on <END> tokens. We
@@ -62,90 +200,61 @@ def reconstruct_build(
         Weight for the penalty term in final scoring.
     top_k : int
         Number of top predictions to return.
+    record_traces : bool
+        Whether to record the trace of the beam search.
 
     Returns
     -------
     Optional[list[Build]]
         The `k` best valid Builds found, or None if no valid build could be
         formed.
+    Optional[list[TraceFrame]]
+        The trace of the beam search, or None if tracing is disabled.
     """
-
     # 1) Convert initial_context into an initial set of capstones
-    #    Dictionary key = exact token string, value = AbilityToken
     initial_capstones: dict[str, AbilityToken] = {}
-    initial_family_logp: dict[str, float] = {}
-
     for tok in initial_context:
         cap = AbilityToken.from_vocab_entry(tok)
-        if cap.main_only:
-            # If the exact token is not already in the dict, add it
-            if tok not in initial_capstones:
-                initial_capstones[tok] = cap
-                initial_family_logp[cap.family] = (
-                    0.0  # Default high priority for user-specified tokens
-                )
-        else:
-            # For standard abilities, if we already have the same family with
-            # lower AP, replace it. Otherwise, just add.
-            existing_tokens_for_family = [
-                k
-                for k, v in initial_capstones.items()
-                if v.family == cap.family
-            ]
-            # Check if there's an existing token with strictly less min_ap
-            replaced = False
-            for old_token_key in existing_tokens_for_family:
-                old_cap = initial_capstones[old_token_key]
-                if cap.min_ap > old_cap.min_ap:
-                    # Replace the old token
-                    del initial_capstones[old_token_key]
-                    initial_capstones[tok] = cap
-                    initial_family_logp[cap.family] = (
-                        0.0  # Default high priority for user-specified tokens
-                    )
-                    replaced = True
-                    break
-            if not replaced and not existing_tokens_for_family:
-                initial_capstones[tok] = cap
-                initial_family_logp[cap.family] = (
-                    0.0  # Default high priority for user-specified tokens
-                )
+        initial_capstones[tok] = cap
+
+    # 2) Run greedy closure to get initial state
+    initial_capstones = greedy_closure(predict_fn, weapon_id, initial_capstones)
 
     # Start our beam with one state
     beam: list[BeamState] = [
         BeamState(
             capstones=initial_capstones,
             log_prob=0.0,
-            family_logp=initial_family_logp,
+            family_logp={},  # No need for family_logp in new approach
         )
     ]
 
-    # 2) Track the best build so far
+    # 3) Track the best build so far and tracing storage
     top_candidates: list[tuple[float, Build]] = []
+    trace: list[TraceFrame] = [] if record_traces else None
 
-    # 3) Run expansions for up to max_steps
+    # 4) Run beam search for refinements
     for step in range(max_steps):
         candidates: list[BeamState] = []
 
         for state in beam:
-            # Expand using the model
-            current_tokens = list(state.capstones.keys())
-            if len(current_tokens) == 0:
-                current_tokens = [
-                    NULL
-                ]  # Some marker if your model expects at least one token
+            # Get predictions
+            current_tokens = list(state.capstones.keys()) or [NULL]
+            raw_predictions = predict_fn(current_tokens, weapon_id)
 
-            # predict_fn returns a dict: {token: logp, ...}
-            next_tokens_with_scores = predict_fn(current_tokens, weapon_id)
+            # Handle case where predict_fn returns (predictions, activations)
+            if isinstance(raw_predictions, tuple) and len(raw_predictions) == 2:
+                probs, activations = raw_predictions
+            else:
+                probs = raw_predictions
+                activations = None
 
-            # Sort tokens by log probability to prioritize higher probability
-            # tokens
+            # Sort tokens by log probability
             for next_token, lp in sorted(
-                next_tokens_with_scores.items(),
+                probs.items(),
                 key=lambda kv: kv[1],
                 reverse=True,
             ):
-                # Convert to AbilityToken
                 try:
                     next_cap = AbilityToken.from_vocab_entry(next_token)
                 except ValueError:
@@ -153,7 +262,6 @@ def reconstruct_build(
 
                 # Build a new dictionary of capstones from the old state
                 new_caps = dict(state.capstones)
-                new_family_logp = dict(state.family_logp)
 
                 if next_cap.main_only:
                     # If we already have this EXACT main-only token, skip
@@ -161,9 +269,6 @@ def reconstruct_build(
                         continue
                     # Otherwise add it
                     new_caps[next_token] = next_cap
-                    new_family_logp[next_cap.family] = max(
-                        new_family_logp.get(next_cap.family, -math.inf), lp
-                    )
                 else:
                     # For standard abilities, see if we have an existing token
                     # for the same family.
@@ -175,15 +280,10 @@ def reconstruct_build(
                     if not existing_tokens_for_family:
                         # No token for this family => just add
                         new_caps[next_token] = next_cap
-                        new_family_logp[next_cap.family] = max(
-                            new_family_logp.get(next_cap.family, -math.inf), lp
-                        )
                     else:
                         # There's at least one existing token for this family.
                         # We only keep the new token if min_ap is strictly
                         # higher than all existing ones.
-                        # If so, remove the older tokens for that family and add
-                        # the new one.
                         can_replace = False
                         for old_token_key in existing_tokens_for_family:
                             old_cap = new_caps[old_token_key]
@@ -194,10 +294,6 @@ def reconstruct_build(
                         if can_replace:
                             # Add the new higher-min-ap token
                             new_caps[next_token] = next_cap
-                            new_family_logp[next_cap.family] = max(
-                                new_family_logp.get(next_cap.family, -math.inf),
-                                lp,
-                            )
                         else:
                             # If we didn't replace anything, that means
                             # next_cap.min_ap <= old_cap.min_ap, so it's not an
@@ -211,7 +307,7 @@ def reconstruct_build(
                 new_state = BeamState(
                     capstones=new_caps,
                     log_prob=new_log_prob,
-                    family_logp=new_family_logp,
+                    family_logp={},  # No need for family_logp in new approach
                 )
                 candidates.append(new_state)
 
@@ -220,26 +316,37 @@ def reconstruct_build(
             # beneficial.
             candidates.append(state)
 
-        # 4) Sort by log_prob descending, take the top beam_size
+        # Record the trace
+        if record_traces:
+            trace.append(
+                TraceFrame(
+                    step=step,
+                    partial_caps=state.capstones,
+                    logits=probs,
+                    activations=activations,  # Now properly handling activations
+                    beam_rank=beam.index(state),
+                )
+            )
+
+        # Sort by log_prob descending, take the top beam_size
         candidates.sort(key=lambda s: s.log_prob, reverse=True)
         beam = candidates[:beam_size]
 
-        # 5) Attempt to allocate each state in the beam and see if it yields
+        # Attempt to allocate each state in the beam and see if it yields
         # a better build
         for st in beam:
-            build, penalty = allocator.allocate(
-                st.capstones, priority=st.family_logp
-            )
+            build, penalty = allocator.allocate(st.capstones)
             if build is not None:
                 final_score = st.log_prob - alpha * penalty
                 # Only add if we don't already have an equivalent build
                 if not any(b == build for _, b in top_candidates):
                     top_candidates.append((final_score, build))
 
-    # 6) After max_steps expansions, we have our best_build
+    # After max_steps expansions, we have our best_build
     if not top_candidates:
-        return None
+        return (None, trace) if record_traces else None
 
     top_candidates.sort(key=lambda x: x[0], reverse=True)
     top_k_candidates = top_candidates[:top_k]
-    return [b for _, b in top_k_candidates]
+    result_builds = [b for _, b in top_k_candidates]
+    return (result_builds, trace) if record_traces else result_builds
