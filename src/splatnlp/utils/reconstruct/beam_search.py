@@ -393,6 +393,30 @@ def reconstruct_build(
         beam = candidates[:beam_size]
         current_step += 1
 
+        # Create a final frame for each state in the beam to record the end of this step
+        if record_traces:
+            for state in beam:
+                current_tokens = list(state.capstones.keys()) or [NULL]
+                raw_predictions = predict_fn(current_tokens, weapon_id)
+                if (
+                    isinstance(raw_predictions, tuple)
+                    and len(raw_predictions) == 2
+                ):
+                    probs, activations = raw_predictions
+                else:
+                    probs = raw_predictions
+                    activations = None
+
+                final_frame = TraceFrame(
+                    step=current_step
+                    - 1,  # Use previous step number since we already incremented
+                    partial_caps=dict(state.capstones),
+                    logits=dict(probs),
+                    activations=activations,
+                    beam_rank=0,  # Use 0 since we don't know the rank at this point
+                )
+                state.trace.append(final_frame)
+
         # Attempt to allocate each state in the beam and see if it yields
         # a better build
         for st in beam:
