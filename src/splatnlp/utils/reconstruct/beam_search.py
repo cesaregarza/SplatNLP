@@ -20,6 +20,7 @@ class BeamState:
     family_logp: dict[
         str, float
     ]  # Maps family names to their best log probability
+    trace: list["TraceFrame"] = field(default_factory=list)
 
 
 @dataclass
@@ -51,11 +52,17 @@ def greedy_closure(
     weapon_id: str,
     capstones: dict[str, AbilityToken],
     threshold: float = 0.5,
-) -> dict[str, AbilityToken]:
+    *,
+    record_traces: bool = False,
+    start_step: int = 0,
+):
     """
-    Greedily add all tokens that exceed the threshold and improve the build.
-    Returns when no more tokens can be added.
+    Greedily add all tokens that exceed ``threshold`` and improve ``capstones``.
+    Each iteration is recorded in ``traces`` when ``record_traces`` is ``True``.
+    The returned ``step`` is the global step index of the last greedy addition.
     """
+    step = start_step
+    traces: list[TraceFrame] | None = [] if record_traces else None
     while True:
         # Run model on current context (or NULL if empty)
         current_tokens = list(capstones.keys()) or [NULL]
@@ -63,9 +70,10 @@ def greedy_closure(
 
         # Handle case where predict_fn returns (predictions, activations)
         if isinstance(raw_predictions, tuple) and len(raw_predictions) == 2:
-            probs = raw_predictions[0]
+            probs, activations = raw_predictions
         else:
             probs = raw_predictions
+            activations = None
 
         # Find tokens to add
         to_add = []
@@ -104,6 +112,18 @@ def greedy_closure(
                     if should_add:
                         to_add.append(tok)
 
+        if record_traces:
+            assert traces is not None
+            traces.append(
+                TraceFrame(
+                    step=step,
+                    partial_caps=dict(capstones),
+                    logits=dict(probs),
+                    activations=activations,
+                    beam_rank=0,
+                )
+            )
+
         if not to_add:
             break
 
@@ -122,8 +142,9 @@ def greedy_closure(
                 for old_tok in existing_tokens:
                     del capstones[old_tok]
                 capstones[tok] = cap
+        step += 1
 
-    return capstones
+    return (capstones, step, traces) if record_traces else capstones
 
 
 @overload
@@ -153,7 +174,7 @@ def reconstruct_build(
     alpha: float = 0.1,
     top_k: int = 1,
     record_traces: Literal[True] = True,
-) -> tuple[Optional[list[Build]], Optional[list[TraceFrame]]]: ...
+) -> tuple[Optional[list[Build]], Optional[list[list[TraceFrame]]]]: ...
 
 
 def reconstruct_build(
@@ -169,7 +190,7 @@ def reconstruct_build(
     record_traces: bool = False,
 ) -> (
     Optional[list[Build]]
-    | tuple[Optional[list[Build]], Optional[list[TraceFrame]]]
+    | tuple[Optional[list[Build]], Optional[list[list[TraceFrame]]]]
 ):
     """
     Multi-label beam search: at each step, expand each state by considering
@@ -203,13 +224,20 @@ def reconstruct_build(
     record_traces : bool
         Whether to record the trace of the beam search.
 
+    Notes
+    -----
+    The global ``step`` counter starts at ``0`` and continues from the
+    greedy closure into the beam phase. Each beam state keeps its own trace
+    history so the final returned traces correspond to the builds actually
+    produced.
+
     Returns
     -------
     Optional[list[Build]]
         The `k` best valid Builds found, or None if no valid build could be
         formed.
-    Optional[list[TraceFrame]]
-        The trace of the beam search, or None if tracing is disabled.
+    Optional[list[list[TraceFrame]]]
+        Traces for each returned build, or None if tracing is disabled.
     """
     # 1) Convert initial_context into an initial set of capstones
     initial_capstones: dict[str, AbilityToken] = {}
@@ -218,7 +246,20 @@ def reconstruct_build(
         initial_capstones[tok] = cap
 
     # 2) Run greedy closure to get initial state
-    initial_capstones = greedy_closure(predict_fn, weapon_id, initial_capstones)
+    if record_traces:
+        initial_capstones, step, greedy_trace = greedy_closure(
+            predict_fn,
+            weapon_id,
+            initial_capstones,
+            record_traces=True,
+            start_step=0,
+        )
+    else:
+        initial_capstones = greedy_closure(
+            predict_fn, weapon_id, initial_capstones
+        )
+        step = 0
+        greedy_trace = []
 
     # Start our beam with one state
     beam: list[BeamState] = [
@@ -226,18 +267,20 @@ def reconstruct_build(
             capstones=initial_capstones,
             log_prob=0.0,
             family_logp={},  # No need for family_logp in new approach
+            trace=list(greedy_trace),
         )
     ]
 
     # 3) Track the best build so far and tracing storage
-    top_candidates: list[tuple[float, Build]] = []
-    trace: list[TraceFrame] = [] if record_traces else None
+    top_candidates: list[tuple[float, Build, list[TraceFrame]]] = []
 
     # 4) Run beam search for refinements
-    for step in range(max_steps):
+    # Continue step numbering from the greedy phase
+    current_step = step + 1
+    for _ in range(max_steps):
         candidates: list[BeamState] = []
 
-        for state in beam:
+        for rank, state in enumerate(beam):
             # Get predictions
             current_tokens = list(state.capstones.keys()) or [NULL]
             raw_predictions = predict_fn(current_tokens, weapon_id)
@@ -248,6 +291,8 @@ def reconstruct_build(
             else:
                 probs = raw_predictions
                 activations = None
+
+            frame = None
 
             # Sort tokens by log probability
             for next_token, lp in sorted(
@@ -303,34 +348,50 @@ def reconstruct_build(
                 # Add a token bonus to encourage adding
                 new_log_prob = state.log_prob + lp + token_bonus
 
-                # Create the new candidate
+                if record_traces and frame is None:
+                    frame = TraceFrame(
+                        step=current_step,
+                        partial_caps=dict(state.capstones),
+                        logits=dict(probs),
+                        activations=activations,
+                        beam_rank=rank,
+                    )
+
                 new_state = BeamState(
                     capstones=new_caps,
                     log_prob=new_log_prob,
-                    family_logp={},  # No need for family_logp in new approach
+                    family_logp={},
+                    trace=state.trace
+                    + ([frame] if record_traces and frame is not None else []),
                 )
                 candidates.append(new_state)
 
             # Also consider "not adding anything new" as a candidate,
             # to allow the beam state to carry over if no expansions are
             # beneficial.
-            candidates.append(state)
+            if record_traces and frame is None:
+                frame = TraceFrame(
+                    step=current_step,
+                    partial_caps=dict(state.capstones),
+                    logits=dict(probs),
+                    activations=activations,
+                    beam_rank=rank,
+                )
 
-        # Record the trace
-        if record_traces:
-            trace.append(
-                TraceFrame(
-                    step=step,
-                    partial_caps=state.capstones,
-                    logits=probs,
-                    activations=activations,  # Now properly handling activations
-                    beam_rank=beam.index(state),
+            candidates.append(
+                BeamState(
+                    capstones=dict(state.capstones),
+                    log_prob=state.log_prob,
+                    family_logp=dict(state.family_logp),
+                    trace=state.trace
+                    + ([frame] if record_traces and frame is not None else []),
                 )
             )
 
         # Sort by log_prob descending, take the top beam_size
         candidates.sort(key=lambda s: s.log_prob, reverse=True)
         beam = candidates[:beam_size]
+        current_step += 1
 
         # Attempt to allocate each state in the beam and see if it yields
         # a better build
@@ -338,15 +399,15 @@ def reconstruct_build(
             build, penalty = allocator.allocate(st.capstones)
             if build is not None:
                 final_score = st.log_prob - alpha * penalty
-                # Only add if we don't already have an equivalent build
-                if not any(b == build for _, b in top_candidates):
-                    top_candidates.append((final_score, build))
+                if not any(b == build for _, b, _ in top_candidates):
+                    top_candidates.append((final_score, build, st.trace))
 
     # After max_steps expansions, we have our best_build
     if not top_candidates:
-        return (None, trace) if record_traces else None
+        return (None, None) if record_traces else None
 
     top_candidates.sort(key=lambda x: x[0], reverse=True)
     top_k_candidates = top_candidates[:top_k]
-    result_builds = [b for _, b in top_k_candidates]
-    return (result_builds, trace) if record_traces else result_builds
+    result_builds = [b for _, b, _ in top_k_candidates]
+    traces_out = [tr for _, _, tr in top_k_candidates]
+    return (result_builds, traces_out) if record_traces else result_builds
