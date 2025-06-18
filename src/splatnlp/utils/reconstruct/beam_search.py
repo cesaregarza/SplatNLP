@@ -32,6 +32,7 @@ class TraceFrame:
     logits: Mapping[str, float]
     activations: Optional[Sequence[float]] = None
     beam_rank: int = 0
+    build: Optional[Build] = None
 
     def to_dict(self) -> dict[str, Any]:
         return dict(
@@ -44,6 +45,7 @@ class TraceFrame:
                 if self.activations is not None
                 else None
             ),
+            build=self.build.to_dict() if self.build is not None else None,
         )
 
 
@@ -51,6 +53,7 @@ def greedy_closure(
     predict_fn,
     weapon_id: str,
     capstones: dict[str, AbilityToken],
+    allocator: Allocator,
     threshold: float = 0.5,
     *,
     record_traces: bool = False,
@@ -114,6 +117,8 @@ def greedy_closure(
 
         if record_traces:
             assert traces is not None
+            # Try to allocate a build for this state
+            build, _ = allocator.allocate(capstones)
             traces.append(
                 TraceFrame(
                     step=step,
@@ -121,6 +126,7 @@ def greedy_closure(
                     logits=dict(probs),
                     activations=activations,
                     beam_rank=0,
+                    build=build,
                 )
             )
 
@@ -251,12 +257,13 @@ def reconstruct_build(
             predict_fn,
             weapon_id,
             initial_capstones,
+            allocator,
             record_traces=True,
             start_step=0,
         )
     else:
         initial_capstones = greedy_closure(
-            predict_fn, weapon_id, initial_capstones
+            predict_fn, weapon_id, initial_capstones, allocator
         )
         step = 0
         greedy_trace = []
@@ -349,12 +356,15 @@ def reconstruct_build(
                 new_log_prob = state.log_prob + lp + token_bonus
 
                 if record_traces and frame is None:
+                    # Try to allocate a build for this state
+                    build, _ = allocator.allocate(state.capstones)
                     frame = TraceFrame(
                         step=current_step,
                         partial_caps=dict(state.capstones),
                         logits=dict(probs),
                         activations=activations,
                         beam_rank=rank,
+                        build=build,
                     )
 
                 new_state = BeamState(
@@ -370,12 +380,15 @@ def reconstruct_build(
             # to allow the beam state to carry over if no expansions are
             # beneficial.
             if record_traces and frame is None:
+                # Try to allocate a build for this state
+                build, _ = allocator.allocate(state.capstones)
                 frame = TraceFrame(
                     step=current_step,
                     partial_caps=dict(state.capstones),
                     logits=dict(probs),
                     activations=activations,
                     beam_rank=rank,
+                    build=build,
                 )
 
             candidates.append(
@@ -407,6 +420,9 @@ def reconstruct_build(
                     probs = raw_predictions
                     activations = None
 
+                # Try to allocate a build for this state
+                build, _ = allocator.allocate(state.capstones)
+
                 final_frame = TraceFrame(
                     step=current_step
                     - 1,  # Use previous step number since we already incremented
@@ -414,6 +430,7 @@ def reconstruct_build(
                     logits=dict(probs),
                     activations=activations,
                     beam_rank=0,  # Use 0 since we don't know the rank at this point
+                    build=build,
                 )
                 state.trace.append(final_frame)
 

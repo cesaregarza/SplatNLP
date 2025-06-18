@@ -2,7 +2,7 @@ import logging
 import re
 from collections import Counter
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from splatnlp.utils.constants import (
     CANONICAL_MAIN_ONLY_ABILITIES,
@@ -264,3 +264,12 @@ class Build:
 
         # Compare sub ability counts
         return self.subs == other.subs
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert the build to a dictionary representation."""
+        return {
+            "mains": dict(self.mains),
+            "subs": dict(self.subs),
+            "total_ap": self.total_ap,
+            "achieved_ap": dict(self.achieved_ap),
+        }
