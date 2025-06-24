@@ -210,7 +210,7 @@ def train_epoch(
         optimizer.zero_grad()
 
         if scaler:
-            with autocast(device_type=config.device, dtype=torch.float8_e4m3):
+            with autocast(device_type=config.device, dtype=torch.bfloat16):
                 outputs = model(
                     batch_inputs,
                     batch_weapons,
