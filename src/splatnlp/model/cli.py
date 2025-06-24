@@ -198,6 +198,12 @@ def main():
         action="store_true",
         help="Enable Distributed Data Parallel (DDP)",
     )
+    parser.add_argument(
+        "--num_masks_per_set",
+        type=int,
+        default=5,
+        help="Number of masked instances to generate per set (default: 5)",
+    )
 
     args = parser.parse_args()
 
@@ -262,6 +268,7 @@ def main():
             True if args.device == "cuda" and args.num_workers > 0 else False
         ),
         distributed=args.distributed,
+        num_instances_per_set=args.num_masks_per_set,
     )
 
     if args.verbose:
