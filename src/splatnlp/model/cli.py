@@ -7,6 +7,7 @@ import boto3
 import orjson
 import pandas as pd
 import torch
+import torch.distributed as dist
 from torch.amp import GradScaler, autocast
 
 from splatnlp.model.config import TrainingConfig
@@ -192,8 +193,35 @@ def main():
         default=1,
         help="Interval for updating metrics during training and validation",
     )
+    parser.add_argument(
+        "--distributed",
+        action="store_true",
+        help="Enable Distributed Data Parallel (DDP)",
+    )
 
     args = parser.parse_args()
+
+    # ------------------------------------------------------------------
+    # 1.  Initialise DDP  (one process per GPU, launched by torchrun)
+    # ------------------------------------------------------------------
+    if args.distributed:
+        dist.init_process_group(backend="nccl", init_method="env://")
+        local_rank = int(os.environ["LOCAL_RANK"])
+        torch.cuda.set_device(local_rank)
+        # Limit all prints & tqdm to rank‑0 only
+        if local_rank != 0:
+
+            def _silence(*a, **kw):
+                pass
+
+            import builtins
+
+            import tqdm as _tqdm
+
+            builtins.print = _silence
+            _tqdm.tqdm = lambda *a, **k: a[0]  # no‑op iterator
+    else:
+        local_rank = 0
 
     if args.verbose:
         print("Loading data and vocabulary...")
@@ -233,6 +261,7 @@ def main():
         persistent_workers=(
             True if args.device == "cuda" and args.num_workers > 0 else False
         ),
+        distributed=args.distributed,
     )
 
     if args.verbose:
@@ -263,6 +292,7 @@ def main():
         scheduler_factor=args.scheduler_factor,
         scheduler_patience=args.scheduler_patience,
         device=args.device,
+        distributed=args.distributed,
     )
 
     if args.verbose:
@@ -279,6 +309,7 @@ def main():
         verbose=args.verbose,
         scaler=scaler,
         metric_update_interval=args.metric_update_interval,
+        ddp=args.distributed,
     )
 
     if args.verbose:
@@ -291,40 +322,45 @@ def main():
         vocab=vocab,
         pad_token=PAD,
         verbose=args.verbose,
+        ddp=args.distributed,
     )
 
     if args.verbose:
         print("Saving model, metrics, and parameters...")
 
-    # Save model, metrics, and parameters
-    os.makedirs(args.output_dir, exist_ok=True)
-    torch.save(
-        trained_model.state_dict(), os.path.join(args.output_dir, "model.pth")
-    )
-    with open(os.path.join(args.output_dir, "metrics_history.json"), "wb") as f:
-        f.write(
-            orjson.dumps(metrics_history, option=orjson.OPT_SERIALIZE_NUMPY)
+    # Save model, metrics, and parameters (only on rank-0 in distributed mode)
+    if (not args.distributed) or (torch.distributed.get_rank() == 0):
+        os.makedirs(args.output_dir, exist_ok=True)
+        torch.save(
+            trained_model.state_dict(),
+            os.path.join(args.output_dir, "model.pth"),
         )
+        with open(
+            os.path.join(args.output_dir, "metrics_history.json"), "wb"
+        ) as f:
+            f.write(
+                orjson.dumps(metrics_history, option=orjson.OPT_SERIALIZE_NUMPY)
+            )
 
-    # Save model parameters
-    model_params = {
-        "vocab_size": len(vocab),
-        "weapon_vocab_size": len(weapon_vocab),
-        "embedding_dim": args.embedding_dim,
-        "hidden_dim": args.hidden_dim,
-        "output_dim": len(vocab),
-        "num_layers": args.num_layers,
-        "num_heads": args.num_heads,
-        "num_inducing_points": args.num_inducing_points,
-        "use_layer_norm": args.use_layer_norm,
-        "dropout": args.dropout,
-        "pad_token_id": vocab[PAD],
-        "use_mixed_precision": args.use_mixed_precision,
-    }
-    with open(os.path.join(args.output_dir, "model_params.json"), "w") as f:
-        orjson.dumps(model_params, f)
+        # Save model parameters
+        model_params = {
+            "vocab_size": len(vocab),
+            "weapon_vocab_size": len(weapon_vocab),
+            "embedding_dim": args.embedding_dim,
+            "hidden_dim": args.hidden_dim,
+            "output_dim": len(vocab),
+            "num_layers": args.num_layers,
+            "num_heads": args.num_heads,
+            "num_inducing_points": args.num_inducing_points,
+            "use_layer_norm": args.use_layer_norm,
+            "dropout": args.dropout,
+            "pad_token_id": vocab[PAD],
+            "use_mixed_precision": args.use_mixed_precision,
+        }
+        with open(os.path.join(args.output_dir, "model_params.json"), "w") as f:
+            orjson.dumps(model_params, f)
 
-    print(f"Model, metrics, and parameters saved in {args.output_dir}")
+        print(f"Model, metrics, and parameters saved in {args.output_dir}")
 
 
 if __name__ == "__main__":

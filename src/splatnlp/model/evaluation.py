@@ -18,6 +18,7 @@ def test_model(
     vocab: dict[str, int],
     pad_token: str = PAD,
     verbose: bool = True,
+    ddp: bool = False,
 ) -> dict[str, float]:
     model.eval()
     device = torch.device(config.device)
@@ -70,4 +71,24 @@ def test_model(
     update_epoch_metrics(
         test_metrics, np.vstack(all_targets), np.vstack(all_preds)
     )
+
+    # Metric reduction for distributed training
+    if ddp and torch.distributed.is_initialized():
+        tensor = torch.tensor(
+            [
+                test_metrics[m]
+                for m in ("loss", "f1", "precision", "recall", "hamming")
+            ],
+            device=device,
+        )
+        torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.SUM)
+        tensor /= torch.distributed.get_world_size()
+        (
+            test_metrics["loss"],
+            test_metrics["f1"],
+            test_metrics["precision"],
+            test_metrics["recall"],
+            test_metrics["hamming"],
+        ) = tensor.tolist()
+
     return test_metrics

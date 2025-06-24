@@ -13,3 +13,4 @@ class TrainingConfig:
     scheduler_factor: float
     scheduler_patience: int
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    distributed: bool = False

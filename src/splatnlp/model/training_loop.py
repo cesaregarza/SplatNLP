@@ -1,3 +1,4 @@
+import os
 import time
 
 import numpy as np
@@ -45,11 +46,18 @@ def train_model(
     vocab: dict[str, int],
     pad_token: str = PAD,
     verbose: bool = True,
-    scaler: GradScaler = None,
+    scaler: GradScaler | None = None,
     metric_update_interval: int = 1,
+    ddp: bool = False,
 ) -> tuple[dict[str, dict[str, list[float]]], torch.nn.Module]:
     device = torch.device(config.device)
     model.to(device)
+    if ddp and torch.distributed.is_initialized():
+        model = torch.nn.parallel.DistributedDataParallel(
+            model,
+            device_ids=[int(os.environ["LOCAL_RANK"])],
+            output_device=int(os.environ["LOCAL_RANK"]),
+        )
     criterion = torch.nn.BCEWithLogitsLoss()
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -85,6 +93,10 @@ def train_model(
 
     start_time = time.time()
     for epoch in range(config.num_epochs):
+        # Re‑seed DistributedSampler for true shuffling each epoch
+        if config.distributed and torch.distributed.is_initialized():
+            train_dl.sampler.set_epoch(epoch)
+
         epoch_start_time = time.time()
         if verbose:
             print(f"Epoch {epoch + 1}/{config.num_epochs}")
@@ -100,6 +112,7 @@ def train_model(
             verbose,
             scaler,
             metric_update_interval,
+            ddp,
         )
         val_metrics = validate(
             model,
@@ -110,6 +123,7 @@ def train_model(
             pad_token,
             verbose,
             metric_update_interval,
+            ddp,
         )
 
         update_metrics_history(metrics_history, "train", train_metrics)
@@ -143,9 +157,12 @@ def train_model(
         if early_stopping(val_metrics["loss"]):
             if verbose:
                 print("Early stopping triggered")
+            if ddp and torch.distributed.is_initialized():
+                torch.distributed.barrier()
             break
 
-    model.load_state_dict(best_model)
+    if (not ddp) or (torch.distributed.get_rank() == 0):
+        model.load_state_dict(best_model)
     return metrics_history, model
 
 
@@ -160,6 +177,7 @@ def train_epoch(
     verbose: bool = True,
     scaler: GradScaler = None,
     metric_update_interval: int = 1,
+    ddp: bool = False,
 ) -> dict[str, float]:
     model.train()
     device = torch.device(config.device)
@@ -192,7 +210,7 @@ def train_epoch(
         optimizer.zero_grad()
 
         if scaler:
-            with autocast(device_type=config.device):
+            with autocast(device_type=config.device, dtype=torch.float8_e4m3):
                 outputs = model(
                     batch_inputs,
                     batch_weapons,
@@ -238,6 +256,26 @@ def train_epoch(
     update_epoch_metrics(
         epoch_metrics, np.vstack(all_targets), np.vstack(all_preds)
     )
+
+    # Metric reduction for distributed training
+    if ddp and torch.distributed.is_initialized():
+        tensor = torch.tensor(
+            [
+                epoch_metrics[m]
+                for m in ("loss", "f1", "precision", "recall", "hamming")
+            ],
+            device=device,
+        )
+        torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.SUM)
+        tensor /= torch.distributed.get_world_size()
+        (
+            epoch_metrics["loss"],
+            epoch_metrics["f1"],
+            epoch_metrics["precision"],
+            epoch_metrics["recall"],
+            epoch_metrics["hamming"],
+        ) = tensor.tolist()
+
     return epoch_metrics
 
 
@@ -250,6 +288,7 @@ def validate(
     pad_token: str = PAD,
     verbose: bool = True,
     metric_update_interval: int = 1,
+    ddp: bool = False,
 ) -> dict[str, float]:
     model.eval()
     device = torch.device(config.device)
@@ -304,6 +343,26 @@ def validate(
     update_epoch_metrics(
         epoch_metrics, np.vstack(all_targets), np.vstack(all_preds)
     )
+
+    # Metric reduction for distributed training
+    if ddp and torch.distributed.is_initialized():
+        tensor = torch.tensor(
+            [
+                epoch_metrics[m]
+                for m in ("loss", "f1", "precision", "recall", "hamming")
+            ],
+            device=device,
+        )
+        torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.SUM)
+        tensor /= torch.distributed.get_world_size()
+        (
+            epoch_metrics["loss"],
+            epoch_metrics["f1"],
+            epoch_metrics["precision"],
+            epoch_metrics["recall"],
+            epoch_metrics["hamming"],
+        ) = tensor.tolist()
+
     return epoch_metrics
 
 

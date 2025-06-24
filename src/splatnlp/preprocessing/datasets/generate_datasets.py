@@ -1,4 +1,5 @@
 import pandas as pd
+import torch
 from torch.utils.data import DataLoader
 
 from splatnlp.preprocessing.datasets.dataset import (
@@ -6,6 +7,18 @@ from splatnlp.preprocessing.datasets.dataset import (
     create_collate_fn,
 )
 from splatnlp.utils.constants import PAD
+
+
+def _wrap_sampler(ds, shuffle, distributed):
+    if not distributed:
+        return None, shuffle  # keep vanilla behaviour
+
+    sampler = torch.utils.data.distributed.DistributedSampler(
+        ds,
+        shuffle=shuffle,  # shuffling handled per‑rank
+        drop_last=False,
+    )
+    return sampler, False  # DataLoader must get shuffle=False
 
 
 def generate_tokenized_datasets(
@@ -68,6 +81,7 @@ def generate_dataloaders(
     num_instances_per_set: int = 5,
     skew_factor: float = 1.2,
     null_token_id: int | None = None,
+    distributed: bool = False,
     **kwargs,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
     """Generate DataLoaders for train, validation, and test sets.
@@ -84,6 +98,8 @@ def generate_dataloaders(
             removal distribution. Defaults to 1.2.
         null_token_id (int | None, optional): The ID of the null token. If
             None, empty sets are not generated. Defaults to None.
+        distributed (bool, optional): Whether to use distributed data loading.
+            Defaults to False.
         **kwargs: Additional keyword arguments for DataLoader.
 
     Returns:
@@ -107,19 +123,27 @@ def generate_dataloaders(
     }
 
     dataloaders = []
-    for dataset in [train_set, validation_set, test_set]:
-        dataloaders.append(
-            DataLoader(
-                SetDataset(
-                    df=dataset,
-                    vocab_size=vocab_size,
-                    num_instances_per_set=num_instances_per_set,
-                    skew_factor=skew_factor,
-                    null_token=null_token_id,
-                ),
-                collate_fn=collate_fn,
-                **dataloader_kwargs,
-            )
+    for ds_pd, is_train in zip(
+        [train_set, validation_set, test_set], [True, False, False]
+    ):
+        ds = SetDataset(
+            df=ds_pd,
+            vocab_size=vocab_size,
+            num_instances_per_set=num_instances_per_set,
+            skew_factor=skew_factor,
+            null_token=null_token_id,
         )
+        sampler, shuffle_flag = _wrap_sampler(
+            ds, shuffle=is_train, distributed=distributed
+        )
+
+        dl = DataLoader(
+            ds,
+            sampler=sampler,
+            shuffle=shuffle_flag,
+            collate_fn=collate_fn,
+            **dataloader_kwargs,
+        )
+        dataloaders.append(dl)
 
     return tuple(dataloaders)
