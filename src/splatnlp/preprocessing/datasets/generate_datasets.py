@@ -116,11 +116,13 @@ def generate_dataloaders(
     collate_fn = create_collate_fn(PAD_ID=pad_token_id)
     dataloader_kwargs = {
         "batch_size": kwargs.get("batch_size", DEFAULT_BATCH_SIZE),
-        "shuffle": kwargs.get("shuffle", DEFAULT_SHUFFLE),
         "num_workers": kwargs.get("num_workers", DEFAULT_NUM_WORKERS),
         "drop_last": kwargs.get("drop_last", DEFAULT_DROP_LAST),
         **kwargs,
     }
+    # Remove shuffle from kwargs to avoid conflicts
+    if "shuffle" in dataloader_kwargs:
+        del dataloader_kwargs["shuffle"]
 
     dataloaders = []
     for ds_pd, is_train in zip(
@@ -136,6 +138,10 @@ def generate_dataloaders(
         sampler, shuffle_flag = _wrap_sampler(
             ds, shuffle=is_train, distributed=distributed
         )
+
+        # Use default shuffle behavior for non-distributed mode
+        if not distributed:
+            shuffle_flag = is_train
 
         dl = DataLoader(
             ds,
