@@ -315,6 +315,7 @@ def main() -> None:
     try:
         primary_model.load_state_dict(state_dict, strict=True)
     except RuntimeError:
+        _LOGGER.warning("Converting DDP state dict to non-DDP state dict")
         state_dict = convert_ddp_state(state_dict)
         primary_model.load_state_dict(state_dict, strict=True)
     primary_model.eval()
