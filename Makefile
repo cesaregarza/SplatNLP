@@ -29,6 +29,7 @@ install:
 		&& sudo rm -rf /var/lib/apt/lists/*
 
 	curl -sSL https://install.python-poetry.org | python3 -
+	python3 -m venv .venv
 	export PATH="/home/ubuntu/.local/bin:$PATH"
 	poetry config virtualenvs.in-project true
 	poetry install
