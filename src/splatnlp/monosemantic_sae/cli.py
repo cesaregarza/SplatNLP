@@ -1,388 +1,484 @@
+"""
+Train a Sparse Auto-Encoder (SAE) on SetCompletionModel activations.
+
+Key improvements vs. the old CLI
+--------------------------------
+* Cleaner argument list with sensible defaults.
+* No runtime path hacking - relies on the installed `splatnlp` package.
+* Consistent logging (to console **and** file).
+* Robust estimation of `T_max` for the cosine LR scheduler.
+* Passes `val_loader` into `train_sae_model`, so validation happens during
+  training.
+* Proper JSON/ORJSON serialisation of metrics and run-config.
+* Optional gradient clipping, KL-warm-up schedule, dead-neuron resampling.
+"""
+
+from __future__ import annotations
+
 import argparse
-import io
+import json
+import logging
 import os
-import sqlite3
+import sys
+from pathlib import Path
+from typing import Any
 
-import boto3
+import numpy as np
 import orjson
-import pandas as pd
 import torch
-from torch.cuda.amp import GradScaler
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingLR
+from tqdm import tqdm
 
-from splatnlp.model.config import TrainingConfig
+# ──────────────────────────────────────────────────────────────────────────────
+# Package imports
+# (all live inside the installed `splatnlp` package – no sys.path hacking)
+# ──────────────────────────────────────────────────────────────────────────────
 from splatnlp.model.models import SetCompletionModel
-from splatnlp.model.training_loop import train_model
-from splatnlp.monosemantic_sae.models import ModifiedSetCompletionModel
-from splatnlp.monosemantic_sae.training_loop import train_autoencoder
+from splatnlp.monosemantic_sae.data_objects import SAEConfig
+from splatnlp.monosemantic_sae.models import SparseAutoencoder
+from splatnlp.monosemantic_sae.sae_training import (
+    evaluate_sae_model,
+    train_sae_model,
+)
+from splatnlp.monosemantic_sae.utils import (
+    load_json_from_path,
+    load_tokenized_data,
+    setup_hook,
+)
 from splatnlp.preprocessing.datasets.generate_datasets import (
     generate_dataloaders,
     generate_tokenized_datasets,
 )
-from splatnlp.utils.constants import PAD
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Logging helpers
+# ──────────────────────────────────────────────────────────────────────────────
+_LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+_ROOT_LOGGER = logging.getLogger()
+_LOGGER = logging.getLogger(__name__)
 
 
-def load_vocab(vocab_path):
-    if vocab_path.startswith(("http://", "https://", "s3://")):
-        if vocab_path.startswith("s3://"):
-            s3 = boto3.client("s3")
-            bucket, key = vocab_path[5:].split("/", 1)
-            response = s3.get_object(Bucket=bucket, Key=key)
-            content = response["Body"].read()
-        else:
-            import requests
+def _setup_logging(save_dir: Path, verbose: bool) -> None:
+    """Configure root logger once per run."""
+    log_level = logging.INFO if verbose else logging.WARNING
+    log_file = save_dir / "sae_training.log"
 
-            response = requests.get(vocab_path)
-            content = response.content
-        return orjson.loads(content)
-    else:
-        with open(vocab_path, "rb") as f:
-            return orjson.loads(f.read())
+    # Re-initialise handlers - prevents duplicated log lines in Jupyter
+    for h in _ROOT_LOGGER.handlers[:]:
+        _ROOT_LOGGER.removeHandler(h)
 
-
-def load_data(data_path, table_name=None):
-    if data_path.startswith(("http://", "https://", "s3://")):
-        if data_path.startswith("s3://"):
-            s3 = boto3.client("s3")
-            bucket, key = data_path[5:].split("/", 1)
-            response = s3.get_object(Bucket=bucket, Key=key)
-            content = response["Body"].read()
-        else:
-            import requests
-
-            response = requests.get(data_path)
-            content = response.content
-        return pd.read_csv(io.BytesIO(content), sep="\t", header=0)
-    elif data_path.endswith(".db") or data_path.endswith(".sqlite"):
-        conn = sqlite3.connect(data_path)
-        if table_name:
-            return pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
-        else:
-            return pd.read_sql_query("SELECT * FROM data", conn)
-    else:
-        return pd.read_csv(data_path, sep="\t")
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Train an Autoencoder for SetCompletionModel or a standard SetCompletionModel"
+    logging.basicConfig(
+        level=log_level,
+        format=_LOG_FORMAT,
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler(log_file),
+        ],
+        force=True,
     )
-    parser.add_argument(
-        "--data_path",
-        type=str,
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CLI
+# ──────────────────────────────────────────────────────────────────────────────
+def _build_arg_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description="Train a Sparse Auto-Encoder on SetCompletionModel activations.",
+    )
+
+    # ── Required paths ───────────────────────────────────────────────────────
+    ap.add_argument(
+        "--model-checkpoint",
         required=True,
-        help="Path to the tokenized dataset (local file, S3 path, or SQLite DB)",
-    )
-    parser.add_argument(
-        "--vocab_path",
         type=str,
+        help="Path/URL to the primary SetCompletionModel .pth checkpoint.",
+    )
+    ap.add_argument(
+        "--data-csv",
         required=True,
-        help="Path to the vocabulary JSON file (local file or S3 path)",
-    )
-    parser.add_argument(
-        "--weapon_vocab_path",
         type=str,
+        help="Path to the tokenised dataset TSV (abilities, weapons, ...).",
+    )
+    ap.add_argument(
+        "--vocab-path",
         required=True,
-        help="Path to the weapon vocabulary JSON file (local file or S3 path)",
-    )
-    parser.add_argument(
-        "--pretrained_model_path",
         type=str,
-        help="Path to the pretrained SetCompletionModel for autoencoder training",
+        help="Path/URL to the ability vocabulary JSON.",
     )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
+    ap.add_argument(
+        "--weapon-vocab-path",
         required=True,
-        help="Directory to save the trained model",
+        type=str,
+        help="Path/URL to the weapon vocabulary JSON.",
     )
-    parser.add_argument(
-        "--autoencoder_dim",
+    ap.add_argument(
+        "--save-dir",
+        required=True,
+        type=str,
+        help="Directory where models / metrics will be written.",
+    )
+
+    # ── Hook options ─────────────────────────────────────────────────────────
+    ap.add_argument(
+        "--hook-target",
+        choices=["masked_mean", "token_ff"],
+        default="masked_mean",
+        help="Activation point to hijack for the SAE.",
+    )
+    ap.add_argument(
+        "--hook-layer-index",
         type=int,
-        default=64,
-        help="Dimension of the autoencoder's hidden layer",
+        help="(token_ff) Transformer layer index.",
     )
-    parser.add_argument(
-        "--learning_rate", type=float, default=0.0001, help="Learning rate"
+    ap.add_argument(
+        "--hook-ff-module-index",
+        type=int,
+        help="(token_ff) Feed-forward sub-module index in that layer.",
     )
-    parser.add_argument(
-        "--weight_decay", type=float, default=0.01, help="Weight decay"
+
+    # ── Primary model hyper-params (only shape-relevant) ─────────────────────
+    ap.add_argument("--primary-embedding-dim", type=int, default=32)
+    ap.add_argument(
+        "--primary-hidden-dim",
+        type=int,
+        default=512,
+        help="Dimension of the masked-mean vector - becomes SAE input.",
     )
-    parser.add_argument(
-        "--num_epochs", type=int, default=10, help="Number of training epochs"
+    ap.add_argument("--primary-num-layers", type=int, default=3)
+    ap.add_argument("--primary-num-heads", type=int, default=8)
+    ap.add_argument("--primary-num-inducing", type=int, default=32)
+    ap.add_argument(
+        "--primary-use-layernorm",
+        action=argparse.BooleanOptionalAction,
+        default=True,
     )
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
-    parser.add_argument(
+    ap.add_argument("--primary-dropout", type=float, default=0.0)
+
+    # ── SAE hyper‑params ─────────────────────────────────────────────────────
+    ap.add_argument(
+        "--expansion-factor",
+        type=float,
+        default=4.0,
+        help="Hidden / input dimension ratio.",
+    )
+    ap.add_argument("--l1-coeff", type=float, default=5e-6)
+    ap.add_argument("--target-usage", type=float, default=0.05)
+    ap.add_argument(
+        "--usage-coeff",
+        type=float,
+        default=0.0,
+        help="Base coefficient for the KL usage term (0 ⇒ disabled).",
+    )
+    ap.add_argument("--dead-neuron-threshold", type=float, default=1e-8)
+
+    # KL schedule
+    ap.add_argument("--kl-warmup-steps", type=int, default=6_000)
+    ap.add_argument("--kl-period-steps", type=int, default=60_000)
+    ap.add_argument("--kl-floor", type=float, default=0.05)
+
+    # ── Training loop ────────────────────────────────────────────────────────
+    ap.add_argument(
         "--device",
         type=str,
         default="cuda" if torch.cuda.is_available() else "cpu",
-        help="Device to use for training",
     )
-    parser.add_argument(
-        "--fraction",
-        type=float,
-        default=1.0,
-        help="Fraction of the dataset to use for training",
-    )
-    parser.add_argument(
-        "--table_name",
-        type=str,
-        help="Table name for SQLite database (optional)",
-    )
-    parser.add_argument(
-        "--verbose",
-        type=bool,
-        default=False,
-        help="Enable verbose output",
-    )
-    parser.add_argument(
-        "--patience",
+    ap.add_argument("--epochs", type=int, default=10)
+    ap.add_argument("--lr", type=float, default=1e-5)
+    ap.add_argument(
+        "--primary-batch-size",
         type=int,
-        default=3,
-        help="Number of epochs with no improvement after which training will be stopped",
+        default=32,
+        help="Batch size for the *primary* model forward pass.",
     )
-    parser.add_argument(
-        "--clip_grad_norm",
-        type=float,
-        default=1.0,
-        help="Maximum norm of gradients for gradient clipping",
-    )
-    parser.add_argument(
-        "--scheduler_factor",
-        type=float,
-        default=0.1,
-        help="Factor by which the learning rate will be reduced",
-    )
-    parser.add_argument(
-        "--scheduler_patience",
+    ap.add_argument(
+        "--buffer-size",
         type=int,
-        default=2,
-        help="Number of epochs with no improvement after which learning rate will be reduced",
+        default=100_000,
+        help="Circular buffer size for captured activations.",
     )
-    parser.add_argument(
-        "--use_mixed_precision",
-        type=bool,
-        default=False,
-        help="Enable mixed precision training for H100 GPUs",
+    ap.add_argument(
+        "--sae-batch-size",
+        type=int,
+        default=1024,
+        help="Batch size for SAE optimisation steps.",
     )
-    parser.add_argument(
-        "--num_workers",
+    ap.add_argument(
+        "--steps-before-train",
+        type=int,
+        default=50_000,
+        help="#activations in buffer before SAE updates start.",
+    )
+    ap.add_argument(
+        "--sae-train-steps",
         type=int,
         default=4,
-        help="Number of worker processes for data loading",
+        help="SAE steps per primary forward (after warm-up).",
     )
-    parser.add_argument(
-        "--embedding_dim",
+    ap.add_argument("--gradient-clip-val", type=float, default=1.0)
+    ap.add_argument("--primary-data-fraction", type=float, default=0.005)
+    ap.add_argument(
+        "--num-workers", type=int, default=min(8, (os.cpu_count() or 8) // 2)
+    )
+    # Dead‑neuron resampling
+    ap.add_argument(
+        "--resample-steps",
         type=int,
-        default=32,
-        help="Dimension of the embedding layer",
+        nargs="+",
+        default=[7_000, 14_000, 21_000, 28_000],
     )
-    parser.add_argument(
-        "--hidden_dim",
-        type=int,
-        default=512,
-        help="Dimension of the hidden layer",
-    )
-    parser.add_argument(
-        "--num_layers",
-        type=int,
-        default=3,
-        help="Number of transformer layers",
-    )
-    parser.add_argument(
-        "--num_heads",
-        type=int,
-        default=8,
-        help="Number of attention heads",
-    )
-    parser.add_argument(
-        "--num_inducing_points",
-        type=int,
-        default=32,
-        help="Number of inducing points for attention",
-    )
-    parser.add_argument(
-        "--use_layer_norm",
-        type=bool,
+    ap.add_argument("--resample-weight", type=float, default=0.01)
+    ap.add_argument("--resample-bias", type=float, default=-1.0)
+
+    # ── Misc ────────────────────────────────────────────────────────────────
+    ap.add_argument(
+        "--verbose",
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="Use layer normalization",
-    )
-    parser.add_argument(
-        "--dropout",
-        type=float,
-        default=0.1,
-        help="Dropout rate",
-    )
-    parser.add_argument(
-        "--metric_update_interval",
-        type=int,
-        default=100,
-        help="Interval for updating metrics during training",
+        help="More logging + tqdm bars.",
     )
 
-    args = parser.parse_args()
+    return ap
 
-    if args.verbose:
-        print("Loading data and vocabulary...")
 
-    # Load data and vocabulary
-    df = load_data(args.data_path, args.table_name)
-    if args.verbose:
-        print(f"Loaded {len(df)} rows from {args.data_path}")
-        print(f"Columns: {df.columns}")
-        print(f"Heads: {df.head()}")
+# ──────────────────────────────────────────────────────────────────────────────
+# Utilities
+# ──────────────────────────────────────────────────────────────────────────────
+def _json_write(path: Path, obj: Any) -> None:
+    try:
+        with open(path, "wb") as f:
+            f.write(
+                orjson.dumps(
+                    obj, option=orjson.OPT_INDENT_2 | orjson.OPT_SERIALIZE_NUMPY
+                )
+            )
+    except Exception:
+        # Fall back to stdlib json for weird types
+        with open(path, "w") as f:
+            json.dump(obj, f, indent=2, default=str)
 
-    df["ability_tags"] = df["ability_tags"].apply(orjson.loads)
-    vocab = load_vocab(args.vocab_path)
-    weapon_vocab = load_vocab(args.weapon_vocab_path)
 
-    if args.verbose:
-        print("Generating datasets...")
+# ──────────────────────────────────────────────────────────────────────────────
+# Main
+# ──────────────────────────────────────────────────────────────────────────────
+def main() -> None:
+    args = _build_arg_parser().parse_args()
 
-    # Generate datasets
+    save_dir = Path(args.save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    _setup_logging(save_dir, args.verbose)
+    _LOGGER.info("Arguments:\n%s", json.dumps(vars(args), indent=2))
+
+    device = torch.device(args.device)
+
+    # -------------------------------------------------------------------- #
+    # 1. Load vocabularies
+    # -------------------------------------------------------------------- #
+    vocab = load_json_from_path(args.vocab_path)
+    weapon_vocab = load_json_from_path(args.weapon_vocab_path)
+    pad_id = vocab.get("<PAD>")
+    if pad_id is None:
+        raise ValueError("'<PAD>' token missing from vocabulary.")
+    _LOGGER.info(
+        "Loaded vocab → %d tokens, weapon vocab → %d tokens.",
+        len(vocab),
+        len(weapon_vocab),
+    )
+
+    # -------------------------------------------------------------------- #
+    # 2. Instantiate + load primary model
+    # -------------------------------------------------------------------- #
+    primary_model = SetCompletionModel(
+        vocab_size=len(vocab),
+        weapon_vocab_size=len(weapon_vocab),
+        embedding_dim=args.primary_embedding_dim,
+        hidden_dim=args.primary_hidden_dim,
+        output_dim=len(vocab),
+        num_layers=args.primary_num_layers,
+        num_heads=args.primary_num_heads,
+        num_inducing_points=args.primary_num_inducing,
+        use_layer_norm=args.primary_use_layernorm,
+        dropout=args.primary_dropout,
+        pad_token_id=pad_id,
+    ).to(device)
+
+    _LOGGER.info("Loading primary checkpoint from: %s", args.model_checkpoint)
+    if args.model_checkpoint.startswith(("http://", "https://")):
+        state_dict = torch.hub.load_state_dict_from_url(
+            args.model_checkpoint, map_location=device
+        )
+    else:
+        state_dict = torch.load(args.model_checkpoint, map_location=device)
+    primary_model.load_state_dict(state_dict, strict=True)
+    primary_model.eval()
+
+    # -------------------------------------------------------------------- #
+    # 3. Register activation hook
+    # -------------------------------------------------------------------- #
+    hook, handle = setup_hook(
+        primary_model,
+        target=args.hook_target,
+        layer_index=args.hook_layer_index,
+        feedforward_module_index=args.hook_ff_module_index,
+    )
+
+    # -------------------------------------------------------------------- #
+    # 4. Dataset → train/val/test DataLoaders
+    # -------------------------------------------------------------------- #
+    df = load_tokenized_data(args.data_csv)
     train_df, val_df, test_df = generate_tokenized_datasets(
-        df, frac=args.fraction
+        df, frac=args.primary_data_fraction
+    )
+    _LOGGER.info(
+        "Dataset sizes → train %d | val %d | test %d",
+        len(train_df),
+        len(val_df),
+        len(test_df),
     )
 
-    if args.verbose:
-        print("Generating dataloaders...")
-
-    # Generate dataloaders
-    train_dl, val_dl, _ = generate_dataloaders(
+    train_dl, val_dl, test_dl = generate_dataloaders(
         train_df,
         val_df,
         test_df,
         vocab_size=len(vocab),
-        pad_token_id=vocab[PAD],
-        batch_size=args.batch_size,
+        pad_token_id=pad_id,
+        batch_size=args.primary_batch_size,
         num_workers=args.num_workers,
+        shuffle=True,
+        pin_memory=device.type == "cuda",
+        persistent_workers=args.num_workers > 0,
     )
 
-    # Create training config
-    config = TrainingConfig(
-        num_epochs=args.num_epochs,
-        patience=args.patience,
-        learning_rate=args.learning_rate,
-        weight_decay=args.weight_decay,
-        clip_grad_norm=args.clip_grad_norm,
-        scheduler_factor=args.scheduler_factor,
-        scheduler_patience=args.scheduler_patience,
-        device=args.device,
+    # -------------------------------------------------------------------- #
+    # 5. Build SAE & optimiser
+    # -------------------------------------------------------------------- #
+    sae = SparseAutoencoder(
+        input_dim=args.primary_hidden_dim,
+        expansion_factor=args.expansion_factor,
+        l1_coefficient=args.l1_coeff,
+        target_usage=args.target_usage,
+        usage_coeff=args.usage_coeff,
+        dead_neuron_threshold=args.dead_neuron_threshold,
+        dead_neuron_steps=1,  # not used - resampling handled outside
+    ).to(device)
+
+    sae_config = SAEConfig(
+        input_dim=args.primary_hidden_dim,
+        expansion_factor=args.expansion_factor,
+        l1_coefficient=args.l1_coeff,
+        learning_rate=args.lr,
+        resample_interval=999_999_999,  # turns off internal resample
+        dead_neuron_threshold=args.dead_neuron_threshold,
+        target_usage=args.target_usage,
+        usage_coeff=args.usage_coeff,
     )
 
-    scaler = GradScaler() if args.use_mixed_precision else None
+    optimiser = AdamW(sae.parameters(), lr=args.lr)
 
-    if args.pretrained_model_path:
-        if args.verbose:
-            print("Loading pretrained model for autoencoder training...")
+    # Cosine LR schedule - T_max = estimated total SAE updates
+    batches_per_epoch = len(train_dl)
+    prim_steps_total = args.epochs * batches_per_epoch
+    prim_steps_warmup = args.steps_before_train // max(
+        args.primary_batch_size, 1
+    )
+    prim_steps_with_sae = max(0, prim_steps_total - prim_steps_warmup)
+    sae_updates_est = prim_steps_with_sae * args.sae_train_steps
+    if sae_updates_est <= 0:
+        sae_updates_est = prim_steps_total  # reasonable fallback
+    _LOGGER.info(
+        "CosineAnnealingLR: T_max = %d SAE updates (est.)", sae_updates_est
+    )
 
-        # Create modified model with autoencoder using from_pretrained method
-        model = ModifiedSetCompletionModel.from_pretrained(
-            pretrained_model_path=args.pretrained_model_path,
-            autoencoder_dim=args.autoencoder_dim,
-            vocab_size=len(vocab),
-            weapon_vocab_size=len(weapon_vocab),
-            embedding_dim=args.embedding_dim,
-            hidden_dim=args.hidden_dim,
-            output_dim=len(vocab),
-            num_layers=args.num_layers,
-            num_heads=args.num_heads,
-            num_inducing_points=args.num_inducing_points,
-            use_layer_norm=args.use_layer_norm,
-            dropout=args.dropout,
-            pad_token_id=vocab[PAD],
-        )
+    scheduler = CosineAnnealingLR(
+        optimiser, T_max=sae_updates_est, eta_min=args.lr * 0.1
+    )
 
-        if args.verbose:
-            print("Starting autoencoder training...")
+    # -------------------------------------------------------------------- #
+    # 6. Persist run configuration
+    # -------------------------------------------------------------------- #
+    run_cfg_path = save_dir / "sae_run_config.json"
+    _json_write(
+        run_cfg_path,
+        {
+            **vars(args),
+            "sae_input_dim": sae.input_dim,
+            "sae_hidden_dim": sae.hidden_dim,
+        },
+    )
+    _LOGGER.info("Saved run-config → %s", run_cfg_path)
 
-        # Train autoencoder
-        metrics_history, trained_model = train_autoencoder(
-            model,
-            train_dl,
-            val_dl,
-            config,
-            vocab,
-            pad_token=PAD,
+    # -------------------------------------------------------------------- #
+    # 7. Train
+    # -------------------------------------------------------------------- #
+    try:
+        metrics_history = train_sae_model(
+            primary_model,
+            sae,
+            optimiser,
+            scheduler,
+            hook,
+            sae_config,
+            data_loader=train_dl,
+            val_loader=val_dl,
+            vocab=vocab,
+            device=device,
+            num_epochs=args.epochs,
+            activation_buffer_size=args.buffer_size,
+            sae_batch_size=args.sae_batch_size,
+            steps_before_sae_train=args.steps_before_train,
+            sae_train_steps_per_primary_step=args.sae_train_steps,
+            resample_steps=set(args.resample_steps),
+            resample_weight=args.resample_weight,
+            resample_bias=args.resample_bias,
+            kl_warmup_steps=args.kl_warmup_steps,
+            kl_period_steps=args.kl_period_steps,
+            kl_floor=args.kl_floor,
+            log_interval=500,
+            gradient_clip_val=args.gradient_clip_val,
             verbose=args.verbose,
-            scaler=scaler,
         )
-    else:
-        if args.verbose:
-            print("Creating model for standard training...")
+    finally:
+        handle.remove()  # ensure we always detach the hook
 
-        # Create standard model
-        model = SetCompletionModel(
-            vocab_size=len(vocab),
-            weapon_vocab_size=len(weapon_vocab),
-            embedding_dim=args.embedding_dim,
-            hidden_dim=args.hidden_dim,
-            output_dim=len(vocab),
-            num_layers=args.num_layers,
-            num_heads=args.num_heads,
-            num_inducing_points=args.num_inducing_points,
-            use_layer_norm=args.use_layer_norm,
-            dropout=args.dropout,
-            pad_token_id=vocab[PAD],
-        )
+    # -------------------------------------------------------------------- #
+    # 8. Save SAE + metrics
+    # -------------------------------------------------------------------- #
+    sae_path = save_dir / "sae_model_final.pth"
+    torch.save(sae.state_dict(), sae_path)
+    _LOGGER.info("Saved SAE → %s", sae_path)
 
-        if args.verbose:
-            print("Starting model training...")
+    if metrics_history:
+        _json_write(save_dir / "sae_metrics_history.json", metrics_history)
 
-        # Train model
-        metrics_history, trained_model = train_model(
-            model,
-            train_dl,
-            val_dl,
-            config,
+    # -------------------------------------------------------------------- #
+    # 9. Final evaluation on the held-out test set
+    # -------------------------------------------------------------------- #
+    _LOGGER.info("Running final SAE evaluation on test split …")
+    test_hook, test_handle = setup_hook(
+        primary_model,
+        target=args.hook_target,
+        layer_index=args.hook_layer_index,
+        feedforward_module_index=args.hook_ff_module_index,
+    )
+    try:
+        test_metrics = evaluate_sae_model(
+            primary_model,
+            sae,
+            test_hook,
+            test_dl,
+            device,
+            sae_config,
             vocab,
-            verbose=args.verbose,
-            scaler=scaler,
-            metric_update_interval=args.metric_update_interval,
+            description="Test",
         )
+    finally:
+        test_handle.remove()
 
-    if args.verbose:
-        print("Saving model, metrics, and parameters...")
-
-    # Save model, metrics, and parameters
-    os.makedirs(args.output_dir, exist_ok=True)
-
-    if args.pretrained_model_path:
-        torch.save(
-            trained_model.state_dict(),
-            os.path.join(args.output_dir, "autoencoder_model.pth"),
-        )
-        # Save autoencoder-specific parameters
-        model_params = {
-            "autoencoder_dim": args.autoencoder_dim,
-            "use_mixed_precision": args.use_mixed_precision,
-        }
-    else:
-        torch.save(
-            trained_model.state_dict(),
-            os.path.join(args.output_dir, "model.pth"),
-        )
-        # Save standard model parameters
-        model_params = {
-            "embedding_dim": args.embedding_dim,
-            "hidden_dim": args.hidden_dim,
-            "num_layers": args.num_layers,
-            "num_heads": args.num_heads,
-            "num_inducing_points": args.num_inducing_points,
-            "use_layer_norm": args.use_layer_norm,
-            "dropout": args.dropout,
-            "use_mixed_precision": args.use_mixed_precision,
-        }
-
-    with open(os.path.join(args.output_dir, "metrics_history.json"), "wb") as f:
-        f.write(
-            orjson.dumps(metrics_history, option=orjson.OPT_SERIALIZE_NUMPY)
-        )
-
-    with open(os.path.join(args.output_dir, "model_params.json"), "w") as f:
-        orjson.dumps(model_params, f)
-
-    print(f"Model, metrics, and parameters saved in {args.output_dir}")
+    _json_write(save_dir / "sae_test_metrics.json", test_metrics)
+    _LOGGER.info("Done - all artifacts saved to %s", save_dir)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
