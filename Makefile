@@ -23,14 +23,16 @@ build-upload:
 
 .PHONY: install
 install:
-	apt-get update && apt-get install -y \
+	sudo apt-get update && sudo apt-get install -y \
 		curl \
 		gcc \
-		make \
-		&& rm -rf /var/lib/apt/lists/*
+		&& sudo rm -rf /var/lib/apt/lists/*
 
 	curl -sSL https://install.python-poetry.org | python3 -
+	export PATH="/home/ubuntu/.local/bin:$PATH"
+	poetry config virtualenvs.in-project true
 	poetry install
+	source .venv/bin/activate
 	# Remove torch to install nightly version for B200
 	poetry remove torch
 	TORCH_URL="https://download.pytorch.org/whl/nightly/cu128/torch-2.8.0.dev20250623%2Bcu128-cp310-cp310-manylinux_2_28_x86_64.whl"
