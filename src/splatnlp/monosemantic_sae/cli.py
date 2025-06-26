@@ -50,6 +50,7 @@ from splatnlp.preprocessing.datasets.generate_datasets import (
     generate_dataloaders,
     generate_tokenized_datasets,
 )
+from splatnlp.utils.convert_ddp_state import convert_ddp_state
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Logging helpers
@@ -289,6 +290,7 @@ def main() -> None:
     # -------------------------------------------------------------------- #
     # 2. Instantiate + load primary model
     # -------------------------------------------------------------------- #
+
     primary_model = SetCompletionModel(
         vocab_size=len(vocab),
         weapon_vocab_size=len(weapon_vocab),
@@ -310,7 +312,11 @@ def main() -> None:
         )
     else:
         state_dict = torch.load(args.model_checkpoint, map_location=device)
-    primary_model.load_state_dict(state_dict, strict=True)
+    try:
+        primary_model.load_state_dict(state_dict, strict=True)
+    except RuntimeError:
+        state_dict = convert_ddp_state(state_dict)
+        primary_model.load_state_dict(state_dict, strict=True)
     primary_model.eval()
 
     # -------------------------------------------------------------------- #

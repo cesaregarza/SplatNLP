@@ -34,7 +34,7 @@ install:
 	export PATH="/home/ubuntu/.local/bin:$PATH"
 	poetry config virtualenvs.in-project true
 	poetry install
-	export PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/nightly/cu128"
+	export PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/nightly/"
 	. .venv/bin/activate
 	# Remove torch to install nightly version for B200
 	poetry remove torch
