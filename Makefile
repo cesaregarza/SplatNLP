@@ -26,6 +26,7 @@ install:
 	sudo apt-get update && sudo apt-get install -y \
 		curl \
 		gcc \
+		python3-venv \
 		&& sudo rm -rf /var/lib/apt/lists/*
 
 	curl -sSL https://install.python-poetry.org | python3 -
