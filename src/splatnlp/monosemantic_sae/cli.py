@@ -1,16 +1,10 @@
 """
 Train a Sparse Auto-Encoder (SAE) on SetCompletionModel activations.
 
-Key improvements vs. the old CLI
---------------------------------
-* Cleaner argument list with sensible defaults.
-* No runtime path hacking - relies on the installed `splatnlp` package.
-* Consistent logging (to console **and** file).
-* Robust estimation of `T_max` for the cosine LR scheduler.
-* Passes `val_loader` into `train_sae_model`, so validation happens during
-  training.
-* Proper JSON/ORJSON serialisation of metrics and run-config.
-* Optional gradient clipping, KL-warm-up schedule, dead-neuron resampling.
+This script is a fusion of two versions, combining the robust engineering
+(DDP-handling, advanced logging, JSON fallbacks) of the original script
+with the enhanced features (token-ff hooking) and more aggressive,
+performance-oriented hyperparameter defaults of a later version.
 """
 
 from __future__ import annotations
@@ -34,7 +28,7 @@ from splatnlp.model.cli import load_data
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Package imports
-# (all live inside the installed `splatnlp` package – no sys.path hacking)
+# (Assumes splatnlp is an installed package)
 # ──────────────────────────────────────────────────────────────────────────────
 from splatnlp.model.models import SetCompletionModel
 from splatnlp.monosemantic_sae.data_objects import SAEConfig
@@ -130,6 +124,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default="masked_mean",
         help="Activation point to hijack for the SAE.",
     )
+    ## FUSED FEATURE: Added arguments for token-level FF hooking from Script B.
     ap.add_argument(
         "--hook-layer-index",
         type=int,
@@ -168,11 +163,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--l1-coeff", type=float, default=5e-6)
     ap.add_argument("--target-usage", type=float, default=0.05)
+    ## FUSED DEFAULT: Using the aggressive KL usage coefficient from Script B.
     ap.add_argument(
         "--usage-coeff",
         type=float,
-        default=0.0,
-        help="Base coefficient for the KL usage term (0 ⇒ disabled).",
+        default=1.5,
+        help="Base coefficient for the KL usage term schedule (0 ⇒ disabled).",
     )
     ap.add_argument("--dead-neuron-threshold", type=float, default=1e-8)
 
@@ -225,14 +221,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--num-workers", type=int, default=min(8, (os.cpu_count() or 8) // 2)
     )
     # Dead‑neuron resampling
+    ## FUSED DEFAULTS: Using the aggressive resampling schedule and parameters from Script B.
     ap.add_argument(
         "--resample-steps",
         type=int,
         nargs="+",
-        default=[7_000, 14_000, 21_000, 28_000],
+        default=[7_000, 14_000, 28_000, 42_000, 56_000, 70_000],
     )
-    ap.add_argument("--resample-weight", type=float, default=0.01)
-    ap.add_argument("--resample-bias", type=float, default=-1.0)
+    ap.add_argument("--resample-weight", type=float, default=0.2)
+    ap.add_argument("--resample-bias", type=float, default=0.0)
 
     # ── Misc ────────────────────────────────────────────────────────────────
     ap.add_argument(
@@ -249,7 +246,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 # Utilities
 # ──────────────────────────────────────────────────────────────────────────────
 def _json_write(path: Path, obj: Any) -> None:
+    """Robustly write object to JSON, trying orjson first then fallback."""
     try:
+        # Fast path with orjson for numpy support
         with open(path, "wb") as f:
             f.write(
                 orjson.dumps(
@@ -258,6 +257,9 @@ def _json_write(path: Path, obj: Any) -> None:
             )
     except Exception:
         # Fall back to stdlib json for weird types
+        _LOGGER.warning(
+            "orjson serialization failed, falling back to standard json."
+        )
         with open(path, "w") as f:
             json.dump(obj, f, indent=2, default=str)
 
@@ -292,7 +294,6 @@ def main() -> None:
     # -------------------------------------------------------------------- #
     # 2. Instantiate + load primary model
     # -------------------------------------------------------------------- #
-
     primary_model = SetCompletionModel(
         vocab_size=len(vocab),
         weapon_vocab_size=len(weapon_vocab),
@@ -314,6 +315,8 @@ def main() -> None:
         )
     else:
         state_dict = torch.load(args.model_checkpoint, map_location=device)
+
+    ## FUSED FEATURE: Retained the robust DDP state dict conversion.
     try:
         primary_model.load_state_dict(state_dict, strict=True)
     except RuntimeError:
@@ -325,6 +328,7 @@ def main() -> None:
     # -------------------------------------------------------------------- #
     # 3. Register activation hook
     # -------------------------------------------------------------------- #
+    ## FUSED FEATURE: The hook setup now passes the new arguments.
     hook, handle = setup_hook(
         primary_model,
         target=args.hook_target,
@@ -368,6 +372,7 @@ def main() -> None:
         expansion_factor=args.expansion_factor,
         l1_coefficient=args.l1_coeff,
         target_usage=args.target_usage,
+        ## FUSED DEFAULT: Pass the aggressive usage_coeff to the model.
         usage_coeff=args.usage_coeff,
         dead_neuron_threshold=args.dead_neuron_threshold,
         dead_neuron_steps=1,  # not used - resampling handled outside
@@ -381,6 +386,7 @@ def main() -> None:
         resample_interval=999_999_999,  # turns off internal resample
         dead_neuron_threshold=args.dead_neuron_threshold,
         target_usage=args.target_usage,
+        ## FUSED DEFAULT: Also ensure the config object has the new default.
         usage_coeff=args.usage_coeff,
     )
 
@@ -438,6 +444,7 @@ def main() -> None:
             sae_batch_size=args.sae_batch_size,
             steps_before_sae_train=args.steps_before_train,
             sae_train_steps_per_primary_step=args.sae_train_steps,
+            ## FUSED DEFAULTS: Pass the new resampling params to the training loop.
             resample_steps=set(args.resample_steps),
             resample_weight=args.resample_weight,
             resample_bias=args.resample_bias,

@@ -10,6 +10,13 @@ This project tackles this challenge through an end-to-end machine learning pipel
 
 **Core Model (`SplatGPT`):** The primary model (`SetCompletionModel`) leverages principles from Set Transformers and GPT-2, incorporating unique attention mechanisms to process gear sets effectively while considering weapon context.
 
+The model is approximately **83 million parameters** in size and is available in two variants:
+
+- **Full:** Trained on a single H100 GPU for 62 hours, using 5 subset variants per data point (each subset created via randomized masking). This variant is extensively explored and includes a fully-trained monosemantic sparse autoencoder (SAE) with numerous labeled neurons for interpretability.
+- **Ultra:** Trained on four B200 GPUs for 35 hours, utilizing 20 subset variants per data point. Currently undergoing exploration; its monosemantic SAE is actively being trained.
+
+A Google Colab notebook demonstrating inference and analysis for both variants is coming soon.
+
 **Sparse Autoencoder (SAE):** The SAE is trained on the activations of the primary model to provide a sparse, monosemantic representation of the gear sets. This allows for interpretability and feature analysis of the model's predictions (see the `monosemantic_sae` module). It includes a `SetCompletionHook` that can be used to hook into the primary model and modify the activations during inference for model steering. This is based on Anthropic's work: [Towards Monosemanticity](https://transformer-circuits.pub/2023/monosemantic-features/index.html)
 
 ---
@@ -25,6 +32,9 @@ For a comprehensive deep-dive into the problem definition, the novel model archi
 
 * **End-to-End Pipeline:** Covers data acquisition from stat.ink, sophisticated preprocessing, model training, evaluation, and API serving.
 * **Novel Architecture (`SetCompletionModel`):** Implements a custom model inspired by Set Transformer and GPT-2 principles, featuring attention mechanisms like Induced Set Attention and Pooling Multihead Attention to handle set-based inputs effectively (see `src/splatnlp/model/models.py`).
+* **Model Variants:** Two versions of the `SetCompletionModel` available:
+  - **Full (83M params):** Extensively tested with complete SAE interpretability.
+  - **Ultra (83M params):** Experimental, leveraging significantly more diverse subset variants per data point for richer context, SAE interpretability in progress.
 * **Embedding-Based Analysis:** Provides tools for training Doc2Vec models on gear sets, performing TF-IDF analysis, clustering builds using UMAP and DBSCAN, and visualizing embeddings (`src/splatnlp/embeddings/`).
 * **Advanced Preprocessing:** Includes domain-specific logic for ability bucketing based on Ability Point (AP) thresholds, tokenization, handling game patches, and targeted sampling to bias towards optimal configurations. Uses PyArrow for memory efficiency during partitioning (see `src/splatnlp/preprocessing/`).
 * **Interpretability via Sparse Autoencoders (SAEs):** Incorporates training of SAEs on the *activations* of the primary model for feature analysis and interpretability, following recent research trends (see `src/splatnlp/monosemantic_sae/`).
