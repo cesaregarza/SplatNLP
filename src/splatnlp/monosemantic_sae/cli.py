@@ -30,6 +30,8 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 
+from splatnlp.model.cli import load_data
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Package imports
 # (all live inside the installed `splatnlp` package – no sys.path hacking)
@@ -50,7 +52,7 @@ from splatnlp.preprocessing.datasets.generate_datasets import (
     generate_dataloaders,
     generate_tokenized_datasets,
 )
-from splatnlp.utils.convert_ddp_state import convert_ddp_state
+from splatnlp.utils.train import convert_ddp_state
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Logging helpers
@@ -333,7 +335,8 @@ def main() -> None:
     # -------------------------------------------------------------------- #
     # 4. Dataset → train/val/test DataLoaders
     # -------------------------------------------------------------------- #
-    df = load_tokenized_data(args.data_csv)
+    df = load_data(args.data_csv)
+    df["ability_tags"] = df["ability_tags"].apply(orjson.loads)
     train_df, val_df, test_df = generate_tokenized_datasets(
         df, frac=args.primary_data_fraction
     )

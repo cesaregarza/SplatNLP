@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODEL_CHECKPOINT="https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/model_super.pth"
+MODEL_CHECKPOINT="https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/model_ultra.pth"
 DATA_CSV="https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/tokenized_data.csv"
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
@@ -44,7 +44,7 @@ NUM_WORKERS=16
 VERBOSE_FLAG="--verbose"
 
 CMD=(
-  poetry run python3 -m splatnlp.monosemantic_sae.sae_training.cli
+  poetry run python3 -m splatnlp.monosemantic_sae.cli
 
   --model-checkpoint "${MODEL_CHECKPOINT}"
   --data-csv         "${DATA_CSV}"

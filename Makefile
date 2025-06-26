@@ -38,7 +38,7 @@ install:
 	. .venv/bin/activate
 	# Remove torch to install nightly version for B200
 	poetry remove torch
-	TORCH_URL="https://download.pytorch.org/whl/nightly/cu128/torch-2.8.0.dev20250623%2Bcu128-cp310-cp310-manylinux_2_28_x86_64.whl"
-	VISION_URL="https://download.pytorch.org/whl/nightly/cu128/torchvision-0.23.0.dev20250623%2Bcu128-cp310-cp310-manylinux_2_28_x86_64.whl"
-	AUDIO_URL="https://download.pytorch.org/whl/nightly/cu128/torchaudio-2.8.0.dev20250623%2Bcu128-cp310-cp310-manylinux_2_28_x86_64.whl"
-	pip install "$(TORCH_URL)" "$(VISION_URL)" "$(AUDIO_URL)"
+	export TORCH_URL="https://download.pytorch.org/whl/nightly/cu128/torch-2.8.0.dev20250623%2Bcu128-cp310-cp310-manylinux_2_28_x86_64.whl"
+	export VISION_URL="https://download.pytorch.org/whl/nightly/cu128/torchvision-0.23.0.dev20250623%2Bcu128-cp310-cp310-manylinux_2_28_x86_64.whl"
+	export AUDIO_URL="https://download.pytorch.org/whl/nightly/cu128/torchaudio-2.8.0.dev20250623%2Bcu128-cp310-cp310-manylinux_2_28_x86_64.whl"
+	pip install $TORCH_URL $VISION_URL $AUDIO_URL

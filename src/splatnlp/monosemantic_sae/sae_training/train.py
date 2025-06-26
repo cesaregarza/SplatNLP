@@ -124,6 +124,7 @@ def train_sae_model(
             disable=not verbose,
             desc=f"Epoch {epoch+1} Training",
             leave=False,
+            position=0,
         )
 
         for abilities, weapons, targets, _ in pbar_train:
@@ -239,6 +240,8 @@ def train_sae_model(
                     m_str = ", ".join(
                         [f"{k}: {v:.4g}" for k, v in log_metrics.items()]
                     )
+                    # Clear the progress bar before logging to prevent overlap
+                    pbar_train.clear()
                     logger.info(
                         "Epoch %d Step %d LR %.2e KL %.3f | %s",
                         epoch + 1,
