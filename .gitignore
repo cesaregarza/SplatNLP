@@ -41,7 +41,6 @@ models/
 saved_models/
 outputs/
 sae_outputs/
-sae_runs/
 sae_grid_search_outputs/
 test_data/
 *.db
