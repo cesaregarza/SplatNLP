@@ -1,6 +1,8 @@
 import logging
+from typing import Optional
 
 import torch
+import wandb
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import _LRScheduler
 from tqdm import tqdm
@@ -51,6 +53,7 @@ def train_sae_model(
     log_interval: int = 500,
     gradient_clip_val: float = 1.0,
     verbose: bool = True,
+    wandb_run: Optional[wandb.sdk.wandb_run.Run] = None,
 ) -> list[dict[str, float | int | bool]]:
     """
     Main SAE training loop function. Performs:
@@ -87,6 +90,7 @@ def train_sae_model(
         log_interval: Interval for logging metrics
         gradient_clip_val: Value for gradient clipping
         verbose: Whether to show progress bars
+        wandb_run: Optional Weights & Biases run object for logging.
 
     Returns:
         list[dict]: List of metric dictionaries collected during training
@@ -106,6 +110,8 @@ def train_sae_model(
     logger.info("SAE input dimension: %d", sae_config.input_dim)
     logger.info("KL warm-up steps: %d", kl_warmup_steps)
     logger.info(f"Gradient clipping value: {gradient_clip_val}")
+    if wandb_run:
+        wandb.watch(sae_model, log_freq=log_interval * 5, log="all")
 
     for epoch in range(num_epochs):
         logger.info(
@@ -159,6 +165,15 @@ def train_sae_model(
                     f"Epoch {epoch+1} Buffering "
                     f"{len(act_buf)}/{steps_before_sae_train}"
                 )
+                if wandb_run:
+                    wandb.log(
+                        {
+                            "buffer_fill_percent": len(act_buf)
+                            / steps_before_sae_train
+                            * 100
+                        },
+                        step=sae_step,
+                    )
                 continue
 
             # Train SAE
@@ -225,6 +240,9 @@ def train_sae_model(
 
                 metrics_history.append(metrics.copy())
 
+                if wandb_run:
+                    wandb.log(metrics, step=sae_step)
+
                 if sae_step % log_interval == 0:
                     log_metrics = {
                         k: v
@@ -268,6 +286,10 @@ def train_sae_model(
                     logger.info("-- Resampled %d neurons --", n_resampled)
                     metrics_history[-1]["resampled_neurons"] = n_resampled
                     metrics_history[-1]["is_resample_step"] = True
+                    if wandb_run:
+                        wandb.log(
+                            {"resampled_neurons": n_resampled}, step=sae_step
+                        )
 
         # End of epoch
         logger.info(
@@ -311,6 +333,9 @@ def train_sae_model(
             standard_val_metrics["global_step"] = global_step
             standard_val_metrics["is_validation_standard"] = True
             metrics_history.append(standard_val_metrics)
+            if wandb_run:
+                wandb.log(standard_val_metrics, step=sae_step)
+
         except Exception as std_val_err:
             logger.error(
                 "Error during standard validation: %s",
@@ -348,6 +373,9 @@ def train_sae_model(
             impact_val_metrics["global_step"] = global_step
             impact_val_metrics["is_validation_impact"] = True
             metrics_history.append(impact_val_metrics)
+            if wandb_run:
+                wandb.log(impact_val_metrics, step=sae_step)
+
         except Exception as impact_val_err:
             logger.error(
                 "Error during reconstruction impact validation: %s",
@@ -394,6 +422,13 @@ def train_sae_model(
             )
 
         metrics_history.append(epoch_summary)
+        if wandb_run:
+            wandb.log(epoch_summary, step=sae_step)
+            if wandb_run and len(usage) > 0:
+                wandb.log(
+                    {"neuron_usage": wandb.Histogram(usage)}, step=sae_step
+                )
+
         logger.info(
             (
                 "Usage Stats: Dead=%d (%.2f%%) "

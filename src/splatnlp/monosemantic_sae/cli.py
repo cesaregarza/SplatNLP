@@ -17,19 +17,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import orjson
 import torch
+import wandb
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from tqdm import tqdm
 
 from splatnlp.model.cli import load_data
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Package imports
-# (Assumes splatnlp is an installed package)
-# ──────────────────────────────────────────────────────────────────────────────
 from splatnlp.model.models import SetCompletionModel
 from splatnlp.monosemantic_sae.data_objects import SAEConfig
 from splatnlp.monosemantic_sae.models import SparseAutoencoder
@@ -37,20 +31,13 @@ from splatnlp.monosemantic_sae.sae_training import (
     evaluate_sae_model,
     train_sae_model,
 )
-from splatnlp.monosemantic_sae.utils import (
-    load_json_from_path,
-    load_tokenized_data,
-    setup_hook,
-)
+from splatnlp.monosemantic_sae.utils import load_json_from_path, setup_hook
 from splatnlp.preprocessing.datasets.generate_datasets import (
     generate_dataloaders,
     generate_tokenized_datasets,
 )
 from splatnlp.utils.train import convert_ddp_state
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Logging helpers
-# ──────────────────────────────────────────────────────────────────────────────
 _LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 _ROOT_LOGGER = logging.getLogger()
 _LOGGER = logging.getLogger(__name__)
@@ -61,7 +48,6 @@ def _setup_logging(save_dir: Path, verbose: bool) -> None:
     log_level = logging.INFO if verbose else logging.WARNING
     log_file = save_dir / "sae_training.log"
 
-    # Re-initialise handlers - prevents duplicated log lines in Jupyter
     for h in _ROOT_LOGGER.handlers[:]:
         _ROOT_LOGGER.removeHandler(h)
 
@@ -76,16 +62,12 @@ def _setup_logging(save_dir: Path, verbose: bool) -> None:
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# CLI
-# ──────────────────────────────────────────────────────────────────────────────
 def _build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         description="Train a Sparse Auto-Encoder on SetCompletionModel activations.",
     )
 
-    # ── Required paths ───────────────────────────────────────────────────────
     ap.add_argument(
         "--model-checkpoint",
         required=True,
@@ -117,14 +99,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Directory where models / metrics will be written.",
     )
 
-    # ── Hook options ─────────────────────────────────────────────────────────
     ap.add_argument(
         "--hook-target",
         choices=["masked_mean", "token_ff"],
         default="masked_mean",
         help="Activation point to hijack for the SAE.",
     )
-    ## FUSED FEATURE: Added arguments for token-level FF hooking from Script B.
     ap.add_argument(
         "--hook-layer-index",
         type=int,
@@ -136,7 +116,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="(token_ff) Feed-forward sub-module index in that layer.",
     )
 
-    # ── Primary model hyper-params (only shape-relevant) ─────────────────────
     ap.add_argument("--primary-embedding-dim", type=int, default=32)
     ap.add_argument(
         "--primary-hidden-dim",
@@ -154,7 +133,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--primary-dropout", type=float, default=0.0)
 
-    # ── SAE hyper‑params ─────────────────────────────────────────────────────
     ap.add_argument(
         "--expansion-factor",
         type=float,
@@ -163,7 +141,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--l1-coeff", type=float, default=5e-6)
     ap.add_argument("--target-usage", type=float, default=0.05)
-    ## FUSED DEFAULT: Using the aggressive KL usage coefficient from Script B.
     ap.add_argument(
         "--usage-coeff",
         type=float,
@@ -172,12 +149,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--dead-neuron-threshold", type=float, default=1e-8)
 
-    # KL schedule
     ap.add_argument("--kl-warmup-steps", type=int, default=6_000)
     ap.add_argument("--kl-period-steps", type=int, default=60_000)
     ap.add_argument("--kl-floor", type=float, default=0.05)
 
-    # ── Training loop ────────────────────────────────────────────────────────
     ap.add_argument(
         "--device",
         type=str,
@@ -220,8 +195,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--num-workers", type=int, default=min(8, (os.cpu_count() or 8) // 2)
     )
-    # Dead‑neuron resampling
-    ## FUSED DEFAULTS: Using the aggressive resampling schedule and parameters from Script B.
     ap.add_argument(
         "--resample-steps",
         type=int,
@@ -231,24 +204,37 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--resample-weight", type=float, default=0.2)
     ap.add_argument("--resample-bias", type=float, default=0.0)
 
-    # ── Misc ────────────────────────────────────────────────────────────────
     ap.add_argument(
         "--verbose",
         action=argparse.BooleanOptionalAction,
         default=True,
         help="More logging + tqdm bars.",
     )
+    ap.add_argument(
+        "--wandb-log",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable Weights & Biases logging.",
+    )
+    ap.add_argument(
+        "--wandb-project",
+        type=str,
+        default="splatnlp-sae",
+        help="Weights & Biases project name.",
+    )
+    ap.add_argument(
+        "--wandb-entity",
+        type=str,
+        default=None,
+        help="Weights & Biases entity (team) name.",
+    )
 
     return ap
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Utilities
-# ──────────────────────────────────────────────────────────────────────────────
 def _json_write(path: Path, obj: Any) -> None:
     """Robustly write object to JSON, trying orjson first then fallback."""
     try:
-        # Fast path with orjson for numpy support
         with open(path, "wb") as f:
             f.write(
                 orjson.dumps(
@@ -256,7 +242,6 @@ def _json_write(path: Path, obj: Any) -> None:
                 )
             )
     except Exception:
-        # Fall back to stdlib json for weird types
         _LOGGER.warning(
             "orjson serialization failed, falling back to standard json."
         )
@@ -264,9 +249,6 @@ def _json_write(path: Path, obj: Any) -> None:
             json.dump(obj, f, indent=2, default=str)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Main
-# ──────────────────────────────────────────────────────────────────────────────
 def main() -> None:
     args = _build_arg_parser().parse_args()
 
@@ -276,6 +258,17 @@ def main() -> None:
     _LOGGER.info("Arguments:\n%s", json.dumps(vars(args), indent=2))
 
     device = torch.device(args.device)
+
+    wandb_run = None
+    if args.wandb_log:
+        wandb_run = wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            config=vars(args),
+            name=f"sae_{save_dir.name}",
+            dir=str(save_dir),
+        )
+        _LOGGER.info("Weights & Biases run initialised: %s", wandb.run.url)
 
     # -------------------------------------------------------------------- #
     # 1. Load vocabularies
@@ -316,7 +309,6 @@ def main() -> None:
     else:
         state_dict = torch.load(args.model_checkpoint, map_location=device)
 
-    ## FUSED FEATURE: Retained the robust DDP state dict conversion.
     try:
         primary_model.load_state_dict(state_dict, strict=True)
     except RuntimeError:
@@ -328,7 +320,6 @@ def main() -> None:
     # -------------------------------------------------------------------- #
     # 3. Register activation hook
     # -------------------------------------------------------------------- #
-    ## FUSED FEATURE: The hook setup now passes the new arguments.
     hook, handle = setup_hook(
         primary_model,
         target=args.hook_target,
@@ -372,7 +363,6 @@ def main() -> None:
         expansion_factor=args.expansion_factor,
         l1_coefficient=args.l1_coeff,
         target_usage=args.target_usage,
-        ## FUSED DEFAULT: Pass the aggressive usage_coeff to the model.
         usage_coeff=args.usage_coeff,
         dead_neuron_threshold=args.dead_neuron_threshold,
         dead_neuron_steps=1,  # not used - resampling handled outside
@@ -386,7 +376,6 @@ def main() -> None:
         resample_interval=999_999_999,  # turns off internal resample
         dead_neuron_threshold=args.dead_neuron_threshold,
         target_usage=args.target_usage,
-        ## FUSED DEFAULT: Also ensure the config object has the new default.
         usage_coeff=args.usage_coeff,
     )
 
@@ -401,7 +390,7 @@ def main() -> None:
     prim_steps_with_sae = max(0, prim_steps_total - prim_steps_warmup)
     sae_updates_est = prim_steps_with_sae * args.sae_train_steps
     if sae_updates_est <= 0:
-        sae_updates_est = prim_steps_total  # reasonable fallback
+        sae_updates_est = prim_steps_total
     _LOGGER.info(
         "CosineAnnealingLR: T_max = %d SAE updates (est.)", sae_updates_est
     )
@@ -444,7 +433,6 @@ def main() -> None:
             sae_batch_size=args.sae_batch_size,
             steps_before_sae_train=args.steps_before_train,
             sae_train_steps_per_primary_step=args.sae_train_steps,
-            ## FUSED DEFAULTS: Pass the new resampling params to the training loop.
             resample_steps=set(args.resample_steps),
             resample_weight=args.resample_weight,
             resample_bias=args.resample_bias,
@@ -454,9 +442,10 @@ def main() -> None:
             log_interval=500,
             gradient_clip_val=args.gradient_clip_val,
             verbose=args.verbose,
+            wandb_run=wandb_run,
         )
     finally:
-        handle.remove()  # ensure we always detach the hook
+        handle.remove()
 
     # -------------------------------------------------------------------- #
     # 8. Save SAE + metrics
@@ -489,13 +478,17 @@ def main() -> None:
             vocab,
             description="Test",
         )
+        if wandb_run:
+            wandb.log(test_metrics, step=metrics_history[-1].get("sae_step", 0))
+
     finally:
         test_handle.remove()
 
     _json_write(save_dir / "sae_test_metrics.json", test_metrics)
     _LOGGER.info("Done - all artifacts saved to %s", save_dir)
+    if wandb_run:
+        wandb.finish()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()

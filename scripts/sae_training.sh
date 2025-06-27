@@ -43,6 +43,13 @@ DEVICE="cuda"
 NUM_WORKERS=16
 VERBOSE_FLAG="--verbose"
 
+# --- Weights & Biases Config ---
+# Set to your W&B username or team name. If you are already logged in, you can skip this.
+# WANDB_ENTITY="your-wandb-entity"
+WANDB_PROJECT="splatnlp-sae"
+# Set to --wandb-log to enable, or "" to disable
+WANDB_LOG_FLAG="--wandb-log"
+
 CMD=(
   poetry run python3 -m splatnlp.monosemantic_sae.cli
 
@@ -86,6 +93,14 @@ CMD=(
 
 if [[ -n "${VERBOSE_FLAG}" ]]; then
   CMD+=("${VERBOSE_FLAG}")
+fi
+
+if [[ -n "${WANDB_LOG_FLAG}" ]]; then
+  CMD+=("${WANDB_LOG_FLAG}")
+  CMD+=(--wandb-project "${WANDB_PROJECT}")
+  if [[ -n "${WANDB_ENTITY:-}" ]]; then
+    CMD+=(--wandb-entity "${WANDB_ENTITY}")
+  fi
 fi
 
 echo "Launching SAE training - output will be written to: ${SAVE_DIR}"
