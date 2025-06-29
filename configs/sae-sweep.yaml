@@ -14,28 +14,28 @@ parameters:
     max: 0.0001    # 3e-4
   "l1-coeff":
     distribution: log_uniform_values
-    min: 0.000008  # 8e-6
-    max: 0.000012  # 1.2e-5
+    min: 0.000005  # 5e-6
+    max: 0.0001    # 1e-4
 
   # --- sparsity -----------------------------------------------------------
   "target-usage":
     distribution: uniform
-    min: 0.03
-    max: 0.07
+    min: 0.015
+    max: 0.04
   "usage-coeff":
     distribution: log_uniform_values
-    min: 0.3
-    max: 2.0
+    min: 2.0
+    max: 8.0
 
   # --- model capacity -----------------------------------------------------
   "expansion-factor":
-    values: [4, 6, 8, 10]
+    value: 10
   "dead-neuron-threshold":
     values: [1e-7, 1e-8, 1e-9]
 
   # --- schedule -----------------------------------------------------------
   "kl-warmup-steps":
-    values: [3000, 6000, 9000]
+    values: [500, 1000, 2000]
   "kl-floor":
     values: [0.0, 0.02, 0.05]
 
@@ -59,7 +59,7 @@ command:
   - --weapon-vocab-path
   - "https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/weapon_vocab.json"
 
-  # -------- fixed recipe flags -------------------------------------------
+  # -------- fixed recipe flags -------------------------------------------
   - --epochs=3
   - --primary-data-fraction=0.005     # fast, cheap screening pass
   - --buffer-size=100000
