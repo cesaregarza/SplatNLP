@@ -1,0 +1,73 @@
+# sae_sweep.yaml  – passes every swept value via ${args}
+program: splatnlp/monosemantic_sae/cli.py          # same as before
+
+method: bayes
+metric:
+  name: val_mse_loss
+  goal: minimize
+
+parameters:
+  # --- optimiser ----------------------------------------------------------
+  lr:
+    distribution: log_uniform_values
+    min: 0.000003  # 3e-6
+    max: 0.0001    # 3e-4
+  "l1-coeff":
+    distribution: log_uniform_values
+    min: 0.000008  # 8e-6
+    max: 0.000012  # 1.2e-5
+
+  # --- sparsity -----------------------------------------------------------
+  "target-usage":
+    distribution: uniform
+    min: 0.03
+    max: 0.07
+  "usage-coeff":
+    distribution: log_uniform_values
+    min: 0.3
+    max: 2.0
+
+  # --- model capacity -----------------------------------------------------
+  "expansion-factor":
+    values: [4, 6, 8, 10]
+  "dead-neuron-threshold":
+    values: [1e-7, 1e-8, 1e-9]
+
+  # --- schedule -----------------------------------------------------------
+  "kl-warmup-steps":
+    values: [3000, 6000, 9000]
+  "kl-floor":
+    values: [0.0, 0.02, 0.05]
+
+early_terminate:
+  type: hyperband
+  min_iter: 2
+
+command:
+  - ${env}
+  - python
+  - -m
+  - splatnlp.monosemantic_sae.cli
+  - --model-checkpoint
+  - "https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/model_ultra.pth"
+  - --data-csv
+  - "https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/tokenized_data.csv"
+  - --save-dir
+  - "sae_runs/${wandb.run.id}"
+  - --vocab-path
+  - "https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/vocab.json"
+  - --weapon-vocab-path
+  - "https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/weapon_vocab.json"
+
+  # -------- fixed recipe flags -------------------------------------------
+  - --epochs=3
+  - --primary-data-fraction=0.005     # fast, cheap screening pass
+  - --buffer-size=100000
+  - --steps-before-train=5000
+
+  # -------- hyper‑parameters injected here -------------------------------
+  - ${args}
+
+  # -------- misc ---------------------------------------------------------
+  - --device=cuda
+  - --wandb-log                        # let the script decide project/entity

@@ -19,10 +19,11 @@ from typing import Any
 
 import orjson
 import torch
-import wandb
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from wandb.util import generate_id
 
+import wandb
 from splatnlp.model.cli import load_data
 from splatnlp.model.models import SetCompletionModel
 from splatnlp.monosemantic_sae.data_objects import SAEConfig
@@ -261,11 +262,16 @@ def main() -> None:
 
     wandb_run = None
     if args.wandb_log:
+        run_name = (
+            f"sweep-{generate_id()}"
+            if os.getenv("WANDB_SWEEP_ID")
+            else f"sae_{save_dir.name}"
+        )
         wandb_run = wandb.init(
             project=args.wandb_project,
             entity=args.wandb_entity,
             config=vars(args),
-            name=f"sae_{save_dir.name}",
+            name=run_name,
             dir=str(save_dir),
         )
         _LOGGER.info("Weights & Biases run initialised: %s", wandb.run.url)

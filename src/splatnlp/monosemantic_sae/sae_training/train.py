@@ -2,11 +2,11 @@ import logging
 from typing import Optional
 
 import torch
-import wandb
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import _LRScheduler
 from tqdm import tqdm
 
+import wandb
 from splatnlp.model.models import SetCompletionModel
 from splatnlp.monosemantic_sae.data_objects import (
     ActivationBuffer,
@@ -313,7 +313,7 @@ def train_sae_model(
                 device=device,
                 sae_config=sae_config,
                 vocab=vocab,
-                description=f"Epoch {epoch+1} Std Val",
+                description=f"val",
             )
             logger.info(
                 "--- Standard Validation Results Epoch %d ---",
@@ -353,7 +353,7 @@ def train_sae_model(
                 device=device,
                 sae_config=sae_config,
                 vocab=vocab,
-                description=f"Epoch {epoch+1} Impact Val",
+                description=f"val",
             )
             logger.info(
                 "--- Reconstruction Impact Validation Results Epoch %d ---",
