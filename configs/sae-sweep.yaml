@@ -13,31 +13,31 @@ parameters:
     min: 0.000003  # 3e-6
     max: 0.0001    # 3e-4
   "l1-coeff":
-    distribution: log_uniform_values
-    min: 0.000005  # 5e-6
-    max: 0.0001    # 1e-4
+    values: [0.0001, 0.0002] # 1e-4, 2e-4
 
   # --- sparsity -----------------------------------------------------------
   "target-usage":
-    distribution: uniform
-    min: 0.012
-    max: 0.02
+    value: 0.007
   "usage-coeff":
-    distribution: log_uniform_values
-    min: 3.0
-    max: 6.0
+    value: 0.0
 
   # --- model capacity -----------------------------------------------------
   "expansion-factor":
-    values: [6, 8]
+    values: [4, 6]
   "dead-neuron-threshold":
-    values: [1e-7, 1e-8, 1e-9]
+    values: [1e-6, 1e-7, 1e-8]
 
   # --- schedule -----------------------------------------------------------
   "kl-warmup-steps":
-    values: [500, 1000, 2000]
+    value: 0
   "kl-floor":
-    values: [0.0, 0.02, 0.05]
+    value: 0.0
+
+  # --- resampling ---------------------------------------------------------
+  "resample-weight":
+    value: 0.01
+  "resample-bias":
+    values: [-1.0, -0.5]
 
 early_terminate:
   type: hyperband
