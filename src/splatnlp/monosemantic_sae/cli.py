@@ -200,7 +200,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--resample-steps",
         type=int,
         nargs="+",
-        default=[7_000, 14_000, 28_000, 42_000, 56_000, 70_000],
+        default=[7_000, 14_000, 28_000],
     )
     ap.add_argument("--resample-weight", type=float, default=0.2)
     ap.add_argument("--resample-bias", type=float, default=0.0)

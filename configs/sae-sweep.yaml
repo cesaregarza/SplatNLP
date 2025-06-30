@@ -9,9 +9,7 @@ metric:
 parameters:
   # --- optimiser ----------------------------------------------------------
   lr:
-    distribution: log_uniform_values
-    min: 0.000003  # 3e-6
-    max: 0.0001    # 3e-4
+    value: 0.0001 # 1e-4
   "l1-coeff":
     values: [0.0001, 0.0002] # 1e-4, 2e-4
 
@@ -25,7 +23,7 @@ parameters:
   "expansion-factor":
     values: [4, 6]
   "dead-neuron-threshold":
-    values: [1e-6, 1e-7, 1e-8]
+    values: [1e-6, 1e-7]
 
   # --- schedule -----------------------------------------------------------
   "kl-warmup-steps":
