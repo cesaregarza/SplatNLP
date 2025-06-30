@@ -20,16 +20,16 @@ parameters:
   # --- sparsity -----------------------------------------------------------
   "target-usage":
     distribution: uniform
-    min: 0.015
-    max: 0.04
+    min: 0.012
+    max: 0.02
   "usage-coeff":
     distribution: log_uniform_values
-    min: 2.0
-    max: 8.0
+    min: 3.0
+    max: 6.0
 
   # --- model capacity -----------------------------------------------------
   "expansion-factor":
-    value: 10
+    value: [6, 8]
   "dead-neuron-threshold":
     values: [1e-7, 1e-8, 1e-9]
 

@@ -94,7 +94,7 @@ class SparseAutoencoder(nn.Module):
         """
         x_centered = x - self.decoder_bias
         h_pre = self.encoder(x_centered)
-        h_post = F.relu(h_pre)
+        h_post = torch.clamp(F.relu(h_pre), min=0.0, max=6.0)
         return h_pre, h_post
 
     def decode(self, h: torch.Tensor) -> torch.Tensor:
