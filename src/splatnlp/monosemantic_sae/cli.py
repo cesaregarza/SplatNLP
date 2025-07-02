@@ -154,6 +154,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--kl-period-steps", type=int, default=60_000)
     ap.add_argument("--kl-floor", type=float, default=0.05)
 
+    ap.add_argument("--l1-warmup-steps", type=int, default=6_000)
+    ap.add_argument("--l1-start", type=float, default=0.0)
+
     ap.add_argument(
         "--device",
         type=str,
@@ -445,6 +448,8 @@ def main() -> None:
             kl_warmup_steps=args.kl_warmup_steps,
             kl_period_steps=args.kl_period_steps,
             kl_floor=args.kl_floor,
+            l1_warmup_steps=args.l1_warmup_steps,
+            l1_start=args.l1_start,
             log_interval=500,
             gradient_clip_val=args.gradient_clip_val,
             verbose=args.verbose,

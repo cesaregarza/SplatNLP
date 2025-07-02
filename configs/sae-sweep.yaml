@@ -11,7 +11,11 @@ parameters:
   lr:
     value: 0.0001 # 1e-4
   "l1-coeff":
-    values: [0.0001, 0.0002] # 1e-4, 2e-4
+    distribution: log_uniform_values
+    min: 0.000001 # 1e-6
+    max: 0.001 # 1e-3
+  "l1-warmup-steps":
+    value: 0
 
   # --- sparsity -----------------------------------------------------------
   "target-usage":
@@ -21,9 +25,9 @@ parameters:
 
   # --- model capacity -----------------------------------------------------
   "expansion-factor":
-    values: [4, 6]
+    values: [4, 6, 8, 10]
   "dead-neuron-threshold":
-    values: [1e-6, 1e-7]
+    value: 1e-6
 
   # --- schedule -----------------------------------------------------------
   "kl-warmup-steps":
@@ -35,7 +39,7 @@ parameters:
   "resample-weight":
     value: 0.01
   "resample-bias":
-    values: [-1.0, -0.5]
+    value: -1.0
 
 early_terminate:
   type: hyperband

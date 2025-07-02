@@ -23,6 +23,7 @@ from splatnlp.monosemantic_sae.sae_training.resample import (
 )
 from splatnlp.monosemantic_sae.sae_training.schedules import (
     usage_coeff_schedule,
+    l1_coeff_schedule,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,8 @@ def train_sae_model(
     kl_warmup_steps: int = 6000,
     kl_period_steps: int = 60000,
     kl_floor: float = 0.05,
+    l1_warmup_steps: int = 6000,
+    l1_start: float = 0.0,
     log_interval: int = 500,
     gradient_clip_val: float = 1.0,
     verbose: bool = True,
@@ -87,6 +90,8 @@ def train_sae_model(
         kl_warmup_steps: Number of steps for KL coefficient warmup
         kl_period_steps: Period of cosine oscillation after warmup
         kl_floor: Minimum KL coefficient value
+        l1_warmup_steps: Number of steps for L1 coefficient warmup
+        l1_start: Initial L1 coefficient value
         log_interval: Interval for logging metrics
         gradient_clip_val: Value for gradient clipping
         verbose: Whether to show progress bars
@@ -217,6 +222,24 @@ def train_sae_model(
                     sae_model, "usage_coeff", desired_coeff
                 )
 
+                # --- L1 warm-up schedule ---
+                desired_l1_coeff = l1_coeff_schedule(
+                    sae_step,
+                    base=sae_config.l1_coefficient,
+                    warmup_steps=l1_warmup_steps,
+                    start=l1_start,
+                )
+                # If `set_l1_coeff` method is defined, use it; otherwise set \
+                # l1_coefficient directly
+                if hasattr(sae_model, "set_l1_coeff"):
+                    sae_model.set_l1_coeff(desired_l1_coeff)
+                else:
+                    sae_model.l1_coefficient = desired_l1_coeff
+
+                current_actual_l1_coeff = getattr(
+                    sae_model, "l1_coefficient", desired_l1_coeff
+                )
+
                 # --- SAE Training Step ---
                 metrics = sae_model.training_step(
                     batch.float(), optimizer, gradient_clip_val
@@ -234,6 +257,8 @@ def train_sae_model(
                 metrics["global_step"] = global_step
                 metrics["kl_coeff_target"] = desired_coeff
                 metrics["kl_coeff_actual"] = current_actual_coeff
+                metrics["l1_coeff_target"] = desired_l1_coeff
+                metrics["l1_coeff_actual"] = current_actual_l1_coeff
                 metrics["epoch"] = epoch + 1
                 metrics["lr"] = scheduler.get_last_lr()[0]
                 metrics["buffer_fill"] = len(act_buf) / act_buf.max_size
@@ -261,11 +286,12 @@ def train_sae_model(
                     # Clear the progress bar before logging to prevent overlap
                     pbar_train.clear()
                     logger.info(
-                        "Epoch %d Step %d LR %.2e KL %.3f | %s",
+                        "Epoch %d Step %d LR %.2e KL %.3f L1 %.3f | %s",
                         epoch + 1,
                         sae_step,
                         metrics["lr"],
                         current_actual_coeff,
+                        current_actual_l1_coeff,
                         m_str,
                     )
 
