@@ -54,5 +54,5 @@ def l1_coeff_schedule(
     """
     if sae_step < warmup_steps:
         return start + (base - start) * sae_step / warmup_steps
-    
+
     return base

@@ -22,8 +22,8 @@ from splatnlp.monosemantic_sae.sae_training.resample import (
     resample_dead_neurons,
 )
 from splatnlp.monosemantic_sae.sae_training.schedules import (
-    usage_coeff_schedule,
     l1_coeff_schedule,
+    usage_coeff_schedule,
 )
 
 logger = logging.getLogger(__name__)
@@ -250,8 +250,27 @@ def train_sae_model(
                 # Collect extra stats
                 with torch.no_grad():
                     hidden: torch.Tensor = sae_model(batch.float())[1]
-                    sparsity = (hidden.abs() > 1e-6).float().mean().item()
+                    sparsity = (
+                        (hidden.abs() > sae_config.dead_neuron_threshold)
+                        .float()
+                        .mean()
+                        .item()
+                    )
                     metrics["sparsity_l0"] = sparsity
+
+                    # Calculate dead percentage and miracle distance for training step
+                    dead_percent = (1.0 - sparsity) * 100.0
+                    from splatnlp.monosemantic_sae.sae_training.evaluate import (
+                        calculate_miracle_distance,
+                    )
+
+                    training_miracle_distance = calculate_miracle_distance(
+                        metrics.get("mse_loss", 0.0),
+                        sparsity,
+                        dead_percent,
+                        sae_config,
+                    )
+                    metrics["miracle_distance"] = training_miracle_distance
 
                 metrics["sae_step"] = sae_step
                 metrics["global_step"] = global_step
@@ -431,6 +450,14 @@ def train_sae_model(
             "is_epoch_summary": True,
         }
 
+        # Use miracle distance from standard validation if available
+        if "standard_val_metrics" in locals():
+            epoch_summary["miracle_distance"] = standard_val_metrics.get(
+                "val_miracle_distance", 0.0
+            )
+        else:
+            epoch_summary["miracle_distance"] = 0.0
+
         if len(usage) > 0:
             prc = torch.tensor(usage).quantile(
                 torch.tensor([0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99])
@@ -461,7 +488,8 @@ def train_sae_model(
                 "| Mean=%.4g "
                 "| Std=%.4g "
                 "| Median=%.4g "
-                "| Max=%.4g",
+                "| Max=%.4g "
+                "| Miracle Distance=%.4g",
             ),
             dead,
             epoch_summary["dead_percent"],
@@ -469,6 +497,7 @@ def train_sae_model(
             epoch_summary["std_usage"],
             epoch_summary.get("p50_usage", 0),
             epoch_summary["max_usage"],
+            epoch_summary["miracle_distance"],
         )
 
         # End of epoch - set SAE back to train mode for next epoch

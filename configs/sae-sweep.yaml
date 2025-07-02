@@ -3,7 +3,7 @@ program: splatnlp/monosemantic_sae/cli.py          # same as before
 
 method: bayes
 metric:
-  name: val_mse_loss
+  name: val_miracle_distance
   goal: minimize
 
 parameters:

@@ -12,6 +12,44 @@ from splatnlp.monosemantic_sae.models import SparseAutoencoder
 logger = logging.getLogger(__name__)
 
 
+def calculate_miracle_distance(
+    mse_loss: float,
+    l0_sparsity: float,
+    dead_percent: float,
+    sae_config: SAEConfig,
+) -> float:
+    """
+    Calculate the weighted miracle distance using logarithmic ratios.
+
+    Args:
+        mse_loss: Current MSE loss
+        l0_sparsity: Current L0 sparsity (fraction of active neurons)
+        dead_percent: Current dead neuron percentage
+        sae_config: SAE configuration containing target values and weights
+
+    Returns:
+        float: Weighted miracle distance using log ratios
+    """
+    import numpy as np
+
+    # Calculate log ratios with caps to avoid -inf
+    mse_ratio = np.log(max(mse_loss / sae_config.miracle_mse_target, 0.1)) ** 2
+    sparsity_ratio = (
+        np.log(max(l0_sparsity / sae_config.miracle_sparsity_target, 0.1)) ** 2
+    )
+    dead_ratio = (
+        np.log(max(dead_percent / sae_config.miracle_dead_neuron_target, 0.1))
+        ** 2
+    )
+
+    miracle_distance = np.sqrt(
+        sae_config.miracle_mse_weight * mse_ratio
+        + sae_config.miracle_sparsity_weight * sparsity_ratio
+        + sae_config.miracle_dead_neuron_weight * dead_ratio
+    )
+    return miracle_distance
+
+
 @torch.no_grad()
 def evaluate_sae_model(
     primary_model: SetCompletionModel,
@@ -89,18 +127,23 @@ def evaluate_sae_model(
         # 3) Calculate losses and metrics for this batch
         batch_mse_loss = F.mse_loss(recon_acts, acts.float()).item()
         batch_l1_loss = torch.norm(hidden_acts, p=1, dim=-1).mean().item()
-        batch_sparsity = (hidden_acts > 1e-6).float().mean().item()
+        batch_l0_sparsity = (
+            (hidden_acts.abs() > sae_config.dead_neuron_threshold)
+            .float()
+            .mean()
+            .item()
+        )
         batch_feature_mag = torch.abs(hidden_acts).mean().item()
 
         # Accumulate weighted losses
         total_mse_loss += batch_mse_loss * current_batch_size
         total_l1_loss += batch_l1_loss * current_batch_size
-        total_sparsity += batch_sparsity * current_batch_size
+        total_sparsity += batch_l0_sparsity * current_batch_size
         total_feature_magnitude += batch_feature_mag * current_batch_size
         num_batches += 1
 
         pbar_eval.set_postfix(
-            mse=batch_mse_loss, l1=batch_l1_loss, sparsity=batch_sparsity
+            mse=batch_mse_loss, l1=batch_l1_loss, l0_sparsity=batch_l0_sparsity
         )
 
     if num_activations == 0:
@@ -119,14 +162,21 @@ def evaluate_sae_model(
     # Calculate average metrics
     avg_mse_loss = total_mse_loss / num_activations
     avg_l1_loss = total_l1_loss / num_activations
-    avg_sparsity = total_sparsity / num_activations
+    avg_l0_sparsity = total_sparsity / num_activations
     avg_feature_magnitude = total_feature_magnitude / num_activations
+
+    # Calculate dead neuron percentage and miracle distance
+    dead_percent = (1.0 - avg_l0_sparsity) * 100.0
+    miracle_distance = calculate_miracle_distance(
+        avg_mse_loss, avg_l0_sparsity, dead_percent, sae_config
+    )
 
     return {
         f"{description.lower()}_mse_loss": avg_mse_loss,
         f"{description.lower()}_l1_loss": avg_l1_loss,
-        f"{description.lower()}_sparsity": avg_sparsity,
+        f"{description.lower()}_l0_sparsity": avg_l0_sparsity,
         f"{description.lower()}_feature_magnitude": avg_feature_magnitude,
+        f"{description.lower()}_miracle_distance": miracle_distance,
         "num_eval_batches": num_batches,
         "num_eval_activations": num_activations,
     }
