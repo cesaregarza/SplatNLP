@@ -25,7 +25,7 @@ parameters:
 
   # --- model capacity -----------------------------------------------------
   "expansion-factor":
-    values: [4, 6, 8, 10]
+    values: [16, 24, 32]
   "dead-neuron-threshold":
     value: 1e-6
 
