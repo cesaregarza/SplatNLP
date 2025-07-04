@@ -76,6 +76,10 @@ class SparseAutoencoder(nn.Module):
         """Update the usage/KL weight used inside `loss_fn`."""
         self.usage_coeff = float(coeff)
 
+    def set_l1_coeff(self, coeff: float) -> None:
+        """Update the L1 coefficient used inside `loss_fn`."""
+        self.l1_coefficient = float(coeff)
+
     def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Encode the input tensor.
 
@@ -94,7 +98,7 @@ class SparseAutoencoder(nn.Module):
         """
         x_centered = x - self.decoder_bias
         h_pre = self.encoder(x_centered)
-        h_post = F.relu(h_pre)
+        h_post = torch.clamp(F.relu(h_pre), min=0.0, max=6.0)
         return h_pre, h_post
 
     def decode(self, h: torch.Tensor) -> torch.Tensor:

@@ -2,11 +2,11 @@ import logging
 from typing import Optional
 
 import torch
-import wandb
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import _LRScheduler
 from tqdm import tqdm
 
+import wandb
 from splatnlp.model.models import SetCompletionModel
 from splatnlp.monosemantic_sae.data_objects import (
     ActivationBuffer,
@@ -22,6 +22,7 @@ from splatnlp.monosemantic_sae.sae_training.resample import (
     resample_dead_neurons,
 )
 from splatnlp.monosemantic_sae.sae_training.schedules import (
+    l1_coeff_schedule,
     usage_coeff_schedule,
 )
 
@@ -50,6 +51,8 @@ def train_sae_model(
     kl_warmup_steps: int = 6000,
     kl_period_steps: int = 60000,
     kl_floor: float = 0.05,
+    l1_warmup_steps: int = 6000,
+    l1_start: float = 0.0,
     log_interval: int = 500,
     gradient_clip_val: float = 1.0,
     verbose: bool = True,
@@ -87,6 +90,8 @@ def train_sae_model(
         kl_warmup_steps: Number of steps for KL coefficient warmup
         kl_period_steps: Period of cosine oscillation after warmup
         kl_floor: Minimum KL coefficient value
+        l1_warmup_steps: Number of steps for L1 coefficient warmup
+        l1_start: Initial L1 coefficient value
         log_interval: Interval for logging metrics
         gradient_clip_val: Value for gradient clipping
         verbose: Whether to show progress bars
@@ -217,6 +222,24 @@ def train_sae_model(
                     sae_model, "usage_coeff", desired_coeff
                 )
 
+                # --- L1 warm-up schedule ---
+                desired_l1_coeff = l1_coeff_schedule(
+                    sae_step,
+                    base=sae_config.l1_coefficient,
+                    warmup_steps=l1_warmup_steps,
+                    start=l1_start,
+                )
+                # If `set_l1_coeff` method is defined, use it; otherwise set \
+                # l1_coefficient directly
+                if hasattr(sae_model, "set_l1_coeff"):
+                    sae_model.set_l1_coeff(desired_l1_coeff)
+                else:
+                    sae_model.l1_coefficient = desired_l1_coeff
+
+                current_actual_l1_coeff = getattr(
+                    sae_model, "l1_coefficient", desired_l1_coeff
+                )
+
                 # --- SAE Training Step ---
                 metrics = sae_model.training_step(
                     batch.float(), optimizer, gradient_clip_val
@@ -227,13 +250,34 @@ def train_sae_model(
                 # Collect extra stats
                 with torch.no_grad():
                     hidden: torch.Tensor = sae_model(batch.float())[1]
-                    sparsity = (hidden.abs() > 1e-6).float().mean().item()
+                    sparsity = (
+                        (hidden.abs() > sae_config.dead_neuron_threshold)
+                        .float()
+                        .mean()
+                        .item()
+                    )
                     metrics["sparsity_l0"] = sparsity
+
+                    # Calculate dead percentage and miracle distance for training step
+                    dead_percent = (1.0 - sparsity) * 100.0
+                    from splatnlp.monosemantic_sae.sae_training.evaluate import (
+                        calculate_miracle_distance,
+                    )
+
+                    training_miracle_distance = calculate_miracle_distance(
+                        metrics.get("mse_loss", 0.0),
+                        sparsity,
+                        dead_percent,
+                        sae_config,
+                    )
+                    metrics["miracle_distance"] = training_miracle_distance
 
                 metrics["sae_step"] = sae_step
                 metrics["global_step"] = global_step
                 metrics["kl_coeff_target"] = desired_coeff
                 metrics["kl_coeff_actual"] = current_actual_coeff
+                metrics["l1_coeff_target"] = desired_l1_coeff
+                metrics["l1_coeff_actual"] = current_actual_l1_coeff
                 metrics["epoch"] = epoch + 1
                 metrics["lr"] = scheduler.get_last_lr()[0]
                 metrics["buffer_fill"] = len(act_buf) / act_buf.max_size
@@ -261,11 +305,12 @@ def train_sae_model(
                     # Clear the progress bar before logging to prevent overlap
                     pbar_train.clear()
                     logger.info(
-                        "Epoch %d Step %d LR %.2e KL %.3f | %s",
+                        "Epoch %d Step %d LR %.2e KL %.3f L1 %.3f | %s",
                         epoch + 1,
                         sae_step,
                         metrics["lr"],
                         current_actual_coeff,
+                        current_actual_l1_coeff,
                         m_str,
                     )
 
@@ -313,7 +358,7 @@ def train_sae_model(
                 device=device,
                 sae_config=sae_config,
                 vocab=vocab,
-                description=f"Epoch {epoch+1} Std Val",
+                description=f"val",
             )
             logger.info(
                 "--- Standard Validation Results Epoch %d ---",
@@ -353,7 +398,7 @@ def train_sae_model(
                 device=device,
                 sae_config=sae_config,
                 vocab=vocab,
-                description=f"Epoch {epoch+1} Impact Val",
+                description=f"val",
             )
             logger.info(
                 "--- Reconstruction Impact Validation Results Epoch %d ---",
@@ -405,6 +450,14 @@ def train_sae_model(
             "is_epoch_summary": True,
         }
 
+        # Use miracle distance from standard validation if available
+        if "standard_val_metrics" in locals():
+            epoch_summary["miracle_distance"] = standard_val_metrics.get(
+                "val_miracle_distance", 0.0
+            )
+        else:
+            epoch_summary["miracle_distance"] = 0.0
+
         if len(usage) > 0:
             prc = torch.tensor(usage).quantile(
                 torch.tensor([0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99])
@@ -435,7 +488,8 @@ def train_sae_model(
                 "| Mean=%.4g "
                 "| Std=%.4g "
                 "| Median=%.4g "
-                "| Max=%.4g",
+                "| Max=%.4g "
+                "| Miracle Distance=%.4g",
             ),
             dead,
             epoch_summary["dead_percent"],
@@ -443,6 +497,7 @@ def train_sae_model(
             epoch_summary["std_usage"],
             epoch_summary.get("p50_usage", 0),
             epoch_summary["max_usage"],
+            epoch_summary["miracle_distance"],
         )
 
         # End of epoch - set SAE back to train mode for next epoch

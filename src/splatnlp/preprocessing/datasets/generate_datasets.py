@@ -82,6 +82,7 @@ def generate_dataloaders(
     skew_factor: float = 1.2,
     null_token_id: int | None = None,
     distributed: bool = False,
+    shuffle_train: bool = True,
     **kwargs,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
     """Generate DataLoaders for train, validation, and test sets.
@@ -126,7 +127,7 @@ def generate_dataloaders(
 
     dataloaders = []
     for ds_pd, is_train in zip(
-        [train_set, validation_set, test_set], [True, False, False]
+        [train_set, validation_set, test_set], [shuffle_train, False, False]
     ):
         ds = SetDataset(
             df=ds_pd,

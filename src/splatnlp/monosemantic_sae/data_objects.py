@@ -26,6 +26,12 @@ class SAEConfig:
     dead_neuron_steps: int = 12500
     target_usage: float = 0.05
     usage_coeff: float = 1e-3
+    miracle_mse_target: float = 0.0003
+    miracle_sparsity_target: float = 0.09
+    miracle_dead_neuron_target: float = 3.5
+    miracle_mse_weight: float = 1.0
+    miracle_sparsity_weight: float = 1.0
+    miracle_dead_neuron_weight: float = 1.0
 
 
 class SAEOutput(NamedTuple):

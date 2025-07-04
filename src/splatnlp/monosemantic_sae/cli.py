@@ -19,10 +19,11 @@ from typing import Any
 
 import orjson
 import torch
-import wandb
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from wandb.util import generate_id
 
+import wandb
 from splatnlp.model.cli import load_data
 from splatnlp.model.models import SetCompletionModel
 from splatnlp.monosemantic_sae.data_objects import SAEConfig
@@ -153,6 +154,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--kl-period-steps", type=int, default=60_000)
     ap.add_argument("--kl-floor", type=float, default=0.05)
 
+    ap.add_argument("--l1-warmup-steps", type=int, default=6_000)
+    ap.add_argument("--l1-start", type=float, default=0.0)
+
     ap.add_argument(
         "--device",
         type=str,
@@ -199,7 +203,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--resample-steps",
         type=int,
         nargs="+",
-        default=[7_000, 14_000, 28_000, 42_000, 56_000, 70_000],
+        default=[7_000, 14_000, 28_000],
     )
     ap.add_argument("--resample-weight", type=float, default=0.2)
     ap.add_argument("--resample-bias", type=float, default=0.0)
@@ -261,11 +265,16 @@ def main() -> None:
 
     wandb_run = None
     if args.wandb_log:
+        run_name = (
+            f"sweep-{generate_id()}"
+            if os.getenv("WANDB_SWEEP_ID")
+            else f"sae_{save_dir.name}"
+        )
         wandb_run = wandb.init(
             project=args.wandb_project,
             entity=args.wandb_entity,
             config=vars(args),
-            name=f"sae_{save_dir.name}",
+            name=run_name,
             dir=str(save_dir),
         )
         _LOGGER.info("Weights & Biases run initialised: %s", wandb.run.url)
@@ -439,6 +448,8 @@ def main() -> None:
             kl_warmup_steps=args.kl_warmup_steps,
             kl_period_steps=args.kl_period_steps,
             kl_floor=args.kl_floor,
+            l1_warmup_steps=args.l1_warmup_steps,
+            l1_start=args.l1_start,
             log_interval=500,
             gradient_clip_val=args.gradient_clip_val,
             verbose=args.verbose,
