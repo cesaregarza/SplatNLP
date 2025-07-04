@@ -1,75 +1,93 @@
-# sae_sweep.yaml  – passes every swept value via ${args}
-program: splatnlp/monosemantic_sae/cli.py          # same as before
+# ultra_sae_bayes.yaml  – launch with:  wandb sweep ultra_sae_bayes.yaml
+program: splatnlp/monosemantic_sae/cli.py
 
 method: bayes
 metric:
   name: val_miracle_distance
   goal: minimize
 
-parameters:
-  # --- optimiser ----------------------------------------------------------
-  lr:
-    value: 0.0001 # 1e-4
-  "l1-coeff":
-    distribution: log_uniform_values
-    min: 0.000001 # 1e-6
-    max: 0.001 # 1e-3
-  "l1-warmup-steps":
-    value: 0
-
-  # --- sparsity -----------------------------------------------------------
-  "target-usage":
-    value: 0.007
-  "usage-coeff":
-    value: 0.0
-
-  # --- model capacity -----------------------------------------------------
-  "expansion-factor":
-    values: [16, 24, 32]
-  "dead-neuron-threshold":
-    value: 1e-6
-
-  # --- schedule -----------------------------------------------------------
-  "kl-warmup-steps":
-    value: 0
-  "kl-floor":
-    value: 0.0
-
-  # --- resampling ---------------------------------------------------------
-  "resample-weight":
-    value: 0.01
-  "resample-bias":
-    value: -1.0
-
 early_terminate:
   type: hyperband
-  min_iter: 2
+  min_iter: 3
+  max_iter: 10
+  s: 2
+
+parameters:
+  # -----------------------------------------------------------------------
+  # 0.  FIXED START VALUE  (no sweep)
+  # -----------------------------------------------------------------------
+  l1-start:
+    value: 1e-6                 # always begin almost pressure‑free
+
+  # -----------------------------------------------------------------------
+  # 1.  MODEL CAPACITY
+  # -----------------------------------------------------------------------
+  expansion-factor:
+    values: [32, 40, 48]
+
+  # -----------------------------------------------------------------------
+  # 2.  SPARSITY CONTROL  (ceiling & warm‑up)
+  # -----------------------------------------------------------------------
+  l1-coeff:                     # ceiling after warm‑up
+    distribution: uniform
+    min: 0.00010
+    max: 0.00030
+
+  l1-warmup-steps:
+    values: [0, 20000]
+
+  # -----------------------------------------------------------------------
+  # 3.  USAGE BALANCING
+  # -----------------------------------------------------------------------
+  usage-coeff:
+    values: [0.0, 0.05]
+
+  # -----------------------------------------------------------------------
+  # 4.  OPTIMISER (fixed for this sweep)
+  # -----------------------------------------------------------------------
+  lr:
+    value: 1e-4
+
+  # -----------------------------------------------------------------------
+  # 5.  REMAINING FIXED HYPERS
+  # -----------------------------------------------------------------------
+  target-usage:
+    value: 0.007
+  dead-neuron-threshold:
+    value: 1e-6
+  kl-warmup-steps:
+    value: 0
+  kl-floor:
+    value: 0.0
+  resample-weight:
+    value: 0.01
+  resample-bias:
+    value: -1.0
+  buffer-size:
+    value: 100000
+  steps-before-train:
+    value: 5000
 
 command:
   - ${env}
   - python
   - -m
   - splatnlp.monosemantic_sae.cli
-  - --model-checkpoint
-  - "https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/model_ultra.pth"
-  - --data-csv
-  - "https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/tokenized_data.csv"
-  - --save-dir
-  - "sae_runs/${wandb.run.id}"
-  - --vocab-path
-  - "https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/vocab.json"
-  - --weapon-vocab-path
-  - "https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/weapon_vocab.json"
+  - --model-checkpoint=https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/model_ultra.pth
+  - --data-csv=https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/tokenized_data.csv
+  - --save-dir=sae_runs/${wandb.run.id}
+  - --vocab-path=https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/vocab.json
+  - --weapon-vocab-path=https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/weapon_vocab.json
 
-  # -------- fixed recipe flags -------------------------------------------
-  - --epochs=3
-  - --primary-data-fraction=0.005     # fast, cheap screening pass
+  # fixed recipe flags
+  - --epochs=10
+  - --primary-data-fraction=0.005
   - --buffer-size=100000
   - --steps-before-train=5000
 
-  # -------- hyper‑parameters injected here -------------------------------
+  # hyper‑parameters injected here
   - ${args}
 
-  # -------- misc ---------------------------------------------------------
+  # misc
   - --device=cuda
-  - --wandb-log                        # let the script decide project/entity
+  - --wandb-log
