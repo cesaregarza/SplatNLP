@@ -109,12 +109,12 @@ def _activation_dtype_or_fallback(dtype_name: str) -> Tuple[str, torch.dtype]:
         raise ValueError(f"Unknown dtype {dtype_name}")
     if DTYPE_MAP_TORCH[dtype_name] is None:
         logging.warning(
-            "dtype %s not supported in this PyTorch build – falling back to fp16",
+            "dtype %s not supported in this PyTorch build - falling back to fp16",
             dtype_name,
         )
         return "fp16", torch.float16
     if "fp8" in dtype_name and not torch.cuda.is_fp8_supported():
-        logging.warning("FP8 not supported on this GPU – falling back to fp16")
+        logging.warning("FP8 not supported on this GPU - falling back to fp16")
         return "fp16", torch.float16
     return dtype_name, DTYPE_MAP_TORCH[dtype_name]
 
