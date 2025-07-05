@@ -360,11 +360,11 @@ def main():
         format="%(asctime)s | %(levelname)-8s | %(message)s",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
-    logging.info("make_dashboard_dataset – starting")
+    logging.info("make_dashboard_dataset - starting")
 
     out_dir = Path(args.output_dir)
     if out_dir.exists():
-        logging.warning("Output dir %s exists – deleting it first", out_dir)
+        logging.warning("Output dir %s exists - deleting it first", out_dir)
         shutil.rmtree(out_dir)
     _ensure_dir(out_dir)
 
@@ -396,7 +396,7 @@ def main():
         ds,
         batch_size=args.chunk_size,
         shuffle=False,
-        num_workers=0,  # streaming inference – keep on main process
+        num_workers=0,  # streaming inference - keep on main process
         pin_memory=(device.type == "cuda"),
     )
 
