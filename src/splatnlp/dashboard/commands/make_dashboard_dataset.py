@@ -188,7 +188,7 @@ def extract_activations(
     top_k: int,
 ):
     """Stream batches through (model → sae), writing per-feature .npy shards."""
-    logging.info("Begin streaming inference …")
+    logging.info("Begin streaming inference ...")
     dtype_name, torch_act_dtype = _activation_dtype_or_fallback(
         activation_dtype_name
     )
@@ -227,7 +227,7 @@ def extract_activations(
             )
 
     # flush
-    logging.info("Writing per-feature .npy files …")
+    logging.info("Writing per-feature .npy files ...")
     for feat in range(feature_dim):
         fdir = out_dir / f"neuron_{feat:05d}"
         _ensure_dir(fdir)
@@ -372,11 +372,11 @@ def main():
     # 1.  Load artefacts                                                 #
     # ------------------------------------------------------------------ #
     device = torch.device(args.device)
-    logging.info("Loading primary model from %s …", args.primary_model)
+    logging.info("Loading primary model from %s ...", args.primary_model)
     model = _torch_load(args.primary_model, device=device)
     model.eval()
 
-    logging.info("Loading SAE model from %s …", args.sae_model)
+    logging.info("Loading SAE model from %s ...", args.sae_model)
     sae = _torch_load(args.sae_model, device=device)
     sae.eval()
 
@@ -384,7 +384,7 @@ def main():
     logging.info("SAE hidden dimension = %d", hidden_dim)
 
     # vocabularies (they are not used inside this script but saved for completeness)
-    logging.info("Loading vocabularies …")
+    logging.info("Loading vocabularies ...")
     ability_vocab = _json_load(args.ability_vocab)
     weapon_vocab = _json_load(args.weapon_vocab)
 
@@ -403,7 +403,7 @@ def main():
     # ------------------------------------------------------------------ #
     # 3.  Metadata Arrow                                                 #
     # ------------------------------------------------------------------ #
-    logging.info("Writing analysis_df.ipc …")
+    logging.info("Writing analysis_df.ipc ...")
     if str(args.dataset).startswith(_REMOTE_PREFIXES):
         content = io.BytesIO(_fetch_bytes(args.dataset))
         scan = pl.scan_csv(content, separator="\t", infer_schema_length=0)
@@ -438,7 +438,7 @@ def main():
     # ------------------------------------------------------------------ #
     # 6.  Logit influences                                               #
     # ------------------------------------------------------------------ #
-    logging.info("Computing logit influences …")
+    logging.info("Computing logit influences ...")
     with open(out_dir / "logit_influences.jsonl", "w", encoding="utf-8") as fp:
         linear_head: torch.nn.Linear = model.head  # type: ignore[attr-defined]
         weight = linear_head.weight.detach().cpu()  # [V, d_hidden]
@@ -475,7 +475,7 @@ def main():
     # 7.  Correlation pass (optional)                                    #
     # ------------------------------------------------------------------ #
     if args.compute_correlations:
-        logging.info("Computing correlations (placeholder fast version) …")
+        logging.info("Computing correlations (placeholder fast version) ...")
         (out_dir / "correlations.json").write_text(
             json.dumps(
                 {
