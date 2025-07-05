@@ -15,7 +15,7 @@ WEAPON_VOCAB="https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/weapo
 
 # --- Output Configuration ---
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-OUTPUT_DIR="dashboard_data/dataset_${TIMESTAMP}"
+OUTPUT_DIR="mnt/e/activations_ultra/dataset_${TIMESTAMP}"
 mkdir -p "${OUTPUT_DIR}"
 
 # --- Dataset Configuration ---
@@ -25,7 +25,7 @@ SKEW_FACTOR=1.2
 
 # --- Processing Configuration ---
 DEVICE="cuda"
-CHUNK_SIZE=50000
+CHUNK_SIZE=5000
 ACTIVATION_DTYPE="fp16"
 WORKERS=0  # Keep at 0 for streaming inference
 

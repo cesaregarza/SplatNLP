@@ -40,8 +40,9 @@ from splatnlp.model.cli import load_data
 from splatnlp.model.models import SetCompletionModel
 from splatnlp.monosemantic_sae.models import SparseAutoencoder
 from splatnlp.monosemantic_sae.utils import load_json_from_path
+
+# only bring in the two helpers
 from splatnlp.preprocessing.datasets.generate_datasets import (
-    DataLoader,
     generate_dataloaders,
     generate_tokenized_datasets,
 )
@@ -187,7 +188,10 @@ def _activation_dtype_or_fallback(dtype_name: str) -> tuple[str, torch.dtype]:
             dtype_name,
         )
         return "fp16", torch.float16
-    if "fp8" in dtype_name and not torch.cuda.is_fp8_supported():
+    if (
+        "fp8" in dtype_name
+        and getattr(torch.cuda, "is_fp8_supported", lambda: False)()
+    ):
         logging.warning("FP8 not supported on this GPU - falling back to fp16")
         return "fp16", torch.float16
     return dtype_name, DTYPE_MAP_TORCH[dtype_name]
@@ -219,6 +223,17 @@ def extract_activations(
     )
     np_dtype = DTYPE_MAP_NUMPY[dtype_name]
 
+    # ------------------------------------------------------------------
+    # Capture the 512-d masked-mean vector that *feeds* the head
+    # ------------------------------------------------------------------
+    _captured: dict[str, torch.Tensor] = {}
+
+    def _pre_head_hook(module, inp, _out):
+        # inp is a tuple -> (masked_mean_vec ,)
+        _captured["vec"] = inp[0].detach()
+
+    hook_handle = model.output_layer.register_forward_hook(_pre_head_hook)
+
     # buffers for activations and indices
     acts_buf: list[list[float]] = [[] for _ in range(feature_dim)]
     idxs_buf: list[list[int]] = [[] for _ in range(feature_dim)]
@@ -238,17 +253,27 @@ def extract_activations(
 
     for batch in dataloader:
         # The dataloader returns (inputs, weapons, targets, attention_masks)
-        # but we only need inputs and weapons for inference
-        inputs, weapons, _, _ = batch
+        inputs, weapons, _, attention_masks = batch
 
         # Move tensors to the same device as the model
         device = next(model.parameters()).device
         inputs = inputs.to(device)
         weapons = weapons.to(device)
+        attention_masks = attention_masks.to(device)
 
-        with torch.no_grad():
-            hidden = model(inputs, weapons)  # [bs, 512]
-            hidden = sae(hidden)  # [bs, n_features]
+        # Create key_padding_mask from attention_masks (True for pad tokens, False for valid tokens)
+        key_padding_mask = ~attention_masks
+
+        with (
+            torch.no_grad(),
+            torch.amp.autocast(
+                "cuda" if device.type == "cuda" else "cpu", dtype=torch.float16
+            ),
+        ):
+            _ = model(inputs, weapons, key_padding_mask=key_padding_mask)
+
+        vec = _captured.pop("vec")  # [bs, 512]
+        hidden = sae(vec)[1]  # [bs, n_features]
 
         hidden_cpu = hidden.detach().cpu()
         inputs_cpu = inputs.detach().cpu()
@@ -319,6 +344,7 @@ def extract_activations(
     logging.info(
         "Activation extraction complete - %d total examples", example_ctr
     )
+    hook_handle.remove()
 
 
 # --------------------------------------------------------------------------- #
@@ -335,7 +361,9 @@ def compute_idf(
     idf_rows = [
         (tok, math.log(tot / (dfreq + 1))) for tok, dfreq in counter.items()
     ]
-    return pl.DataFrame(idf_rows, schema=["token_id", "idf"], orient="row")
+    return pl.DataFrame(
+        {"token_id": [r[0] for r in idf_rows], "idf": [r[1] for r in idf_rows]}
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -446,7 +474,7 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument(
         "--chunk-size",
         type=int,
-        default=50_000,
+        default=4096,
         help="Batch size fed to the model/SAE pipeline",
     )
     p.add_argument(
@@ -551,6 +579,10 @@ def main():
 
     _load_model_checkpoint(primary_model, args.primary_model, device)
 
+    # Convert model to half precision for GPU memory efficiency
+    if device.type == "cuda":
+        primary_model.half()
+
     # ------------------------------------------------------------------ #
     # 4.  Instantiate + load SAE model                                    #
     # ------------------------------------------------------------------ #
@@ -632,18 +664,45 @@ def main():
     # ------------------------------------------------------------------ #
     # 9.  Activations                                                    #
     # ------------------------------------------------------------------ #
-    extract_activations(
-        model=primary_model,
-        sae=sae,
-        dataloader=dl,
-        out_dir=out_dir,
-        activation_dtype_name=args.activation_dtype,
-        int8_quant=(args.activation_dtype == "int8_per_neuron"),
-        feature_dim=hidden_dim,
-        emit_token_combos=args.emit_token_combos,
-        pad_token_id=pad_id,
-        save_inputs=args.debug_save_inputs,
-    )
+    # Optional OOM back-off logic
+    current_chunk_size = args.chunk_size
+    while True:
+        try:
+            extract_activations(
+                model=primary_model,
+                sae=sae,
+                dataloader=dl,
+                out_dir=out_dir,
+                activation_dtype_name=args.activation_dtype,
+                int8_quant=(args.activation_dtype == "int8_per_neuron"),
+                feature_dim=hidden_dim,
+                emit_token_combos=args.emit_token_combos,
+                pad_token_id=pad_id,
+                save_inputs=args.debug_save_inputs,
+            )
+            break
+        except torch.cuda.OutOfMemoryError:
+            current_chunk_size //= 2
+            torch.cuda.empty_cache()
+            logging.warning(
+                "⚠️  OOM – retrying with chunk_size=%d", current_chunk_size
+            )
+            if current_chunk_size < 512:
+                raise
+            # Recreate dataloader with smaller batch size
+            dl, _, _ = generate_dataloaders(
+                dashboard_df,
+                dashboard_df,  # Dummy val/test - not used
+                dashboard_df,  # Dummy val/test - not used
+                vocab_size=len(ability_vocab),
+                pad_token_id=pad_id,
+                batch_size=current_chunk_size,
+                num_workers=args.workers,
+                shuffle_train=False,  # No shuffling for deterministic dashboard generation
+                pin_memory=(device.type == "cuda"),
+                num_instances_per_set=args.num_masks_per_set,
+                skew_factor=args.skew_factor,
+            )
 
     # ------------------------------------------------------------------ #
     # 10.  Logit influences                                               #
