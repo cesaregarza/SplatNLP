@@ -22,6 +22,7 @@ import logging
 import math
 import os
 import shutil
+import subprocess
 import sys
 import time
 from collections import Counter
@@ -29,10 +30,23 @@ from pathlib import Path
 
 import boto3
 import numpy as np
+import orjson
 import polars as pl
 import requests
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
+
+from splatnlp.model.cli import load_data
+from splatnlp.model.models import SetCompletionModel
+from splatnlp.monosemantic_sae.models import SparseAutoencoder
+from splatnlp.monosemantic_sae.utils import load_json_from_path
+from splatnlp.preprocessing.datasets.generate_datasets import (
+    DataLoader,
+    generate_dataloaders,
+    generate_tokenized_datasets,
+)
+from splatnlp.utils.constants import PAD
+from splatnlp.utils.train import convert_ddp_state
 
 # --------------------------------------------------------------------------- #
 # 0.  Utility helpers                                                         #
@@ -73,12 +87,73 @@ def _torch_load(path: str | Path, device: str = "cpu"):
     return torch.load(byts, map_location=device)
 
 
-def _json_load(path: str | Path):
-    """orjson-style loader with remote support."""
-    import orjson
+def _load_model_checkpoint(
+    model: SetCompletionModel, checkpoint_path: str, device: torch.device
+) -> None:
+    """Load model checkpoint with DDP state handling."""
+    logging.info("Loading primary checkpoint from: %s", checkpoint_path)
+    state_dict = _torch_load(checkpoint_path, device)
 
-    raw = _fetch_bytes(path)
-    return orjson.loads(raw)
+    try:
+        model.load_state_dict(state_dict, strict=True)
+    except RuntimeError:
+        logging.warning("Converting DDP state dict to non-DDP state dict")
+        state_dict = convert_ddp_state(state_dict)
+        model.load_state_dict(state_dict, strict=True)
+    model.eval()
+
+
+def _load_sae_checkpoint(
+    sae: SparseAutoencoder, checkpoint_path: str, device: torch.device
+) -> None:
+    """Load SAE checkpoint with DDP state handling."""
+    logging.info("Loading SAE checkpoint from: %s", checkpoint_path)
+    state_dict = _torch_load(checkpoint_path, device)
+
+    try:
+        sae.load_state_dict(state_dict, strict=True)
+    except RuntimeError:
+        logging.warning("Converting DDP state dict to non-DDP state dict")
+        state_dict = convert_ddp_state(state_dict)
+        sae.load_state_dict(state_dict, strict=True)
+    sae.eval()
+
+
+def _load_sae_config(config_path: str) -> dict:
+    """Load SAE configuration from JSON file or URL."""
+    logging.info("Loading SAE configuration from: %s", config_path)
+    config = load_json_from_path(config_path)
+
+    # Extract relevant parameters
+    extracted_config = {
+        "primary_embedding_dim": config.get("primary_embedding_dim", 32),
+        "primary_hidden_dim": config.get("primary_hidden_dim", 512),
+        "primary_num_layers": config.get("primary_num_layers", 3),
+        "primary_num_heads": config.get("primary_num_heads", 8),
+        "primary_num_inducing": config.get("primary_num_inducing", 32),
+        "primary_use_layernorm": config.get("primary_use_layernorm", True),
+        "primary_dropout": config.get("primary_dropout", 0.0),
+        "expansion_factor": config.get("expansion_factor", 16.0),
+    }
+
+    logging.info("Loaded configuration:")
+    logging.info(
+        "  Model: %dd → %dd, %d layers",
+        extracted_config["primary_embedding_dim"],
+        extracted_config["primary_hidden_dim"],
+        extracted_config["primary_num_layers"],
+    )
+    logging.info(
+        "  SAE: expansion_factor=%.1f (%d → %dd)",
+        extracted_config["expansion_factor"],
+        extracted_config["primary_hidden_dim"],
+        int(
+            extracted_config["primary_hidden_dim"]
+            * extracted_config["expansion_factor"]
+        ),
+    )
+
+    return extracted_config
 
 
 # dtype maps identical to the original -------------------------------------- #
@@ -123,57 +198,7 @@ def _ensure_dir(p: Path):
 
 
 # --------------------------------------------------------------------------- #
-# 1. Dataset wrapper                                                          #
-# --------------------------------------------------------------------------- #
-class TSVAbilityDataset(Dataset):
-    """Lazy dataset that yields parsed tensors for model consumption."""
-
-    def __init__(
-        self,
-        csv_path: Path | str,
-        ability_pad_id: int = 0,
-        device: str | torch.device = "cpu",
-    ):
-        # handle remote files
-        if str(csv_path).startswith(_REMOTE_PREFIXES):
-            content = _fetch_bytes(csv_path)
-            df = pl.read_csv(
-                io.BytesIO(content), separator="\t", low_memory=True
-            )
-        else:
-            df = pl.read_csv(
-                csv_path,
-                separator="\t" if str(csv_path).endswith(".tsv") else ",",
-                low_memory=True,
-            )
-
-        self.ability_lists: list[str] = df["ability_tags"].to_list()
-        self.weapon_ids: list[int] = df["weapon_id"].to_list()
-        self.device = device
-        self.pad_id = ability_pad_id
-
-        # unify length
-        self.max_len = max(len(json.loads(lst)) for lst in self.ability_lists)
-        self.len_ = len(self.weapon_ids)
-
-    def __len__(self):  # type: ignore[override]
-        return self.len_
-
-    def __getitem__(self, idx):  # type: ignore[override]
-        abilities = json.loads(self.ability_lists[idx])
-        pad_len = self.max_len - len(abilities)
-        abilities = abilities + [self.pad_id] * pad_len
-        abilities = torch.tensor(
-            abilities, dtype=torch.long, device=self.device
-        )
-        weapon_id = torch.tensor(
-            self.weapon_ids[idx], dtype=torch.long, device=self.device
-        )
-        return abilities, weapon_id
-
-
-# --------------------------------------------------------------------------- #
-# 2.  Core pass – (model → sae) -> streamed feature sharding                  #
+# 1.  Core pass – (model → sae) -> streamed feature sharding                  #
 # --------------------------------------------------------------------------- #
 def extract_activations(
     model: torch.nn.Module,
@@ -184,7 +209,8 @@ def extract_activations(
     int8_quant: bool,
     feature_dim: int,
     emit_token_combos: bool,
-    top_k: int,
+    pad_token_id: int,
+    save_inputs: bool = False,
 ):
     """Stream batches through (model → sae), writing per-feature .npy shards."""
     logging.info("Begin streaming inference ...")
@@ -193,30 +219,61 @@ def extract_activations(
     )
     np_dtype = DTYPE_MAP_NUMPY[dtype_name]
 
-    # buffers
+    # buffers for activations and indices
     acts_buf: list[list[float]] = [[] for _ in range(feature_dim)]
     idxs_buf: list[list[int]] = [[] for _ in range(feature_dim)]
+
+    # buffers for input tokens and weapons (only if save_inputs=True)
+    input_tokens_buf: list[list[list[int]]] = (
+        [[] for _ in range(feature_dim)] if save_inputs else None
+    )
+    weapon_ids_buf: list[list[int]] = (
+        [[] for _ in range(feature_dim)] if save_inputs else None
+    )
+
     quant_sidecar = {}
 
     example_ctr = 0
     t0 = time.time()
 
     for batch in dataloader:
-        abilities, weapon_ids = batch
+        # The dataloader returns (inputs, weapons, targets, attention_masks)
+        # but we only need inputs and weapons for inference
+        inputs, weapons, _, _ = batch
+
+        # Move tensors to the same device as the model
+        device = next(model.parameters()).device
+        inputs = inputs.to(device)
+        weapons = weapons.to(device)
+
         with torch.no_grad():
-            hidden = model(abilities, weapon_ids)  # [bs, 512]
+            hidden = model(inputs, weapons)  # [bs, 512]
             hidden = sae(hidden)  # [bs, n_features]
 
         hidden_cpu = hidden.detach().cpu()
-        for row in hidden_cpu:
+        inputs_cpu = inputs.detach().cpu()
+        weapons_cpu = weapons.detach().cpu()
+
+        for i, row in enumerate(hidden_cpu):
             nz = (row > 0).nonzero().squeeze(1).tolist()
             if not nz:
                 example_ctr += 1
                 continue
+
+            # Get the input tokens and weapon for this example
+            input_seq = inputs_cpu[i].tolist()
+            weapon_id = weapons_cpu[i].item()
+
+            # Remove padding tokens
+            input_tokens = [tok for tok in input_seq if tok != pad_token_id]
+
             vals = row[nz].to(torch_act_dtype).tolist()
             for feat, val in zip(nz, vals):
                 acts_buf[feat].append(val)
                 idxs_buf[feat].append(example_ctr)
+                if save_inputs:
+                    input_tokens_buf[feat].append(input_tokens)
+                    weapon_ids_buf[feat].append(weapon_id)
             example_ctr += 1
 
         if example_ctr and example_ctr % 10_000 == 0:
@@ -230,8 +287,21 @@ def extract_activations(
     for feat in range(feature_dim):
         fdir = out_dir / f"neuron_{feat:05d}"
         _ensure_dir(fdir)
+
+        # Save activations and indices
         np.save(fdir / "acts.npy", np.asarray(acts_buf[feat], dtype=np_dtype))
         np.save(fdir / "idxs.npy", np.asarray(idxs_buf[feat], dtype=np.int32))
+
+        # Save input tokens and weapon IDs (only if save_inputs=True)
+        if save_inputs:
+            np.savez_compressed(
+                fdir / "input_tokens.npz",
+                tokens=np.array(input_tokens_buf[feat], dtype=object),
+            )
+            np.save(
+                fdir / "weapon_ids.npy",
+                np.asarray(weapon_ids_buf[feat], dtype=np.int32),
+            )
 
         if int8_quant and acts_buf[feat]:
             qmin, qmax = float(min(acts_buf[feat])), float(max(acts_buf[feat]))
@@ -252,7 +322,7 @@ def extract_activations(
 
 
 # --------------------------------------------------------------------------- #
-# 3.  IDF computation                                                         #
+# 2.  IDF computation                                                         #
 # --------------------------------------------------------------------------- #
 def compute_idf(
     example_df: pl.DataFrame, ability_col: str = "ability_tags"
@@ -265,15 +335,16 @@ def compute_idf(
     idf_rows = [
         (tok, math.log(tot / (dfreq + 1))) for tok, dfreq in counter.items()
     ]
-    return pl.DataFrame(idf_rows, schema=["token_id", "idf"])
+    return pl.DataFrame(idf_rows, schema=["token_id", "idf"], orient="row")
 
 
 # --------------------------------------------------------------------------- #
-# 4.  Main                                                                    #
+# 3.  Main                                                                    #
 # --------------------------------------------------------------------------- #
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Generate dashboard dataset artefacts"
+        description="Generate dashboard dataset artefacts",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     # ─ Required
     p.add_argument(
@@ -300,6 +371,58 @@ def build_argparser() -> argparse.ArgumentParser:
         help=".tsv or .csv source file (local or remote)",
     )
     p.add_argument("--output-dir", required=True, help="Destination directory")
+
+    # ─ Configuration loading
+    p.add_argument(
+        "--sae-config",
+        help="Path / URL to SAE run config JSON (auto-loads model/SAE parameters)",
+    )
+
+    # ─ Model configuration
+    p.add_argument("--primary-embedding-dim", type=int, default=32)
+    p.add_argument(
+        "--primary-hidden-dim",
+        type=int,
+        default=512,
+        help="Dimension of the masked-mean vector - becomes SAE input.",
+    )
+    p.add_argument("--primary-num-layers", type=int, default=3)
+    p.add_argument("--primary-num-heads", type=int, default=8)
+    p.add_argument("--primary-num-inducing", type=int, default=32)
+    p.add_argument(
+        "--primary-use-layernorm",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    p.add_argument("--primary-dropout", type=float, default=0.0)
+
+    # ─ SAE configuration
+    p.add_argument(
+        "--expansion-factor",
+        type=float,
+        default=4.0,
+        help="Hidden / input dimension ratio.",
+    )
+
+    # ─ Dataset configuration
+    p.add_argument(
+        "--data-fraction",
+        type=float,
+        default=1.0,
+        help="Fraction of dataset to use for dashboard generation",
+    )
+    p.add_argument(
+        "--num-masks-per-set",
+        type=int,
+        default=5,
+        help="Number of masked instances to generate per set",
+    )
+    p.add_argument(
+        "--skew-factor",
+        type=float,
+        default=1.2,
+        help="Factor to control the skew of the removal distribution",
+    )
 
     # ─ Optional / compute
     p.add_argument(
@@ -338,6 +461,11 @@ def build_argparser() -> argparse.ArgumentParser:
         help="Run correlation pass (slow) - default off",
     )
     p.add_argument(
+        "--debug-save-inputs",
+        action="store_true",
+        help="Save input tokens and weapon IDs (increases disk usage significantly)",
+    )
+    p.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -368,62 +496,144 @@ def main():
     _ensure_dir(out_dir)
 
     # ------------------------------------------------------------------ #
-    # 1.  Load artefacts                                                 #
+    # 1.  Load configuration (if provided)                                #
     # ------------------------------------------------------------------ #
-    device = torch.device(args.device)
-    logging.info("Loading primary model from %s ...", args.primary_model)
-    model = _torch_load(args.primary_model, device=device)
-    model.eval()
+    if args.sae_config:
+        sae_config = _load_sae_config(args.sae_config)
+        # Override command line arguments with config values
+        args.primary_embedding_dim = sae_config["primary_embedding_dim"]
+        args.primary_hidden_dim = sae_config["primary_hidden_dim"]
+        args.primary_num_layers = sae_config["primary_num_layers"]
+        args.primary_num_heads = sae_config["primary_num_heads"]
+        args.primary_num_inducing = sae_config["primary_num_inducing"]
+        args.primary_use_layernorm = sae_config["primary_use_layernorm"]
+        args.primary_dropout = sae_config["primary_dropout"]
+        args.expansion_factor = sae_config["expansion_factor"]
+        logging.info("Using configuration from SAE config file")
+    else:
+        logging.info("Using command line arguments for model configuration")
 
-    logging.info("Loading SAE model from %s ...", args.sae_model)
-    sae = _torch_load(args.sae_model, device=device)
-    sae.eval()
-
-    hidden_dim = sae.decoder.out_features  # assume nn.Linear decoder
-    logging.info("SAE hidden dimension = %d", hidden_dim)
-
-    # vocabularies (they are not used inside this script but saved for completeness)
+    # ------------------------------------------------------------------ #
+    # 2.  Load vocabularies                                               #
+    # ------------------------------------------------------------------ #
     logging.info("Loading vocabularies ...")
-    ability_vocab = _json_load(args.ability_vocab)
-    weapon_vocab = _json_load(args.weapon_vocab)
+    ability_vocab = load_json_from_path(args.ability_vocab)
+    weapon_vocab = load_json_from_path(args.weapon_vocab)
 
-    # ------------------------------------------------------------------ #
-    # 2.  Dataset + DataLoader                                           #
-    # ------------------------------------------------------------------ #
-    ds = TSVAbilityDataset(args.dataset, ability_pad_id=0, device=device)
-    dl = DataLoader(
-        ds,
-        batch_size=args.chunk_size,
-        shuffle=False,
-        num_workers=0,  # streaming inference - keep on main process
-        pin_memory=(device.type == "cuda"),
+    pad_id = ability_vocab.get(PAD)
+    if pad_id is None:
+        raise ValueError(f"'{PAD}' token missing from vocabulary.")
+
+    logging.info(
+        "Loaded vocab → %d tokens, weapon vocab → %d tokens.",
+        len(ability_vocab),
+        len(weapon_vocab),
     )
 
     # ------------------------------------------------------------------ #
-    # 3.  Metadata Arrow                                                 #
+    # 3.  Instantiate + load primary model                                #
+    # ------------------------------------------------------------------ #
+    device = torch.device(args.device)
+
+    primary_model = SetCompletionModel(
+        vocab_size=len(ability_vocab),
+        weapon_vocab_size=len(weapon_vocab),
+        embedding_dim=args.primary_embedding_dim,
+        hidden_dim=args.primary_hidden_dim,
+        output_dim=len(ability_vocab),
+        num_layers=args.primary_num_layers,
+        num_heads=args.primary_num_heads,
+        num_inducing_points=args.primary_num_inducing,
+        use_layer_norm=args.primary_use_layernorm,
+        dropout=args.primary_dropout,
+        pad_token_id=pad_id,
+    ).to(device)
+
+    _load_model_checkpoint(primary_model, args.primary_model, device)
+
+    # ------------------------------------------------------------------ #
+    # 4.  Instantiate + load SAE model                                    #
+    # ------------------------------------------------------------------ #
+    sae = SparseAutoencoder(
+        input_dim=args.primary_hidden_dim,
+        expansion_factor=args.expansion_factor,
+    ).to(device)
+
+    _load_sae_checkpoint(sae, args.sae_model, device)
+
+    hidden_dim = sae.hidden_dim
+    logging.info("SAE hidden dimension = %d", hidden_dim)
+
+    # ------------------------------------------------------------------ #
+    # 5.  Load and prepare dataset                                        #
+    # ------------------------------------------------------------------ #
+    logging.info("Loading dataset from %s ...", args.dataset)
+    df = load_data(args.dataset)
+    df["ability_tags"] = df["ability_tags"].apply(orjson.loads)
+
+    logging.info("Generating datasets with masking...")
+    train_df, val_df, test_df = generate_tokenized_datasets(
+        df,
+        frac=args.data_fraction,
+        validation_size=0.0,  # No validation split for dashboard generation
+        test_size=0.0,  # No test split for dashboard generation
+    )
+
+    # Use train_df as our main dataset (it contains all data when validation_size=test_size=0)
+    dashboard_df = train_df
+    logging.info("Dashboard dataset size: %d examples", len(dashboard_df))
+
+    # ------------------------------------------------------------------ #
+    # 6.  Create DataLoader with masking                                  #
+    # ------------------------------------------------------------------ #
+    logging.info(
+        "Creating DataLoader with %d masks per set...", args.num_masks_per_set
+    )
+    dl, _, _ = generate_dataloaders(
+        dashboard_df,
+        dashboard_df,  # Dummy val/test - not used
+        dashboard_df,  # Dummy val/test - not used
+        vocab_size=len(ability_vocab),
+        pad_token_id=pad_id,
+        batch_size=args.chunk_size,
+        num_workers=args.workers,
+        shuffle_train=False,  # No shuffling for deterministic dashboard generation
+        pin_memory=(device.type == "cuda"),
+        num_instances_per_set=args.num_masks_per_set,
+        skew_factor=args.skew_factor,
+    )
+
+    # ------------------------------------------------------------------ #
+    # 7.  Metadata Arrow                                                 #
     # ------------------------------------------------------------------ #
     logging.info("Writing analysis_df.ipc ...")
     if str(args.dataset).startswith(_REMOTE_PREFIXES):
-        content = io.BytesIO(_fetch_bytes(args.dataset))
-        scan = pl.scan_csv(content, separator="\t", infer_schema_length=0)
+        # ── remote file already in memory → read eagerly, then add index
+        df = pl.read_csv(
+            io.BytesIO(_fetch_bytes(args.dataset)),
+            separator="\t",
+            low_memory=True,
+        )
+        example_df = df.with_row_index("example_id")
     else:
+        # ── local file → true lazy scan; Polars decides best engine
         scan = pl.scan_csv(
             args.dataset,
-            separator="\t" if str(args.dataset).endswith(".tsv") else ",",
+            separator="\t" if args.dataset.endswith(".tsv") else ",",
         )
-    example_df = scan.with_row_count("example_id").collect(streaming=True)
+        example_df = scan.with_row_index("example_id").collect()
     example_df.write_ipc(out_dir / "analysis_df.ipc")
 
     # ------------------------------------------------------------------ #
-    # 4.  IDF                                                            #
+    # 8.  IDF                                                            #
     # ------------------------------------------------------------------ #
     compute_idf(example_df).write_ipc(out_dir / "idf.ipc")
 
     # ------------------------------------------------------------------ #
-    # 5.  Activations                                                    #
+    # 9.  Activations                                                    #
     # ------------------------------------------------------------------ #
     extract_activations(
-        model=model,
+        model=primary_model,
         sae=sae,
         dataloader=dl,
         out_dir=out_dir,
@@ -431,15 +641,19 @@ def main():
         int8_quant=(args.activation_dtype == "int8_per_neuron"),
         feature_dim=hidden_dim,
         emit_token_combos=args.emit_token_combos,
-        top_k=args.top_k,
+        pad_token_id=pad_id,
+        save_inputs=args.debug_save_inputs,
     )
 
     # ------------------------------------------------------------------ #
-    # 6.  Logit influences                                               #
+    # 10.  Logit influences                                               #
     # ------------------------------------------------------------------ #
     logging.info("Computing logit influences ...")
     with open(out_dir / "logit_influences.jsonl", "w", encoding="utf-8") as fp:
-        linear_head: torch.nn.Linear = model.head  # type: ignore[attr-defined]
+        # Handle both output_layer and head attribute names
+        linear_head = (
+            getattr(primary_model, "output_layer", None) or primary_model.head
+        )
         weight = linear_head.weight.detach().cpu()  # [V, d_hidden]
         dictionary = sae.decoder.weight.detach().cpu().T  # [n_feat, d_hidden]
         logits = (dictionary @ weight.T).numpy()  # [n_feat, V]
@@ -471,7 +685,7 @@ def main():
             fp.write(json.dumps(record) + "\n")
 
     # ------------------------------------------------------------------ #
-    # 7.  Correlation pass (optional)                                    #
+    # 11.  Correlation pass (optional)                                    #
     # ------------------------------------------------------------------ #
     if args.compute_correlations:
         logging.info("Computing correlations (placeholder fast version) ...")
@@ -486,8 +700,16 @@ def main():
         )
 
     # ------------------------------------------------------------------ #
-    # 8.  metadata.json                                                  #
+    # 12.  metadata.json                                                  #
     # ------------------------------------------------------------------ #
+    try:
+        git_hash = (
+            subprocess.check_output(["git", "rev-parse", "HEAD"])
+            .decode("utf-8")
+            .strip()
+        )
+    except Exception:
+        git_hash = "N/A"
     meta = {
         "num_examples": example_df.height,
         "num_features": hidden_dim,
@@ -495,6 +717,11 @@ def main():
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "ability_vocab_size": len(ability_vocab),
         "weapon_vocab_size": len(weapon_vocab),
+        "num_masks_per_set": args.num_masks_per_set,
+        "skew_factor": args.skew_factor,
+        "data_fraction": args.data_fraction,
+        "git_hash": git_hash,
+        "cli_args": " ".join(sys.argv),
     }
     (out_dir / "metadata.json").write_text(json.dumps(meta, indent=2))
     logging.info("Finished - data directory ready at %s", out_dir)
