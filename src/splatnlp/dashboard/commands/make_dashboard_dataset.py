@@ -26,7 +26,6 @@ import sys
 import time
 from collections import Counter
 from pathlib import Path
-from typing import List, Tuple
 
 import boto3
 import numpy as np
@@ -103,7 +102,7 @@ DTYPE_MAP_NUMPY = {
 }
 
 
-def _activation_dtype_or_fallback(dtype_name: str) -> Tuple[str, torch.dtype]:
+def _activation_dtype_or_fallback(dtype_name: str) -> tuple[str, torch.dtype]:
     """Validate requested dtype against build / hardware capability."""
     if dtype_name not in DTYPE_MAP_TORCH:
         raise ValueError(f"Unknown dtype {dtype_name}")
@@ -148,8 +147,8 @@ class TSVAbilityDataset(Dataset):
                 low_memory=True,
             )
 
-        self.ability_lists: List[str] = df["ability_tags"].to_list()
-        self.weapon_ids: List[int] = df["weapon_id"].to_list()
+        self.ability_lists: list[str] = df["ability_tags"].to_list()
+        self.weapon_ids: list[int] = df["weapon_id"].to_list()
         self.device = device
         self.pad_id = ability_pad_id
 
@@ -195,8 +194,8 @@ def extract_activations(
     np_dtype = DTYPE_MAP_NUMPY[dtype_name]
 
     # buffers
-    acts_buf: List[List[float]] = [[] for _ in range(feature_dim)]
-    idxs_buf: List[List[int]] = [[] for _ in range(feature_dim)]
+    acts_buf: list[list[float]] = [[] for _ in range(feature_dim)]
+    idxs_buf: list[list[int]] = [[] for _ in range(feature_dim)]
     quant_sidecar = {}
 
     example_ctr = 0
