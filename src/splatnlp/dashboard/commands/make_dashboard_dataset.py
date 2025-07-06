@@ -653,7 +653,6 @@ def main():
     # Convert models to half precision for GPU memory efficiency
     if device.type == "cuda":
         primary_model.half()
-        sae.half()
 
     # ------------------------------------------------------------------ #
     # 4.  Instantiate + load SAE model                                    #
