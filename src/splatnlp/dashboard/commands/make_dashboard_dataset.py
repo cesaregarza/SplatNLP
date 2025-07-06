@@ -268,6 +268,15 @@ def extract_activations(
 ):
     """Stream batches through (model → sae), writing per-feature .npy shards."""
     logging.info("Begin streaming inference ...")
+    logging.info("  • Model device: %s", next(model.parameters()).device)
+    logging.info("  • SAE device: %s", next(sae.parameters()).device)
+    logging.info("  • Feature dimension: %d", feature_dim)
+    logging.info("  • Flush every: %d examples", flush_every)
+    logging.info("  • Save inputs: %s", save_inputs)
+    logging.info("  • Activation dtype: %s", activation_dtype_name)
+    logging.info("  • Int8 quantization: %s", int8_quant)
+    logging.info("  • Estimated total batches: %d", len(dataloader))
+    logging.info("  • Estimated total examples: %d", len(dataloader.dataset))
     dtype_name, torch_act_dtype = _activation_dtype_or_fallback(
         activation_dtype_name
     )
@@ -283,10 +292,12 @@ def extract_activations(
         _captured["vec"] = inp[0].detach()
 
     hook_handle = model.output_layer.register_forward_hook(_pre_head_hook)
+    logging.info("  • Hook registered on model.output_layer")
 
     # buffers for activations and indices
     acts_buf: list[list[float]] = [[] for _ in range(feature_dim)]
     idxs_buf: list[list[int]] = [[] for _ in range(feature_dim)]
+    logging.info("  • Initialized buffers for %d features", feature_dim)
 
     # buffers for input tokens and weapons (only if save_inputs=True)
     input_tokens_buf: list[list[list[int]]] = (
@@ -301,6 +312,7 @@ def extract_activations(
     example_ctr = 0
     t0 = time.time()
     chunk_id = 0  # 👈  NEW
+    logging.info("  • Starting extraction loop...")
 
     for batch in dataloader:
         # The dataloader returns (inputs, weapons, targets, attention_masks)
@@ -326,6 +338,15 @@ def extract_activations(
 
         vec = _captured.pop("vec")  # [bs, 512]
         hidden = sae(vec)[1]  # [bs, n_features]
+
+        # Log first batch details for debugging
+        if example_ctr == 0:
+            logging.info("  • First batch processed:")
+            logging.info("    - Input shape: %s", inputs.shape)
+            logging.info("    - Weapon shape: %s", weapons.shape)
+            logging.info("    - Captured vector shape: %s", vec.shape)
+            logging.info("    - Hidden activations shape: %s", hidden.shape)
+            logging.info("    - Non-zero activations: %d / %d", (hidden > 0).sum().item(), hidden.numel())
 
         hidden_cpu = hidden.detach().cpu()
         inputs_cpu = inputs.detach().cpu()
