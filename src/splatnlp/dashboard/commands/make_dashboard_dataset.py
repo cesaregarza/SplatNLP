@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hashlib
 import io
 import json
 import logging
@@ -56,7 +57,17 @@ from splatnlp.utils.train import convert_ddp_state
 _REMOTE_PREFIXES = ("s3://", "http://", "https://")
 
 
-def _fetch_bytes(path: str | Path) -> bytes:
+def _get_cache_path(path: str) -> Path:
+    """Get the cache path for a remote file."""
+    cache_dir = Path.home() / ".cache" / "splatnlp" / "datasets"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create a hash of the URL/path for the filename
+    path_hash = hashlib.sha256(path.encode()).hexdigest()[:16]
+    return cache_dir / f"{path_hash}.cache"
+
+
+def _fetch_bytes(path: str | Path, no_cache: bool = False) -> bytes:
     """
     Return the raw bytes at *path*.
 
@@ -64,17 +75,45 @@ def _fetch_bytes(path: str | Path) -> bytes:
     * local filesystem
     * S3  (`s3://bucket/key`)
     * HTTP/HTTPS
+    * Caching for remote files
     """
     path = str(path)
-    if path.startswith("s3://"):
-        bucket, key = path[5:].split("/", 1)
-        s3 = boto3.client("s3")
-        obj = s3.get_object(Bucket=bucket, Key=key)
-        return obj["Body"].read()
-    if path.startswith(("http://", "https://")):
-        resp = requests.get(path, timeout=60)
-        resp.raise_for_status()
-        return resp.content
+
+    # Check if it's a remote path
+    if path.startswith(_REMOTE_PREFIXES):
+        cache_path = _get_cache_path(path)
+
+        # Try to load from cache first (unless no_cache is True)
+        if not no_cache and cache_path.exists():
+            logging.info("Loading %s from cache: %s", path, cache_path)
+            with open(cache_path, "rb") as f:
+                return f.read()
+
+        # Download and cache
+        if no_cache:
+            logging.info("Downloading %s (cache disabled)", path)
+        else:
+            logging.info("Downloading %s (will cache to %s)", path, cache_path)
+        if path.startswith("s3://"):
+            bucket, key = path[5:].split("/", 1)
+            s3 = boto3.client("s3")
+            obj = s3.get_object(Bucket=bucket, Key=key)
+            content = obj["Body"].read()
+        elif path.startswith(("http://", "https://")):
+            resp = requests.get(path, timeout=60)
+            resp.raise_for_status()
+            content = resp.content
+        else:
+            raise ValueError(f"Unsupported remote path: {path}")
+
+        # Save to cache (unless no_cache is True)
+        if not no_cache:
+            with open(cache_path, "wb") as f:
+                f.write(content)
+            logging.info("Cached %s (%d bytes)", path, len(content))
+
+        return content
+
     # local disk
     with open(path, "rb") as f:
         return f.read()
@@ -277,6 +316,10 @@ def extract_activations(
     logging.info("  • Int8 quantization: %s", int8_quant)
     logging.info("  • Estimated total batches: %d", len(dataloader))
     logging.info("  • Estimated total examples: %d", len(dataloader.dataset))
+    logging.info(
+        "  • Optimizations: torch.inference_mode, torch.compile, vectorized processing"
+    )
+    logging.info("  • Cache directory: %s", _get_cache_path("dummy").parent)
     dtype_name, torch_act_dtype = _activation_dtype_or_fallback(
         activation_dtype_name
     )
@@ -327,7 +370,7 @@ def extract_activations(
         # Create key_padding_mask from attention_masks (True for pad tokens, False for valid tokens)
         key_padding_mask = ~attention_masks
 
-        with torch.no_grad():
+        with torch.inference_mode():  # Faster than no_grad
             if device.type == "cuda":
                 with torch.amp.autocast("cuda", dtype=torch.float16):
                     _ = model(
@@ -346,33 +389,41 @@ def extract_activations(
             logging.info("    - Weapon shape: %s", weapons.shape)
             logging.info("    - Captured vector shape: %s", vec.shape)
             logging.info("    - Hidden activations shape: %s", hidden.shape)
-            logging.info("    - Non-zero activations: %d / %d", (hidden > 0).sum().item(), hidden.numel())
+            logging.info(
+                "    - Non-zero activations: %d / %d",
+                (hidden > 0).sum().item(),
+                hidden.numel(),
+            )
 
-        hidden_cpu = hidden.detach().cpu()
-        inputs_cpu = inputs.detach().cpu()
-        weapons_cpu = weapons.detach().cpu()
+        # Vectorized approach: eliminate Python loop bottleneck
+        # 1. Keep only positive values on GPU
+        mask = hidden > 0  # boolean tensor
+        if mask.any():
+            pos_idx = mask.nonzero(as_tuple=False)  # (nnz, 2) on CUDA
+            values = hidden[mask]  # (nnz,) on CUDA
 
-        for i, row in enumerate(hidden_cpu):
-            nz = (row > 0).nonzero().squeeze(1).tolist()
-            if not nz:
-                example_ctr += 1
-                continue
+            # 2. Move once to CPU as a single contiguous buffer
+            cpu_idx = pos_idx.cpu().numpy().astype(np.int32)
+            cpu_val = values.detach().cpu().numpy().astype(np_dtype)
 
-            # Get the input tokens and weapon for this example
-            input_seq = inputs_cpu[i].tolist()
-            weapon_id = weapons_cpu[i].item()
-
-            # Remove padding tokens
-            input_tokens = [tok for tok in input_seq if tok != pad_token_id]
-
-            vals = row[nz].to(torch_act_dtype).tolist()
-            for feat, val in zip(nz, vals):
-                acts_buf[feat].append(val)
-                idxs_buf[feat].append(example_ctr)
+            # 3. Scatter into per-feature lists without per-element Python cost
+            for feat in np.unique(cpu_idx[:, 1]):
+                sel = cpu_idx[:, 1] == feat
+                acts_buf[feat].extend(cpu_val[sel])
+                idxs_buf[feat].extend(cpu_idx[sel, 0] + example_ctr)
                 if save_inputs:
-                    input_tokens_buf[feat].append(input_tokens)
-                    weapon_ids_buf[feat].append(weapon_id)
-            example_ctr += 1
+                    # Handle input tokens and weapon IDs for this feature
+                    for batch_idx in cpu_idx[sel, 0]:
+                        input_seq = inputs[batch_idx].cpu().tolist()
+                        weapon_id = weapons[batch_idx].cpu().item()
+                        input_tokens = [
+                            tok for tok in input_seq if tok != pad_token_id
+                        ]
+                        input_tokens_buf[feat].append(input_tokens)
+                        weapon_ids_buf[feat].append(weapon_id)
+
+        # Update example counter
+        example_ctr += hidden.shape[0]
 
         # ── NEW: periodic flush ────────────────────────────────────────────
         if example_ctr and (example_ctr % flush_every == 0):
@@ -405,8 +456,12 @@ def extract_activations(
 
         if example_ctr and example_ctr % 100_000 == 0:  # Reduced log frequency
             rate = example_ctr / (time.time() - t0 + 1e-6)
+            total_activations = sum(len(buf) for buf in acts_buf)
             logging.info(
-                "  • processed %d examples (%.1f ex/s)", example_ctr, rate
+                "  • processed %d examples (%.1f ex/s, %.1f activations/sec)",
+                example_ctr,
+                rate,
+                total_activations / (time.time() - t0 + 1e-6),
             )
 
     # flush final chunk
@@ -593,6 +648,11 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument(
         "--verbose", action="store_true", help="Synonym for --log-level DEBUG"
     )
+    p.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Disable caching of remote datasets (force re-download)",
+    )
 
     return p
 
@@ -674,6 +734,8 @@ def main():
     # Convert models to half precision for GPU memory efficiency
     if device.type == "cuda":
         primary_model.half()
+        # Compile model for 1.3-1.8x speedup (PyTorch 2.2+)
+        primary_model = torch.compile(primary_model)
 
     # ------------------------------------------------------------------ #
     # 4.  Instantiate + load SAE model                                    #
@@ -692,7 +754,19 @@ def main():
     # 5.  Load and prepare dataset                                        #
     # ------------------------------------------------------------------ #
     logging.info("Loading dataset from %s ...", args.dataset)
-    df = load_data(args.dataset)
+
+    # Use cached loading for remote datasets
+    if str(args.dataset).startswith(_REMOTE_PREFIXES):
+        # Load from cache or download
+        content = _fetch_bytes(args.dataset, no_cache=args.no_cache)
+        df = pl.read_csv(io.BytesIO(content), separator="\t", low_memory=True)
+        df = (
+            df.to_pandas()
+        )  # Convert to pandas for compatibility with load_data
+    else:
+        # Local file - use existing load_data function
+        df = load_data(args.dataset)
+
     df["ability_tags"] = df["ability_tags"].apply(orjson.loads)
 
     logging.info("Generating datasets with masking...")
@@ -734,7 +808,7 @@ def main():
     if str(args.dataset).startswith(_REMOTE_PREFIXES):
         # ── remote file already in memory → read eagerly, then add index
         df = pl.read_csv(
-            io.BytesIO(_fetch_bytes(args.dataset)),
+            io.BytesIO(_fetch_bytes(args.dataset, no_cache=args.no_cache)),
             separator="\t",
             low_memory=True,
         )
