@@ -35,6 +35,7 @@ EMIT_TOKEN_COMBOS=false
 TOP_K=30
 COMPUTE_CORRELATIONS=false
 DEBUG_SAVE_INPUTS=false  # Disabled by default to reduce memory usage
+NO_CACHE=false  # Enable caching for remote datasets (faster subsequent runs)
 
 # --- Logging ---
 LOG_LEVEL="INFO"
@@ -79,6 +80,10 @@ if [[ "${DEBUG_SAVE_INPUTS}" == "true" ]]; then
   CMD+=(--debug-save-inputs)
 fi
 
+if [[ "${NO_CACHE}" == "true" ]]; then
+  CMD+=(--no-cache)
+fi
+
 if [[ -n "${VERBOSE_FLAG}" ]]; then
   CMD+=("${VERBOSE_FLAG}")
 fi
@@ -90,6 +95,7 @@ echo "   SAE model: ${SAE_MODEL}"
 echo "   SAE config: ${SAE_CONFIG_FILE}"
 echo "   Chunk size: ${CHUNK_SIZE} (conservative for rented machines)"
 echo "   Flush every: ${FLUSH_EVERY} examples (memory management)"
+echo "   Cache remote datasets: $([ "${NO_CACHE}" == "true" ] && echo "disabled" || echo "enabled")"
 echo ""
 
 printf '» %q ' "${CMD[@]}"; echo
