@@ -16,6 +16,7 @@ Author: 2025-07-05
 from __future__ import annotations
 
 import argparse
+import gc
 import io
 import json
 import logging
@@ -204,6 +205,54 @@ def _ensure_dir(p: Path):
 # --------------------------------------------------------------------------- #
 # 1.  Core pass – (model → sae) -> streamed feature sharding                  #
 # --------------------------------------------------------------------------- #
+def _flush_chunk(
+    out_dir: Path,
+    acts_buf,
+    idxs_buf,
+    input_tokens_buf,
+    weapon_ids_buf,
+    np_dtype,
+    int8_quant,
+    quant_sidecar,
+    chunk_id: int,
+    emit_token_combos: bool,
+):
+    """Flush a chunk of buffered activations to disk."""
+    for feat, (acts, idxs) in enumerate(zip(acts_buf, idxs_buf)):
+        if not acts:  # nothing buffered for this feature
+            continue
+        fdir = out_dir / f"neuron_{feat:05d}"
+        _ensure_dir(fdir)
+
+        np.save(fdir / f"acts_{chunk_id}.npy", np.asarray(acts, dtype=np_dtype))
+        np.save(fdir / f"idxs_{chunk_id}.npy", np.asarray(idxs, dtype=np.int32))
+
+        if input_tokens_buf is not None:
+            np.savez_compressed(
+                fdir / f"input_tokens_{chunk_id}.npz",
+                tokens=np.array(input_tokens_buf[feat], dtype=object),
+            )
+            np.save(
+                fdir / f"weapon_ids_{chunk_id}.npy",
+                np.asarray(weapon_ids_buf[feat], dtype=np.int32),
+            )
+
+        if int8_quant:
+            qmin, qmax = float(min(acts)), float(max(acts))
+            # track running min/max per feature
+            prev = quant_sidecar.get(feat, {"min": +1e9, "max": -1e9})
+            quant_sidecar[feat] = {
+                "min": min(prev["min"], qmin),
+                "max": max(prev["max"], qmax),
+            }
+
+        if not emit_token_combos and chunk_id == 0:  # create once
+            for suffix in ("single_token_df", "pair_df", "triple_df"):
+                (fdir / f"{suffix}.csv").write_text(
+                    "example_id,placeholder\n", encoding="utf-8"
+                )
+
+
 def extract_activations(
     model: torch.nn.Module,
     sae: torch.nn.Module,
@@ -215,6 +264,7 @@ def extract_activations(
     emit_token_combos: bool,
     pad_token_id: int,
     save_inputs: bool = False,
+    flush_every: int = 100_000,  # 👈  NEW
 ):
     """Stream batches through (model → sae), writing per-feature .npy shards."""
     logging.info("Begin streaming inference ...")
@@ -246,10 +296,11 @@ def extract_activations(
         [[] for _ in range(feature_dim)] if save_inputs else None
     )
 
-    quant_sidecar = {}
+    quant_sidecar: dict[int, dict[str, float]] = {}
 
     example_ctr = 0
     t0 = time.time()
+    chunk_id = 0  # 👈  NEW
 
     for batch in dataloader:
         # The dataloader returns (inputs, weapons, targets, attention_masks)
@@ -264,13 +315,14 @@ def extract_activations(
         # Create key_padding_mask from attention_masks (True for pad tokens, False for valid tokens)
         key_padding_mask = ~attention_masks
 
-        with (
-            torch.no_grad(),
-            torch.amp.autocast(
-                "cuda" if device.type == "cuda" else "cpu", dtype=torch.float16
-            ),
-        ):
-            _ = model(inputs, weapons, key_padding_mask=key_padding_mask)
+        with torch.no_grad():
+            if device.type == "cuda":
+                with torch.amp.autocast("cuda", dtype=torch.float16):
+                    _ = model(
+                        inputs, weapons, key_padding_mask=key_padding_mask
+                    )
+            else:
+                _ = model(inputs, weapons, key_padding_mask=key_padding_mask)
 
         vec = _captured.pop("vec")  # [bs, 512]
         hidden = sae(vec)[1]  # [bs, n_features]
@@ -301,42 +353,55 @@ def extract_activations(
                     weapon_ids_buf[feat].append(weapon_id)
             example_ctr += 1
 
-        if example_ctr and example_ctr % 10_000 == 0:
+        # ── NEW: periodic flush ────────────────────────────────────────────
+        if example_ctr and (example_ctr % flush_every == 0):
+            _flush_chunk(
+                out_dir,
+                acts_buf,
+                idxs_buf,
+                input_tokens_buf,
+                weapon_ids_buf,
+                np_dtype,
+                int8_quant,
+                quant_sidecar,
+                chunk_id,
+                emit_token_combos,
+            )
+            # clear python lists
+            acts_buf = [[] for _ in range(feature_dim)]
+            idxs_buf = [[] for _ in range(feature_dim)]
+            if save_inputs:
+                input_tokens_buf = [[] for _ in range(feature_dim)]
+                weapon_ids_buf = [[] for _ in range(feature_dim)]
+            chunk_id += 1
+            gc.collect()  # Force garbage collection after clearing large lists
+            logging.info(
+                "  • processed %d examples (%.1f ex/s) - flushing chunk %d",
+                example_ctr,
+                example_ctr / (time.time() - t0 + 1e-6),
+                chunk_id - 1,
+            )
+
+        if example_ctr and example_ctr % 100_000 == 0:  # Reduced log frequency
             rate = example_ctr / (time.time() - t0 + 1e-6)
             logging.info(
                 "  • processed %d examples (%.1f ex/s)", example_ctr, rate
             )
 
-    # flush
-    logging.info("Writing per-feature .npy files ...")
-    for feat in range(feature_dim):
-        fdir = out_dir / f"neuron_{feat:05d}"
-        _ensure_dir(fdir)
-
-        # Save activations and indices
-        np.save(fdir / "acts.npy", np.asarray(acts_buf[feat], dtype=np_dtype))
-        np.save(fdir / "idxs.npy", np.asarray(idxs_buf[feat], dtype=np.int32))
-
-        # Save input tokens and weapon IDs (only if save_inputs=True)
-        if save_inputs:
-            np.savez_compressed(
-                fdir / "input_tokens.npz",
-                tokens=np.array(input_tokens_buf[feat], dtype=object),
-            )
-            np.save(
-                fdir / "weapon_ids.npy",
-                np.asarray(weapon_ids_buf[feat], dtype=np.int32),
-            )
-
-        if int8_quant and acts_buf[feat]:
-            qmin, qmax = float(min(acts_buf[feat])), float(max(acts_buf[feat]))
-            quant_sidecar[feat] = {"min": qmin, "max": qmax}
-
-        if not emit_token_combos:  # write tiny placeholder CSVs
-            for suffix in ("single_token_df", "pair_df", "triple_df"):
-                (fdir / f"{suffix}.csv").write_text(
-                    "example_id,placeholder\n", encoding="utf-8"
-                )
+    # flush final chunk
+    logging.info("Writing final chunk and per-feature .npy files ...")
+    _flush_chunk(
+        out_dir,
+        acts_buf,
+        idxs_buf,
+        input_tokens_buf,
+        weapon_ids_buf,
+        np_dtype,
+        int8_quant,
+        quant_sidecar,
+        chunk_id,
+        emit_token_combos,
+    )
 
     if int8_quant:
         (out_dir / "quantization.json").write_text(json.dumps(quant_sidecar))
@@ -478,6 +543,12 @@ def build_argparser() -> argparse.ArgumentParser:
         help="Batch size fed to the model/SAE pipeline",
     )
     p.add_argument(
+        "--flush-every",
+        type=int,
+        default=100_000,
+        help="Number of examples to process before flushing to disk (memory management)",
+    )
+    p.add_argument(
         "--emit-token-combos",
         action="store_true",
         help="Generate CSVs with single/pair/triple token statistics",
@@ -579,9 +650,10 @@ def main():
 
     _load_model_checkpoint(primary_model, args.primary_model, device)
 
-    # Convert model to half precision for GPU memory efficiency
+    # Convert models to half precision for GPU memory efficiency
     if device.type == "cuda":
         primary_model.half()
+        sae.half()
 
     # ------------------------------------------------------------------ #
     # 4.  Instantiate + load SAE model                                    #
@@ -652,6 +724,7 @@ def main():
         scan = pl.scan_csv(
             args.dataset,
             separator="\t" if args.dataset.endswith(".tsv") else ",",
+            infer_schema_length=None,  # Disable fast guessing heuristic for wide TSVs
         )
         example_df = scan.with_row_index("example_id").collect()
     example_df.write_ipc(out_dir / "analysis_df.ipc")
@@ -664,8 +737,9 @@ def main():
     # ------------------------------------------------------------------ #
     # 9.  Activations                                                    #
     # ------------------------------------------------------------------ #
-    # Optional OOM back-off logic
+    # Optional OOM back-off logic with proper hook cleanup
     current_chunk_size = args.chunk_size
+    current_flush_every = args.flush_every
     while True:
         try:
             extract_activations(
@@ -679,13 +753,19 @@ def main():
                 emit_token_combos=args.emit_token_combos,
                 pad_token_id=pad_id,
                 save_inputs=args.debug_save_inputs,
+                flush_every=current_flush_every,
             )
             break
         except torch.cuda.OutOfMemoryError:
             current_chunk_size //= 2
+            current_flush_every = (
+                current_chunk_size * 25
+            )  # Scale flush frequency with batch size
             torch.cuda.empty_cache()
             logging.warning(
-                "⚠️  OOM – retrying with chunk_size=%d", current_chunk_size
+                "⚠️  OOM - retrying with chunk_size=%d, flush_every=%d",
+                current_chunk_size,
+                current_flush_every,
             )
             if current_chunk_size < 512:
                 raise
