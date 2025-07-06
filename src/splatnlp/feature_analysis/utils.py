@@ -7,7 +7,7 @@ displaying examples, and testing the feature analyzer.
 
 import json
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -277,7 +277,7 @@ def test_feature_analyzer(feature_analyzer, feature_id: int = 1257):
     return analysis
 
 
-def test_multiple_features(feature_analyzer, test_features: List[int] = None):
+def test_multiple_features(feature_analyzer, test_features: list[int] = None):
     """Test analysis of multiple features from our previous SAE results."""
 
     print("\n=== ANALYZING MULTIPLE FEATURES ===\n")
@@ -357,8 +357,8 @@ def save_feature_analysis(
 
 
 def batch_analyze_features(
-    feature_analyzer, feature_ids: List[int], output_dir: str = "."
-) -> List[str]:
+    feature_analyzer, feature_ids: list[int], output_dir: str = "."
+) -> list[str]:
     """Analyze multiple features and save their analysis to files."""
 
     output_files = []

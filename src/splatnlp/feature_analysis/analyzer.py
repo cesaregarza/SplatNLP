@@ -16,6 +16,7 @@ import numpy as np
 
 from splatnlp.dashboard.fs_database import FSDatabase
 from splatnlp.dashboard.utils.converters import generate_weapon_name_mapping
+from splatnlp.feature_analysis.defaults import HIGH_AP_PATTERN, SPECIAL_TOKENS
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +62,8 @@ class FeatureAnalyzer:
         )
 
         # Pre-compute patterns for analysis
-        self.HIGH_AP_PATTERN = re.compile(r"_(21|29|38|51|57)$")
-        self.SPECIAL_TOKENS = {"<PAD>", "<NULL>"}
+        self.HIGH_AP_PATTERN = re.compile(HIGH_AP_PATTERN)
+        self.SPECIAL_TOKENS = SPECIAL_TOKENS
 
         # SAE dimensions
         self.sae_input_dim = self.sae_model.decoder.weight.shape[0]  # 512

@@ -6,14 +6,22 @@ including comprehensive feature analysis, activation pattern exploration,
 and LLM prompt generation.
 """
 
-from .analyzer import FeatureAnalyzer
-from .config import FEATURE_CATEGORIES, FeatureAnalysisConfig, default_config
-from .factory import (
+from splatnlp.feature_analysis.analyzer import FeatureAnalyzer
+from splatnlp.feature_analysis.config import (
+    FeatureAnalysisConfig,
+    default_config,
+)
+from splatnlp.feature_analysis.defaults import (
+    FEATURE_CATEGORIES,
+    HIGH_AP_PATTERN,
+    SPECIAL_TOKENS,
+)
+from splatnlp.feature_analysis.factory import (
     create_feature_analyzer,
     create_feature_analyzer_from_notebook_config,
     create_quick_analyzer,
 )
-from .utils import (
+from splatnlp.feature_analysis.utils import (
     batch_analyze_features,
     generate_comprehensive_llm_prompt,
     save_feature_analysis,
@@ -36,6 +44,8 @@ __all__ = [
     "FeatureAnalysisConfig",
     "default_config",
     "FEATURE_CATEGORIES",
+    "HIGH_AP_PATTERN",
+    "SPECIAL_TOKENS",
     # Factory functions
     "create_feature_analyzer",
     "create_feature_analyzer_from_notebook_config",
