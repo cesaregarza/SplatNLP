@@ -43,15 +43,21 @@ class FeatureLabel:
 class FeatureLabelsManager:
     """Enhanced feature labeling with categories and metadata."""
 
-    def __init__(self, storage_path: Optional[Path] = None):
+    def __init__(
+        self, storage_path: Optional[Path] = None, model_type: str = "full"
+    ):
         """Initialize the feature labels manager.
 
         Args:
             storage_path: Path to store feature labels JSON.
-                         Defaults to dashboard directory.
+                         Defaults to dashboard directory with model-specific file.
+            model_type: Type of model ("full" or "ultra")
         """
+        self.model_type = model_type
         if storage_path is None:
-            storage_path = Path(__file__).parent.parent / "feature_labels.json"
+            # Use model-specific label file
+            filename = f"feature_labels_{model_type}.json"
+            storage_path = Path(__file__).parent.parent / filename
         self.storage_path = storage_path
         self.feature_labels = self._load_labels()
 

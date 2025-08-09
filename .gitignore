@@ -75,3 +75,6 @@ results.csv
 .codesearch/
 !scripts/*.sh
 sae_runs
+
+# Claude-specific documentation
+CLAUDE.md

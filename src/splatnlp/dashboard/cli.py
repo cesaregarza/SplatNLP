@@ -14,35 +14,10 @@ import torch
 
 from splatnlp.dashboard.app import DASHBOARD_CONTEXT as app_context_ref
 from splatnlp.dashboard.app import app
-from splatnlp.dashboard.commands.compute_correlations_efficient_cmd import (
-    compute_correlations_efficient_command,
-)
-from splatnlp.dashboard.commands.consolidate_activations_efficient_cmd import (
-    consolidate_activations_efficient_command,
-)
-from splatnlp.dashboard.commands.consolidate_to_db_cmd import (
-    consolidate_to_db_command,
-)
-from splatnlp.dashboard.commands.extract_top_examples_cmd import (
-    extract_top_examples_command,
-)
 
-# Import command functions
+# Import available command functions
 from splatnlp.dashboard.commands.generate_activations_cmd import (
     generate_activations_command,
-)
-from splatnlp.dashboard.commands.ingest_binned_samples_cmd import (
-    ingest_binned_samples_command,
-    register_ingest_binned_samples_parser,
-)
-from splatnlp.dashboard.commands.minimize_examples_cmd import (
-    setup_minimize_examples_parser,
-)
-from splatnlp.dashboard.commands.precompute_analytics_cmd import (
-    precompute_analytics_command,
-)
-from splatnlp.dashboard.commands.streaming_consolidate_cmd import (
-    streaming_consolidate_command,
 )
 from splatnlp.dashboard.components.feature_labels import FeatureLabelsManager
 from splatnlp.model.models import SetCompletionModel
@@ -128,6 +103,28 @@ def load_dashboard_data(args_ns: argparse.Namespace):
                 raise ConnectionError(
                     f"Critical: Filesystem database could not be initialized: {e}"
                 ) from e
+        elif args_ns.use_efficient:
+            # Efficient database case
+            logger.info(
+                f"Initializing efficient database with data_dir={args_ns.data_dir} and examples_dir={args_ns.examples_dir}"
+            )
+            try:
+                from splatnlp.dashboard.efficient_fs_database import (
+                    EfficientFSDatabase,
+                )
+
+                db_context = EfficientFSDatabase(
+                    args_ns.data_dir, args_ns.examples_dir
+                )
+                logger.info("Efficient database initialized successfully")
+            except Exception as e:
+                logger.critical(
+                    f"Failed to initialize efficient database: {e}",
+                    exc_info=True,
+                )
+                raise ConnectionError(
+                    f"Critical: Efficient database could not be initialized: {e}"
+                ) from e
 
     # Fallback to precomputed_analytics for commands other than 'run' if they support it
     if (
@@ -173,7 +170,9 @@ def load_dashboard_data(args_ns: argparse.Namespace):
             f"For command '{args_ns.main_command}', no database or precomputed analytics available. Command may not function as expected."
         )
 
-    feature_labels_manager = FeatureLabelsManager()
+    # Get model type from args, default to "full" if not specified
+    model_type = getattr(args_ns, "model_type", "full")
+    feature_labels_manager = FeatureLabelsManager(model_type=model_type)
 
     dashboard_context_data = SimpleNamespace(
         vocab=vocab,
@@ -186,12 +185,22 @@ def load_dashboard_data(args_ns: argparse.Namespace):
         db_context=db_context,
         feature_labels_manager=feature_labels_manager,
         device=DEVICE,
+        model_type=model_type,
     )
     return dashboard_context_data
 
 
 def setup_run_parser(subparsers):
     run_parser = subparsers.add_parser("run", help="Run the dashboard server.")
+
+    # Model type selection
+    run_parser.add_argument(
+        "--model-type",
+        type=str,
+        choices=["full", "ultra"],
+        default="full",
+        help="Model type to use (full: 2048 features, ultra: 24576 features)",
+    )
 
     # Database type selection
     db_group = run_parser.add_mutually_exclusive_group(required=True)
@@ -205,6 +214,11 @@ def setup_run_parser(subparsers):
         action="store_true",
         help="Use filesystem-based database instead of DuckDB",
     )
+    db_group.add_argument(
+        "--use-efficient",
+        action="store_true",
+        help="Use efficient optimized storage (recommended for Ultra model)",
+    )
 
     # Filesystem database specific args
     run_parser.add_argument(
@@ -216,6 +230,18 @@ def setup_run_parser(subparsers):
         "--neurons-root",
         type=str,
         help="Path to root directory containing neuron_XXXX folders (required if --use-filesystem)",
+    )
+
+    # Efficient database specific args
+    run_parser.add_argument(
+        "--data-dir",
+        type=str,
+        help="Path to Parquet/Zarr converted data (for --use-efficient). Defaults based on model-type.",
+    )
+    run_parser.add_argument(
+        "--examples-dir",
+        type=str,
+        help="Path to optimized examples storage (for --use-efficient). Defaults based on model-type.",
     )
 
     run_parser.add_argument(
@@ -260,7 +286,82 @@ def setup_run_parser(subparsers):
     run_parser.set_defaults(func=run_dashboard_server)
 
 
+def convert_to_efficient_command(args):
+    """Run the convert to efficient format command."""
+    from splatnlp.dashboard.commands.convert_to_efficient_cmd import (
+        BatchConverter,
+    )
+
+    converter = BatchConverter(
+        source_dir=args.source_dir,
+        target_dir=args.target_dir,
+        chunk_size=args.chunk_size,
+        compression=args.compression,
+        compression_level=args.compression_level,
+    )
+    converter.convert_all()
+
+
+def create_examples_storage_command(args):
+    """Run the create examples storage command."""
+    from splatnlp.dashboard.commands.create_examples_storage_cmd import (
+        OptimizedExampleStorage,
+    )
+
+    builder = OptimizedExampleStorage(
+        data_dir=args.data_dir,
+        output_dir=args.output_dir,
+        top_k=args.top_k,
+        activation_threshold=args.threshold,
+        n_features=args.n_features,
+    )
+    builder.process_all_batches()
+
+
+def analyze_activations_command(args):
+    """Run the analyze activations command."""
+    from splatnlp.dashboard.commands.analyze_activations_cmd import (
+        ActivationAnalyzer,
+    )
+
+    analyzer = ActivationAnalyzer(args.data_dir)
+
+    if args.feature_id is not None:
+        # Analyze specific feature
+        examples = analyzer.find_top_activated_features(n_features=1)
+        print(f"Analysis for feature {args.feature_id}:")
+        print(examples)
+    elif args.weapon_id is not None:
+        # Analyze weapon patterns
+        analysis = analyzer.analyze_weapon_patterns(
+            args.weapon_id, limit=args.limit
+        )
+        print(f"Analysis for weapon {args.weapon_id}:")
+        print(analysis)
+    else:
+        # General analysis
+        top_features = analyzer.find_top_activated_features(n_features=10)
+        print("Top 10 activated features:")
+        for feat in top_features:
+            print(
+                f"  Feature {feat['feature_id']}: {feat['activation_count']} activations"
+            )
+
+
 def run_dashboard_server(args):
+    # Set defaults based on model type
+    if args.use_efficient:
+        if args.model_type == "ultra":
+            if not args.data_dir:
+                args.data_dir = "/mnt/e/activations_ultra_efficient"
+            if not args.examples_dir:
+                args.examples_dir = "/mnt/e/dashboard_examples_optimized"
+        else:  # full model
+            if not args.data_dir:
+                args.data_dir = "/mnt/e/activations_full_efficient"
+            if not args.examples_dir:
+                args.examples_dir = "/mnt/e/dashboard_examples_full_optimized"
+
     if args.enable_dynamic_tooltips:
         if not args.primary_model_checkpoint or not args.sae_model_checkpoint:
             logger.error(
@@ -291,9 +392,14 @@ def run_dashboard_server(args):
         dashboard_data_obj.feature_labels_manager
     )
     app_context_ref.device = dashboard_data_obj.device
+    app_context_ref.model_type = dashboard_data_obj.model_type
 
     # Initialize database based on type
-    if args.use_filesystem:
+    if args.use_efficient:
+        from splatnlp.dashboard.app import init_efficient_database
+
+        init_efficient_database(args.data_dir, args.examples_dir)
+    elif args.use_filesystem:
         from splatnlp.dashboard.app import init_filesystem_database
 
         init_filesystem_database(args.meta_path, args.neurons_root)
@@ -376,6 +482,12 @@ def setup_generate_activations_parser(subparsers):
     p.add_argument("--sae-expansion-factor", type=float, default=4.0)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument(
+        "--num-instances-per-set",
+        type=int,
+        default=1,
+        help="Number of subset instances per set (1 for Full model, 20 for Ultra model)",
+    )
+    p.add_argument(
         "--hook-target",
         type=str,
         default="masked_mean",
@@ -389,6 +501,8 @@ def setup_generate_activations_parser(subparsers):
     p.set_defaults(func=generate_activations_command)
 
 
+# COMMENTED OUT - OLD COMMAND
+"""
 def setup_extract_top_examples_parser(subparsers):
     p = subparsers.add_parser(
         "extract-top-examples",
@@ -465,8 +579,11 @@ def setup_extract_top_examples_parser(subparsers):
         help="Number of bottom bins to define 'low activation'",
     )
     p.set_defaults(func=extract_top_examples_command)
+"""
 
 
+# COMMENTED OUT - OLD COMMAND
+"""
 def setup_compute_correlations_parser(subparsers):
     p = subparsers.add_parser(
         "compute-correlations",
@@ -533,8 +650,11 @@ def setup_compute_correlations_parser(subparsers):
         help="Minimum common examples needed to actually compute correlation.",
     )
     p.set_defaults(func=compute_correlations_efficient_command)
+"""
 
 
+# COMMENTED OUT - OLD COMMAND
+"""
 def setup_consolidate_activations_parser(subparsers):
     p = subparsers.add_parser(
         "consolidate-activations",
@@ -604,8 +724,11 @@ def setup_consolidate_activations_parser(subparsers):
         help="Number of examples to include in the dashboard sample.",
     )
     p.set_defaults(func=consolidate_activations_efficient_command)
+"""
 
 
+# COMMENTED OUT - OLD COMMAND
+"""
 def setup_precompute_analytics_parser(subparsers):
     p = subparsers.add_parser(
         "precompute-analytics",
@@ -678,8 +801,11 @@ def setup_precompute_analytics_parser(subparsers):
         help="Device to use ('cuda', 'cpu').",
     )
     p.set_defaults(func=precompute_analytics_command)
+"""
 
 
+# COMMENTED OUT - OLD COMMAND
+"""
 def setup_streaming_consolidate_parser(subparsers):
     p = subparsers.add_parser(
         "streaming-consolidate",
@@ -733,6 +859,7 @@ def setup_streaming_consolidate_parser(subparsers):
         "--max-features", type=int, default=None
     )
     p.set_defaults(func=streaming_consolidate_command)
+"""
 
 
 def main():
@@ -747,20 +874,21 @@ def main():
 
     setup_run_parser(subparsers)
     setup_generate_activations_parser(subparsers)
-    setup_extract_top_examples_parser(subparsers)
-    setup_compute_correlations_parser(subparsers)
-    setup_consolidate_activations_parser(subparsers)
-    setup_precompute_analytics_parser(subparsers)
-    setup_streaming_consolidate_parser(subparsers)
-    setup_consolidate_to_db_parser(
-        subparsers
-    )  # Existing command for precomputed analytics
-    register_ingest_binned_samples_parser(
-        subparsers
-    )  # New command for binned samples CSV
-    setup_minimize_examples_parser(
-        subparsers
-    )  # New command for minimizing examples
+
+    # Commands that need fixing/removal:
+    # setup_extract_top_examples_parser(subparsers)
+    # setup_compute_correlations_parser(subparsers)
+    # setup_consolidate_activations_parser(subparsers)
+    # setup_precompute_analytics_parser(subparsers)
+    # setup_streaming_consolidate_parser(subparsers)
+    # setup_consolidate_to_db_parser(subparsers)
+    # register_ingest_binned_samples_parser(subparsers)
+    # setup_minimize_examples_parser(subparsers)
+
+    # Add new efficient commands
+    setup_convert_to_efficient_parser(subparsers)
+    setup_create_examples_storage_parser(subparsers)
+    setup_analyze_activations_parser(subparsers)
 
     args = parser.parse_args()
 
@@ -781,6 +909,124 @@ def main():
         sys.exit(1)
 
 
+def setup_convert_to_efficient_parser(subparsers):
+    """Setup parser for converting joblib to efficient format."""
+    parser = subparsers.add_parser(
+        "convert-to-efficient",
+        help="Convert joblib batches to efficient Parquet/Zarr format",
+    )
+
+    parser.add_argument(
+        "--source-dir",
+        type=str,
+        required=True,
+        help="Directory containing joblib batch files",
+    )
+    parser.add_argument(
+        "--target-dir",
+        type=str,
+        required=True,
+        help="Output directory for converted files",
+    )
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=1000,
+        help="Zarr chunk size for row dimension",
+    )
+    parser.add_argument(
+        "--compression",
+        type=str,
+        default="zstd",
+        choices=["zstd", "lz4", "gzip", "blosc", "none"],
+        help="Compression algorithm",
+    )
+    parser.add_argument(
+        "--compression-level",
+        type=int,
+        default=3,
+        help="Compression level (1-9)",
+    )
+
+    parser.set_defaults(func=convert_to_efficient_command)
+
+
+def setup_create_examples_storage_parser(subparsers):
+    """Setup parser for creating optimized example storage."""
+    parser = subparsers.add_parser(
+        "create-examples",
+        help="Create optimized example storage for dashboard",
+    )
+
+    parser.add_argument(
+        "--data-dir",
+        type=str,
+        required=True,
+        help="Directory with Parquet/Zarr converted data",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        required=True,
+        help="Output directory for example storage",
+    )
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=100,
+        help="Number of top examples to store per feature",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.1,
+        help="Minimum activation threshold",
+    )
+    parser.add_argument(
+        "--n-features",
+        type=int,
+        default=24576,
+        help="Number of features to process",
+    )
+
+    parser.set_defaults(func=create_examples_storage_command)
+
+
+def setup_analyze_activations_parser(subparsers):
+    """Setup parser for analyzing activations."""
+    parser = subparsers.add_parser(
+        "analyze",
+        help="Analyze activations using efficient storage",
+    )
+
+    parser.add_argument(
+        "--data-dir",
+        type=str,
+        default="/mnt/e/activations_ultra_efficient",
+        help="Directory with converted data",
+    )
+    parser.add_argument(
+        "--feature-id",
+        type=int,
+        help="Specific feature to analyze",
+    )
+    parser.add_argument(
+        "--weapon-id",
+        type=int,
+        help="Analyze patterns for specific weapon",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=100,
+        help="Limit for number of examples",
+    )
+
+    parser.set_defaults(func=analyze_activations_command)
+
+
+# COMMENTED OUT - OLD COMMAND
+"""
 def setup_consolidate_to_db_parser(subparsers):
     p = subparsers.add_parser(
         "consolidate-to-db",
@@ -803,6 +1049,7 @@ def setup_consolidate_to_db_parser(subparsers):
         help="Path to .joblib file with consolidated precomputed analytics (e.g., output of precompute-analytics). This file is expected to contain feature statistics, top examples, and logit influences.",
     )
     p.set_defaults(func=consolidate_to_db_command)
+"""
 
 
 # Note: register_ingest_binned_samples_parser is defined in ingest_binned_samples_cmd.py

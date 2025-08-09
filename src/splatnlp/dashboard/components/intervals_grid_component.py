@@ -636,7 +636,16 @@ class IntervalsGridRenderer:
             self._cache = None
             return
 
-        activations_df = self.db.get_feature_activations(feature_id)
+        # Limit activations for performance with large datasets
+        # For efficient database, only load top examples to avoid performance issues
+        max_activations = (
+            1000
+            if self.db.__class__.__name__ == "EfficientFSDatabase"
+            else None
+        )
+        activations_df = self.db.get_feature_activations(
+            feature_id, limit=max_activations
+        )
         if activations_df.is_empty():
             self._cache = None
             return

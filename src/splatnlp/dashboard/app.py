@@ -23,6 +23,7 @@ from splatnlp.dashboard.components.feature_labels import (
     create_feature_label_editor,
     create_labeling_statistics,
 )
+from splatnlp.dashboard.efficient_fs_database import EfficientFSDatabase
 from splatnlp.dashboard.fs_database import FSDatabase
 
 # THIS IS WHERE THE GLOBAL CONTEXT WILL BE STORED
@@ -47,6 +48,28 @@ def init_filesystem_database(
     DASHBOARD_CONTEXT.analysis_df = DASHBOARD_CONTEXT.db.analysis_df
     DASHBOARD_CONTEXT.metadata = DASHBOARD_CONTEXT.db.metadata
     DASHBOARD_CONTEXT.pad_token_id = DASHBOARD_CONTEXT.vocab["<PAD>"]
+
+
+def init_efficient_database(
+    data_dir: str = "/mnt/e/activations_ultra_efficient",
+    examples_dir: str = "/mnt/e/dashboard_examples_optimized",
+) -> None:
+    """Initialize the efficient database using optimized storage.
+
+    Args:
+        data_dir: Path to the Parquet/Zarr converted data
+        examples_dir: Path to the optimized examples storage
+    """
+    DASHBOARD_CONTEXT.db = EfficientFSDatabase(data_dir, examples_dir)
+    DASHBOARD_CONTEXT.feature_ids = DASHBOARD_CONTEXT.db.get_all_feature_ids()
+
+    # For compatibility with existing code
+    DASHBOARD_CONTEXT.analysis_df = None  # Not used in efficient version
+    DASHBOARD_CONTEXT.metadata = DASHBOARD_CONTEXT.db.metadata
+    if hasattr(DASHBOARD_CONTEXT, "vocab") and DASHBOARD_CONTEXT.vocab:
+        DASHBOARD_CONTEXT.pad_token_id = DASHBOARD_CONTEXT.vocab.get(
+            "<PAD>", 139
+        )
 
 
 app = dash.Dash(

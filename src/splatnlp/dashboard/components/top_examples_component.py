@@ -106,7 +106,7 @@ def update_top_examples_grid(selected_feature_id):
     for i, example in enumerate(top_examples.to_dicts(), 1):
         # Get weapon name from weapon_id
         weapon_name = weapon_name_mapping.get(
-            int(example.get("weapon_id")),
+            int(example.get("weapon_id", 0)),
             f"Weapon_{example.get('weapon_id', 'unknown')}",
         )
 

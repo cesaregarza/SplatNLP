@@ -248,6 +248,8 @@ def reconstruct_build(
     # 1) Convert initial_context into an initial set of capstones
     initial_capstones: dict[str, AbilityToken] = {}
     for tok in initial_context:
+        if tok == "<NULL>":
+            continue
         cap = AbilityToken.from_vocab_entry(tok)
         initial_capstones[tok] = cap
 
