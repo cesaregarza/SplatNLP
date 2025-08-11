@@ -1,35 +1,33 @@
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional, Union
 
 import dash
 import dash_bootstrap_components as dbc
-from dash import Input, Output, State, callback_context, dcc, html
+from dash import (
+    ALL,
+    MATCH,
+    Input,
+    Output,
+    State,
+    callback_context,
+    dcc,
+    html,
+    no_update,
+)
 
-# Import components
-from splatnlp.dashboard.components import (
-    ablation_component,
-    activation_hist_component,
-    correlations_component,
-    feature_influence_component,
-    feature_selector_layout,
-    feature_summary_component,
-    intervals_grid_component,
-    token_analysis,
-    top_examples_component,
-    top_logits_component,
-)
-from splatnlp.dashboard.components.feature_labels import (
-    FeatureLabelsManager,
-    create_feature_label_editor,
-    create_labeling_statistics,
-)
-from splatnlp.dashboard.efficient_fs_database import EfficientFSDatabase
-from splatnlp.dashboard.fs_database import FSDatabase
+# Set up logging
+logger = logging.getLogger(__name__)
+logger.info("=== Starting app.py initialization ===")
 
 # THIS IS WHERE THE GLOBAL CONTEXT WILL BE STORED
 # It will be populated by the script that runs the dashboard (e.g., cli.py or run_dashboard.py)
 DASHBOARD_CONTEXT = SimpleNamespace()  # Initialize as a SimpleNamespace
+logger.info("DASHBOARD_CONTEXT created as SimpleNamespace")
+
+from splatnlp.dashboard.efficient_fs_database import EfficientFSDatabase
+from splatnlp.dashboard.fs_database import FSDatabase
 
 
 def init_filesystem_database(
@@ -81,10 +79,34 @@ def init_efficient_database(
         DASHBOARD_CONTEXT.influence_data = DASHBOARD_CONTEXT.db.influence_data
 
 
+# Create the app
+logger.info("Creating Dash app...")
 app = dash.Dash(
     __name__,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
     suppress_callback_exceptions=True,
+)
+logger.info("Dash app created successfully")
+
+# Import components AFTER app creation so callbacks can register properly
+logger.info("Importing dashboard components...")
+from splatnlp.dashboard.components import (
+    ablation_component,
+    activation_hist_component,
+    correlations_component,
+    example_features_component,
+    feature_influence_component,
+    feature_selector_layout,
+    feature_summary_component,
+    intervals_grid_component,
+    token_analysis,
+    top_examples_component,
+    top_logits_component,
+)
+from splatnlp.dashboard.components.feature_labels import (
+    FeatureLabelsManager,
+    create_feature_label_editor,
+    create_labeling_statistics,
 )
 
 # Placeholder for feature label editor - will be populated dynamically
@@ -132,6 +154,11 @@ app.layout = dbc.Container(
                                     children=intervals_grid_component,
                                 ),
                                 dbc.Tab(
+                                    label="Co-Activation Analysis",
+                                    tab_id="tab-example-features",
+                                    children=example_features_component,
+                                ),
+                                dbc.Tab(
                                     label="Top Logits & Correlations",
                                     tab_id="tab-logits",
                                     children=[
@@ -166,120 +193,253 @@ app.layout = dbc.Container(
 )
 
 
+# Register callbacks for the example features component
+@app.callback(
+    [
+        Output("example-cards-container", "children"),
+        Output("example-indices-store", "data"),
+        Output("example-features-error", "children"),
+    ],
+    [Input("feature-dropdown", "value")],
+)
+def update_example_cards(selected_feature_id):
+    """Load top examples for the selected feature and create cards."""
+    logger.info(
+        f"update_example_cards called with feature_id={selected_feature_id}"
+    )
+    logger.info(f"DASHBOARD_CONTEXT has db: {hasattr(DASHBOARD_CONTEXT, 'db')}")
+    if hasattr(DASHBOARD_CONTEXT, "db"):
+        logger.info(f"DASHBOARD_CONTEXT.db type: {type(DASHBOARD_CONTEXT.db)}")
+
+    try:
+        from splatnlp.dashboard.components.example_features_component import (
+            update_example_cards as impl,
+        )
+
+        result = impl(selected_feature_id)
+        logger.info(
+            f"update_example_cards returning: {result[2] if len(result) > 2 else 'success'}"
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error in update_example_cards: {e}", exc_info=True)
+        return [], {}, f"Error: {str(e)}"
+
+
+# New callback for co-activation analysis
+@app.callback(
+    [
+        Output("coactivation-analysis-container", "children"),
+        Output("example-features-map", "data"),
+    ],
+    [Input("analyze-coactivations-btn", "n_clicks")],
+    [State("example-indices-store", "data")],
+    prevent_initial_call=True,
+)
+def analyze_coactivations(n_clicks, example_indices_data):
+    """Analyze co-activating features for all examples."""
+    logger.info(f"analyze_coactivations called with n_clicks={n_clicks}")
+    from splatnlp.dashboard.components.example_features_component import (
+        analyze_coactivations as impl,
+    )
+
+    return impl(n_clicks, example_indices_data)
+
+
+# DISABLED - Pattern matching callbacks cause issues with dashboard loading
+# # Callback for highlighting examples when a feature is clicked
+# @app.callback(
+#     [
+#         Output("example-cards-container", "children"),
+#         Output("highlighted-feature", "data"),
+#     ],
+#     [Input({"type": "highlight-feature-btn", "index": ALL}, "n_clicks")],
+#     [
+#         State("example-indices-store", "data"),
+#         State("example-features-map", "data"),
+#         State("highlighted-feature", "data"),
+#     ],
+#     prevent_initial_call=True,
+# )
+# def highlight_examples_with_feature(n_clicks_list, example_data, features_map, current_highlighted):
+#     """Highlight examples that have the selected co-activating feature."""
+#     import dash
+#     from splatnlp.dashboard.components.example_features_component import update_example_cards_with_highlights
+#
+#     ctx = dash.callback_context
+#     if not ctx.triggered or not any(n_clicks_list):
+#         return dash.no_update, dash.no_update
+#
+#     # Get the feature ID that was clicked
+#     prop_id = ctx.triggered[0]["prop_id"]
+#     feature_id = json.loads(prop_id.split(".")[0])["index"]
+#
+#     # Toggle highlight if clicking the same feature
+#     if current_highlighted == feature_id:
+#         feature_id = None
+#
+#     return update_example_cards_with_highlights(example_data, features_map, feature_id)
+
+# DISABLED AGAIN - Pattern matching still causing issues
+# @app.callback(
+#     Output("feature-dropdown", "value"),
+#     [Input({"type": "feature-link", "feature": ALL}, "n_clicks")],
+#     prevent_initial_call=True,
+# )
+# def navigate_to_feature(n_clicks_list):
+#     """Navigate to a different feature when clicked."""
+#     try:
+#         from splatnlp.dashboard.components.example_features_component import navigate_to_feature as impl
+#         return impl(n_clicks_list)
+#     except Exception as e:
+#         logger.error(f"Error in navigate_to_feature: {e}")
+#         return no_update
+
+
 # This callback is to set the page-load-trigger once DASHBOARD_CONTEXT is potentially available.
 # It's triggered by the dcc.Location component after the initial layout is rendered.
 # The assumption is that the script running the Dash app (e.g., cli.py) will have set
 # DASHBOARD_CONTEXT *before* app.run_server() is called.
 @app.callback(Output("page-load-trigger", "data"), Input("url", "pathname"))
-def trigger_page_load(_pathname: Optional[str]) -> str:
-    # This callback's main purpose is to signal that the initial app setup phase
-    # (where context might be loaded externally by the script starting the server)
-    # should be complete. The value returned (timestamp) is a simple way to trigger
-    # other callbacks that depend on "page-load-trigger".
+def trigger_page_load(pathname):
+    """
+    This callback fires when the page loads (or when the URL changes).
+    It serves as a trigger for other callbacks that depend on DASHBOARD_CONTEXT.
+    """
     import time
 
-    return time.time()
+    logger.info(f"trigger_page_load called with pathname={pathname}")
+    logger.info(
+        f"DASHBOARD_CONTEXT attributes: {list(vars(DASHBOARD_CONTEXT).keys())}"
+    )
+    timestamp = time.time()
+    logger.info(f"Returning timestamp: {timestamp}")
+    return timestamp
 
 
-# Feature label editor callbacks
+# Feature Label Callbacks
 @app.callback(
     Output("feature-label-editor-container", "children"),
     Input("feature-dropdown", "value"),
-    prevent_initial_call=True,
 )
-def update_feature_label_editor(feature_id):
-    """Update feature label editor when selection changes."""
-    if feature_id is None or feature_id == -1:
-        return html.Div("Select a feature to label", className="text-muted")
+def update_feature_label_editor(selected_feature_id):
+    """Update the feature label editor when a new feature is selected."""
+    logger.info(
+        f"update_feature_label_editor called with feature_id={selected_feature_id}"
+    )
+    logger.info(
+        f"DASHBOARD_CONTEXT has feature_labels_manager: {hasattr(DASHBOARD_CONTEXT, 'feature_labels_manager')}"
+    )
 
-    if (
-        hasattr(DASHBOARD_CONTEXT, "feature_labels_manager")
-        and DASHBOARD_CONTEXT.feature_labels_manager
-    ):
-        return create_feature_label_editor(
-            feature_id, DASHBOARD_CONTEXT.feature_labels_manager
+    if not hasattr(DASHBOARD_CONTEXT, "feature_labels_manager"):
+        logger.warning("Feature labels manager not initialized")
+        return html.Div(
+            "Feature labels not initialized", className="text-muted"
         )
-    return html.Div("Feature labeling not available", className="text-warning")
+
+    if selected_feature_id is None:
+        logger.info("No feature selected")
+        return html.Div(
+            "Select a feature to edit labels", className="text-muted"
+        )
+
+    logger.info(f"Creating label editor for feature {selected_feature_id}")
+    return create_feature_label_editor(
+        selected_feature_id, DASHBOARD_CONTEXT.feature_labels_manager
+    )
 
 
 @app.callback(
-    Output("feature-labels-feedback", "children"),
-    Output("feature-labels-updated", "data"),
-    Output("labeling-statistics-container", "children"),
-    Input("save-feature-labels-btn", "n_clicks"),
-    Input("clear-feature-labels-btn", "n_clicks"),
-    State("feature-dropdown", "value"),
-    State("feature-name-input", "value"),
-    State("feature-category-radio", "value"),
-    State("feature-notes-textarea", "value"),
-    State("feature-labels-updated", "data"),
-    prevent_initial_call=True,
+    [
+        Output("feature-labels-feedback", "children"),
+        Output("feature-labels-updated", "data"),
+        Output("labeling-statistics-container", "children"),
+    ],
+    [
+        Input("save-label-btn", "n_clicks"),
+        Input("delete-label-btn", "n_clicks"),
+    ],
+    [
+        State("feature-dropdown", "value"),
+        State("feature-label-input", "value"),
+        State("feature-confidence-dropdown", "value"),
+        State("feature-labels-updated", "data"),
+    ],
 )
-def save_feature_labels(
+def handle_label_actions(
     save_clicks,
-    clear_clicks,
+    delete_clicks,
     feature_id,
-    name,
-    category,
-    notes,
-    current_counter,
+    label_text,
+    confidence,
+    update_counter,
 ):
-    """Save or clear feature labels."""
-    ctx = dash.callback_context
-    if not ctx.triggered:
-        return "", current_counter or 0, dash.no_update
+    """Handle save and delete actions for feature labels."""
+    from dash import callback_context
 
-    button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+    if not callback_context.triggered:
+        # Initial load - just show statistics
+        if hasattr(DASHBOARD_CONTEXT, "feature_labels_manager"):
+            stats = create_labeling_statistics(
+                DASHBOARD_CONTEXT.feature_labels_manager
+            )
+            return "", update_counter, stats
+        return "", update_counter, html.Div()
 
-    if feature_id is None or feature_id == -1:
+    if not hasattr(DASHBOARD_CONTEXT, "feature_labels_manager"):
         return (
-            "Please select a feature first.",
-            current_counter or 0,
-            dash.no_update,
+            html.Div("Feature labels not initialized", className="text-danger"),
+            update_counter,
+            html.Div(),
         )
 
-    if (
-        hasattr(DASHBOARD_CONTEXT, "feature_labels_manager")
-        and DASHBOARD_CONTEXT.feature_labels_manager
-    ):
-        if button_id == "save-feature-labels-btn":
-            # Save labels
-            DASHBOARD_CONTEXT.feature_labels_manager.update_label(
-                feature_id,
-                name=name or "",
-                category=category or "none",
-                notes=notes or "",
-            )
-            new_counter = (current_counter or 0) + 1
-            stats_component = create_labeling_statistics(
-                DASHBOARD_CONTEXT.feature_labels_manager
-            )
-            return (
-                f"✓ Saved labels for Feature {feature_id}",
-                new_counter,
-                stats_component,
-            )
+    button_id = callback_context.triggered[0]["prop_id"].split(".")[0]
+    manager = DASHBOARD_CONTEXT.feature_labels_manager
 
-        elif button_id == "clear-feature-labels-btn":
-            # Clear labels
-            DASHBOARD_CONTEXT.feature_labels_manager.update_label(
-                feature_id, name="", category="none", notes=""
-            )
-            new_counter = (current_counter or 0) + 1
-            stats_component = create_labeling_statistics(
-                DASHBOARD_CONTEXT.feature_labels_manager
-            )
+    if button_id == "save-label-btn" and feature_id is not None:
+        if label_text:
+            success = manager.set_label(feature_id, label_text, confidence)
+            if success:
+                # Update statistics
+                stats = create_labeling_statistics(manager)
+                return (
+                    html.Div(
+                        f"✓ Label saved for feature {feature_id}",
+                        className="text-success",
+                    ),
+                    update_counter + 1,
+                    stats,
+                )
             return (
-                f"✓ Cleared labels for Feature {feature_id}",
-                new_counter,
-                stats_component,
+                html.Div("Failed to save label", className="text-danger"),
+                update_counter,
+                create_labeling_statistics(manager),
             )
+        return (
+            html.Div("Please enter a label", className="text-warning"),
+            update_counter,
+            create_labeling_statistics(manager),
+        )
 
-    return (
-        "Feature labeling not available",
-        current_counter or 0,
-        dash.no_update,
-    )
+    elif button_id == "delete-label-btn" and feature_id is not None:
+        success = manager.delete_label(feature_id)
+        if success:
+            stats = create_labeling_statistics(manager)
+            return (
+                html.Div(
+                    f"✓ Label deleted for feature {feature_id}",
+                    className="text-success",
+                ),
+                update_counter + 1,
+                stats,
+            )
+        return (
+            html.Div("No label to delete", className="text-info"),
+            update_counter,
+            create_labeling_statistics(manager),
+        )
+
+    return "", update_counter, create_labeling_statistics(manager)
 
 
 # Add callbacks for new token analysis components
@@ -287,7 +447,7 @@ def save_feature_labels(
     Output("single-token-examples", "children"),
     Input("feature-dropdown", "value"),
 )
-def update_single_token_examples(feature_id: Optional[int]):
+def update_single_token_examples(feature_id):
     """Update single token examples when feature selection changes."""
     if feature_id is None:
         return "Select a feature to see single token examples."
@@ -313,7 +473,7 @@ def update_single_token_examples(feature_id: Optional[int]):
     Output("token-pair-examples", "children"),
     Input("feature-dropdown", "value"),
 )
-def update_token_pair_examples(feature_id: Optional[int]):
+def update_token_pair_examples(feature_id):
     """Update token pair examples when feature selection changes."""
     if feature_id is None:
         return "Select a feature to see token pair examples."
@@ -339,7 +499,7 @@ def update_token_pair_examples(feature_id: Optional[int]):
     Output("token-triple-examples", "children"),
     Input("feature-dropdown", "value"),
 )
-def update_token_triple_examples(feature_id: Optional[int]):
+def update_token_triple_examples(feature_id):
     """Update token triple examples when feature selection changes."""
     if feature_id is None:
         return "Select a feature to see token triple examples."
@@ -361,11 +521,6 @@ def update_token_triple_examples(feature_id: Optional[int]):
     )
 
 
-if __name__ == "__main__":
-    # This section is for development testing of the app structure.
-    # The actual data loading and context setting will happen in the main script.
-    print("Running in development mode. DASHBOARD_CONTEXT will be None.")
-    print(
-        "Functionality requiring DASHBOARD_CONTEXT (like feature list) might not work as expected."
-    )
-    app.run_server(debug=True)
+logger.info(f"=== app.py initialization complete ===")
+logger.info(f"Total callbacks registered: {len(app.callback_map)}")
+logger.info(f"App ready to run")

@@ -9,7 +9,7 @@ import json
 import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import orjson
@@ -544,6 +544,179 @@ class EfficientFSDatabase:
         return triple_df.to_pandas()
 
     # ----- Additional methods for enhanced functionality -------------------
+
+    def get_example_activations_by_batch(
+        self, batch_id: int, sample_id: int, top_k: int = 20
+    ) -> List[Tuple[int, float]]:
+        """Get top-k activating features for a specific example using batch/sample IDs.
+
+        Args:
+            batch_id: The batch ID
+            sample_id: The sample ID within the batch
+            top_k: Number of top features to return
+
+        Returns:
+            List of (feature_id, activation_value) tuples sorted by activation
+        """
+        try:
+            logger.debug(
+                f"[get_example_activations_by_batch] batch_id={batch_id}, sample_id={sample_id}"
+            )
+
+            # Load the batch's zarr file
+            zarr_path = (
+                self.data_dir / "activations" / f"batch_{batch_id:04d}.zarr"
+            )
+
+            if not zarr_path.exists():
+                logger.warning(f"Zarr file not found: {zarr_path}")
+                return []
+
+            # Open the zarr array for this batch
+            z = zarr.open(str(zarr_path), mode="r")
+
+            # Get the row for this example within the batch
+            example_activations = z[sample_id, :]
+
+            # Find non-zero activations
+            non_zero_indices = np.nonzero(example_activations)[0]
+
+            if len(non_zero_indices) == 0:
+                return []
+
+            # Get activation values for non-zero features
+            activations = [
+                (int(idx), float(example_activations[idx]))
+                for idx in non_zero_indices
+            ]
+
+            # Sort by activation value and take top-k
+            activations.sort(key=lambda x: x[1], reverse=True)
+
+            return activations[:top_k]
+
+        except Exception as e:
+            logger.error(
+                f"Error getting example activations by batch: {e}",
+                exc_info=True,
+            )
+            logger.error(f"  Batch ID: {batch_id}")
+            logger.error(f"  Sample ID: {sample_id}")
+            return []
+
+    def get_example_activations(
+        self, example_idx: int, top_k: int = 20
+    ) -> List[Tuple[int, float]]:
+        """Get top-k activating features for a specific example.
+
+        Args:
+            example_idx: The global example index to query
+            top_k: Number of top features to return
+
+        Returns:
+            List of (feature_id, activation_value) tuples sorted by activation
+        """
+        try:
+            # The example_idx is a global index, we need to find which batch and offset
+            batch_size = self.metadata.get("batch_size", 5000)
+
+            # First try the simple approach (if indices are sequential)
+            batch_idx = example_idx // batch_size
+            example_offset = example_idx % batch_size
+
+            logger.debug(
+                f"[get_example_activations] global_idx={example_idx}, trying batch_idx={batch_idx}, offset={example_offset}"
+            )
+
+            # Load the batch's zarr file
+            zarr_path = (
+                self.data_dir / "activations" / f"batch_{batch_idx:04d}.zarr"
+            )
+
+            if not zarr_path.exists():
+                logger.warning(f"Zarr file not found: {zarr_path}")
+                # Try to find the correct batch by searching metadata
+                for try_batch in range(self.metadata.get("n_batches", 0)):
+                    meta_path = (
+                        self.data_dir
+                        / "metadata"
+                        / f"batch_{try_batch:04d}.parquet"
+                    )
+                    if meta_path.exists():
+                        meta_df = pl.read_parquet(meta_path)
+                        if (
+                            len(
+                                meta_df.filter(
+                                    pl.col("global_index") == example_idx
+                                )
+                            )
+                            > 0
+                        ):
+                            batch_idx = try_batch
+                            # Get the actual sample_id within this batch
+                            row = meta_df.filter(
+                                pl.col("global_index") == example_idx
+                            )[0]
+                            example_offset = row["sample_id"].item()
+                            logger.info(
+                                f"Found example in batch {batch_idx} at offset {example_offset}"
+                            )
+                            zarr_path = (
+                                self.data_dir
+                                / "activations"
+                                / f"batch_{batch_idx:04d}.zarr"
+                            )
+                            break
+                else:
+                    logger.error(
+                        f"Could not find example {example_idx} in any batch"
+                    )
+                    return []
+
+            if not zarr_path.exists():
+                logger.error(
+                    f"Zarr file still not found after search: {zarr_path}"
+                )
+                return []
+
+            # Open the zarr array for this batch
+            z = zarr.open(str(zarr_path), mode="r")
+
+            # Get the row for this example within the batch
+            example_activations = z[example_offset, :]
+
+            # Find non-zero activations
+            non_zero_indices = np.nonzero(example_activations)[0]
+
+            if len(non_zero_indices) == 0:
+                return []
+
+            # Get activation values for non-zero features
+            activations = [
+                (int(idx), float(example_activations[idx]))
+                for idx in non_zero_indices
+            ]
+
+            # Sort by activation value and take top-k
+            activations.sort(key=lambda x: x[1], reverse=True)
+
+            return activations[:top_k]
+
+        except Exception as e:
+            logger.error(
+                f"Error getting example activations: {e}", exc_info=True
+            )
+            logger.error(f"  Example index: {example_idx}")
+            logger.error(
+                f"  Batch: {batch_idx if 'batch_idx' in locals() else 'unknown'}"
+            )
+            logger.error(
+                f"  Batch size: {batch_size if 'batch_size' in locals() else 'unknown'}"
+            )
+            logger.error(
+                f"  Example offset: {example_offset if 'example_offset' in locals() else 'unknown'}"
+            )
+            return []
 
     def search_features_by_weapon(
         self, weapon_id: int, limit: int = 10
