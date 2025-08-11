@@ -28,11 +28,11 @@ logger = logging.getLogger(__name__)
 
 # Constants
 MAX_TFIDF_FEATURES = 10
-MAX_SAMPLES_PER_BIN = 14
+MAX_SAMPLES_PER_BIN = 20  # Increased from 14 to show more examples
 TOP_WEAPONS_COUNT = 5
 TOP_BINS_FOR_ANALYSIS = 8
 CARD_WIDTH = "250px"
-CARD_HEIGHT = "180px"
+CARD_HEIGHT = "220px"
 
 
 @dataclass
@@ -92,6 +92,12 @@ class TFIDFAnalyzer:
         selected_feature_id: int,
     ) -> TFIDFAnalysis | None:
         """Perform TF-IDF analysis on the top activations."""
+        # If IDF is empty, compute it from the current activations
+        if self.idf.is_empty() or len(self.idf) == 0:
+            from splatnlp.dashboard.utils.tfidf import compute_idf
+
+            self.idf = compute_idf(activations_df)
+
         # Compute TF-IDF once
         tf_idf = compute_tf_idf(self.idf, activations_df)
 
@@ -314,9 +320,9 @@ class UIComponentBuilder:
                         ability_display,
                         className="flex-grow-1 overflow-auto mb-2",
                         style={
-                            "fontSize": "0.9rem",
-                            "maxHeight": "calc(100% - 3rem)",
-                        },  # Reserve space for title and activation
+                            "fontSize": "0.8rem",
+                            "maxHeight": "calc(100% - 5rem)",
+                        },  # Reserve space for title, activation and button
                     ),
                     html.P(
                         f"Activation: {activation_val:.4f}",
@@ -637,9 +643,9 @@ class IntervalsGridRenderer:
             return
 
         # Limit activations for performance with large datasets
-        # For efficient database, only load top examples to avoid performance issues
+        # For efficient database, load more examples but still limit for performance
         max_activations = (
-            1000
+            5000  # Increased from 1000 to get better sampling
             if self.db.__class__.__name__ == "EfficientFSDatabase"
             else None
         )

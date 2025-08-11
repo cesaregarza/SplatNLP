@@ -5,6 +5,9 @@ from splatnlp.dashboard.components.activation_hist import (
 from splatnlp.dashboard.components.correlations_component import (
     correlations_component,
 )
+from splatnlp.dashboard.components.feature_influence import (
+    feature_influence_component,
+)
 from splatnlp.dashboard.components.feature_selector import (
     feature_selector_layout,
 )
@@ -25,6 +28,7 @@ __all__ = [
     "activation_hist_component",
     "feature_selector_layout",
     "feature_summary_component",
+    "feature_influence_component",
     "top_logits_component",
     "top_examples_component",
     "intervals_grid_component",

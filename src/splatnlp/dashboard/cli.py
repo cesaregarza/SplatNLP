@@ -91,10 +91,33 @@ def load_dashboard_data(args_ns: argparse.Namespace):
                 f"Initializing filesystem database with meta_path={args_ns.meta_path} and neurons_root={args_ns.neurons_root}"
             )
             try:
-                from splatnlp.dashboard.fs_database import FSDatabase
+                # Check if we should use cached database with precomputed data
+                if hasattr(args_ns, "use_cached_db") and args_ns.use_cached_db:
+                    from splatnlp.dashboard.cached_fs_database import (
+                        CachedFSDatabase,
+                    )
 
-                db_context = FSDatabase(args_ns.meta_path, args_ns.neurons_root)
-                logger.info("Filesystem database initialized successfully")
+                    precomputed_dir = getattr(args_ns, "precomputed_dir", None)
+                    influence_data_path = getattr(
+                        args_ns, "influence_data_path", None
+                    )
+
+                    db_context = CachedFSDatabase(
+                        args_ns.meta_path,
+                        args_ns.neurons_root,
+                        precomputed_dir=precomputed_dir,
+                        influence_data_path=influence_data_path,
+                    )
+                    logger.info(
+                        "Cached filesystem database initialized with precomputed data"
+                    )
+                else:
+                    from splatnlp.dashboard.fs_database import FSDatabase
+
+                    db_context = FSDatabase(
+                        args_ns.meta_path, args_ns.neurons_root
+                    )
+                    logger.info("Filesystem database initialized successfully")
             except Exception as e:
                 logger.critical(
                     f"Failed to initialize filesystem database: {e}",
@@ -109,14 +132,35 @@ def load_dashboard_data(args_ns: argparse.Namespace):
                 f"Initializing efficient database with data_dir={args_ns.data_dir} and examples_dir={args_ns.examples_dir}"
             )
             try:
-                from splatnlp.dashboard.efficient_fs_database import (
-                    EfficientFSDatabase,
+                # Check if we should use cached efficient database with influence data
+                influence_data_path = getattr(
+                    args_ns, "influence_data_path", None
                 )
+                precomputed_dir = getattr(args_ns, "precomputed_dir", None)
 
-                db_context = EfficientFSDatabase(
-                    args_ns.data_dir, args_ns.examples_dir
-                )
-                logger.info("Efficient database initialized successfully")
+                if influence_data_path or precomputed_dir:
+                    from splatnlp.dashboard.cached_efficient_database import (
+                        CachedEfficientDatabase,
+                    )
+
+                    db_context = CachedEfficientDatabase(
+                        args_ns.data_dir,
+                        args_ns.examples_dir,
+                        influence_data_path=influence_data_path,
+                        precomputed_dir=precomputed_dir,
+                    )
+                    logger.info(
+                        "Cached efficient database initialized with precomputed data"
+                    )
+                else:
+                    from splatnlp.dashboard.efficient_fs_database import (
+                        EfficientFSDatabase,
+                    )
+
+                    db_context = EfficientFSDatabase(
+                        args_ns.data_dir, args_ns.examples_dir
+                    )
+                    logger.info("Efficient database initialized successfully")
             except Exception as e:
                 logger.critical(
                     f"Failed to initialize efficient database: {e}",
@@ -230,6 +274,22 @@ def setup_run_parser(subparsers):
         "--neurons-root",
         type=str,
         help="Path to root directory containing neuron_XXXX folders (required if --use-filesystem)",
+    )
+    # Cached database options
+    run_parser.add_argument(
+        "--use-cached-db",
+        action="store_true",
+        help="Use cached database with precomputed data for faster startup",
+    )
+    run_parser.add_argument(
+        "--precomputed-dir",
+        type=str,
+        help="Directory containing precomputed histogram and stats data",
+    )
+    run_parser.add_argument(
+        "--influence-data-path",
+        type=str,
+        help="Path to precomputed influence data (CSV or Parquet)",
     )
 
     # Efficient database specific args
@@ -388,11 +448,20 @@ def run_dashboard_server(args):
         None  # For 'run' command, precomputed_analytics is not used.
     )
     app_context_ref.db_context = dashboard_data_obj.db_context
+    app_context_ref.db = (
+        dashboard_data_obj.db_context
+    )  # Also set as 'db' for compatibility
     app_context_ref.feature_labels_manager = (
         dashboard_data_obj.feature_labels_manager
     )
     app_context_ref.device = dashboard_data_obj.device
     app_context_ref.model_type = dashboard_data_obj.model_type
+
+    # Set influence data if available
+    if hasattr(dashboard_data_obj.db_context, "influence_data"):
+        app_context_ref.influence_data = (
+            dashboard_data_obj.db_context.influence_data
+        )
 
     # Initialize database based on type
     if args.use_efficient:

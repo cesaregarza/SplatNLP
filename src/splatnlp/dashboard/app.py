@@ -11,6 +11,7 @@ from splatnlp.dashboard.components import (
     ablation_component,
     activation_hist_component,
     correlations_component,
+    feature_influence_component,
     feature_selector_layout,
     feature_summary_component,
     intervals_grid_component,
@@ -49,6 +50,10 @@ def init_filesystem_database(
     DASHBOARD_CONTEXT.metadata = DASHBOARD_CONTEXT.db.metadata
     DASHBOARD_CONTEXT.pad_token_id = DASHBOARD_CONTEXT.vocab["<PAD>"]
 
+    # Check if we have cached database with influence data
+    if hasattr(DASHBOARD_CONTEXT.db, "influence_data"):
+        DASHBOARD_CONTEXT.influence_data = DASHBOARD_CONTEXT.db.influence_data
+
 
 def init_efficient_database(
     data_dir: str = "/mnt/e/activations_ultra_efficient",
@@ -70,6 +75,10 @@ def init_efficient_database(
         DASHBOARD_CONTEXT.pad_token_id = DASHBOARD_CONTEXT.vocab.get(
             "<PAD>", 139
         )
+
+    # Check if we have cached database with influence data
+    if hasattr(DASHBOARD_CONTEXT.db, "influence_data"):
+        DASHBOARD_CONTEXT.influence_data = DASHBOARD_CONTEXT.db.influence_data
 
 
 app = dash.Dash(
@@ -129,6 +138,11 @@ app.layout = dbc.Container(
                                         top_logits_component,
                                         correlations_component,
                                     ],
+                                ),
+                                dbc.Tab(
+                                    label="Feature Influence",
+                                    tab_id="tab-influence",
+                                    children=feature_influence_component,
                                 ),
                                 dbc.Tab(
                                     label="Token Analysis",
