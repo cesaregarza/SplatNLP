@@ -1,3 +1,12 @@
+"""Beam search utilities for gear build reconstruction.
+
+This module exposes :func:`reconstruct_build`, which incrementally assembles
+"capstone" abilities predicted by a model.  At each step it evaluates
+candidate sets with :class:`Allocator` and keeps the highest scoring legal
+build.  The procedure is described in detail in ``README.md`` in this
+directory.
+"""
+
 import math
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping, Optional, Sequence, overload
