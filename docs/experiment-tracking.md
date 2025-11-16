@@ -6,7 +6,19 @@ The project uses Weights & Biases (WandB) for experiment tracking, with support 
 
 ### Basic Usage
 
-Enable WandB logging with CLI flags:
+WandB is available for both the main SetCompletionModel and the SAE training.
+
+**Main Model Training:**
+```bash
+python -m splatnlp.model.cli \
+    --wandb_log \
+    --wandb_project splatnlp \
+    --wandb_entity your-team \
+    --wandb_run_name "experiment-1" \
+    ...
+```
+
+**SAE Training:**
 ```bash
 python -m splatnlp.monosemantic_sae.cli \
     --wandb-log \
@@ -17,22 +29,41 @@ python -m splatnlp.monosemantic_sae.cli \
 
 ### Initialization
 
+All hyperparameters are automatically logged to the run config:
 ```python
-if args.wandb_log:
-    run_name = os.environ.get("WANDB_RUN_ID", f"local_{generate_id()}")
-    wandb.init(
-        project=args.wandb_project,
-        entity=args.wandb_entity,
-        config=vars(args),
-        name=run_name,
-    )
+wandb.init(
+    project=args.wandb_project,
+    entity=args.wandb_entity,
+    name=args.wandb_run_name,
+    config={
+        "embedding_dim": args.embedding_dim,
+        "hidden_dim": args.hidden_dim,
+        "num_layers": args.num_layers,
+        # ... all other hyperparameters
+    },
+)
 ```
 
-All CLI arguments are automatically logged to the run config. This makes experiment comparison straightforward.
+This makes experiment comparison straightforward since all settings are captured.
 
-### What Gets Tracked
+### Main Model Metrics
 
-**Training Metrics** (logged every N steps):
+**Per-epoch metrics** (logged after each epoch):
+- `train/loss`: BCE loss on training set
+- `train/f1`: F1 score
+- `train/precision`: Precision
+- `train/recall`: Recall
+- `train/hamming`: Hamming distance
+- `val/loss`: Validation BCE loss
+- `val/f1`: Validation F1 score
+- `val/precision`: Validation precision
+- `val/recall`: Validation recall
+- `val/hamming`: Validation hamming distance
+- `lr`: Current learning rate
+
+### SAE Training Metrics
+
+**Per-step metrics:**
 - `train/loss`: Total loss
 - `train/mse_loss`: Reconstruction error
 - `train/l1_loss`: Sparsity penalty

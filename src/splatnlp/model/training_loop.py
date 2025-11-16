@@ -7,6 +7,7 @@ from torch.amp import GradScaler, autocast
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 
+import wandb
 from splatnlp.model.config import TrainingConfig
 from splatnlp.model.utils import (
     create_multi_hot_targets,
@@ -49,6 +50,7 @@ def train_model(
     scaler: GradScaler | None = None,
     metric_update_interval: int = 1,
     ddp: bool = False,
+    wandb_log: bool = False,
 ) -> tuple[dict[str, dict[str, list[float]]], torch.nn.Module]:
     device = torch.device(config.device)
     model.to(device)
@@ -128,6 +130,25 @@ def train_model(
 
         update_metrics_history(metrics_history, "train", train_metrics)
         update_metrics_history(metrics_history, "val", val_metrics)
+
+        # Log metrics to WandB
+        if wandb_log:
+            wandb.log(
+                {
+                    "epoch": epoch + 1,
+                    "train/loss": train_metrics["loss"],
+                    "train/f1": train_metrics["f1"],
+                    "train/precision": train_metrics["precision"],
+                    "train/recall": train_metrics["recall"],
+                    "train/hamming": train_metrics["hamming"],
+                    "val/loss": val_metrics["loss"],
+                    "val/f1": val_metrics["f1"],
+                    "val/precision": val_metrics["precision"],
+                    "val/recall": val_metrics["recall"],
+                    "val/hamming": val_metrics["hamming"],
+                    "lr": optimizer.param_groups[0]["lr"],
+                }
+            )
 
         epoch_time = time.time() - epoch_start_time
         total_time = time.time() - start_time

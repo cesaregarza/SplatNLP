@@ -10,6 +10,7 @@ import torch
 import torch.distributed as dist
 from torch.amp import GradScaler, autocast
 
+import wandb
 from splatnlp.model.config import TrainingConfig
 from splatnlp.model.evaluation import test_model
 from splatnlp.model.models import SetCompletionModel
@@ -204,6 +205,29 @@ def main():
         default=5,
         help="Number of masked instances to generate per set (default: 5)",
     )
+    parser.add_argument(
+        "--wandb_log",
+        action="store_true",
+        help="Enable Weights & Biases logging",
+    )
+    parser.add_argument(
+        "--wandb_project",
+        type=str,
+        default="splatnlp",
+        help="Weights & Biases project name",
+    )
+    parser.add_argument(
+        "--wandb_entity",
+        type=str,
+        default=None,
+        help="Weights & Biases entity (team) name",
+    )
+    parser.add_argument(
+        "--wandb_run_name",
+        type=str,
+        default=None,
+        help="Weights & Biases run name (auto-generated if not specified)",
+    )
 
     args = parser.parse_args()
 
@@ -228,6 +252,34 @@ def main():
             _tqdm.tqdm = lambda *a, **k: a[0]  # no‑op iterator
     else:
         local_rank = 0
+
+    # Initialize WandB if enabled (only on rank 0)
+    if args.wandb_log and local_rank == 0:
+        wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            name=args.wandb_run_name,
+            config={
+                "embedding_dim": args.embedding_dim,
+                "hidden_dim": args.hidden_dim,
+                "num_layers": args.num_layers,
+                "num_heads": args.num_heads,
+                "num_inducing_points": args.num_inducing_points,
+                "use_layer_norm": args.use_layer_norm,
+                "dropout": args.dropout,
+                "learning_rate": args.learning_rate,
+                "weight_decay": args.weight_decay,
+                "num_epochs": args.num_epochs,
+                "batch_size": args.batch_size,
+                "patience": args.patience,
+                "clip_grad_norm": args.clip_grad_norm,
+                "scheduler_factor": args.scheduler_factor,
+                "scheduler_patience": args.scheduler_patience,
+                "use_mixed_precision": args.use_mixed_precision,
+                "num_masks_per_set": args.num_masks_per_set,
+                "fraction": args.fraction,
+            },
+        )
 
     if args.verbose:
         print("Loading data and vocabulary...")
@@ -317,6 +369,7 @@ def main():
         scaler=scaler,
         metric_update_interval=args.metric_update_interval,
         ddp=args.distributed,
+        wandb_log=args.wandb_log and local_rank == 0,
     )
 
     if args.verbose:
@@ -368,6 +421,10 @@ def main():
             orjson.dumps(model_params, f)
 
         print(f"Model, metrics, and parameters saved in {args.output_dir}")
+
+    # Finish WandB run
+    if args.wandb_log and local_rank == 0:
+        wandb.finish()
 
 
 if __name__ == "__main__":
