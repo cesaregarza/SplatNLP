@@ -1,10 +1,10 @@
 # SAE Feature Dashboard
 
-This dashboard provides an interactive, visual interface for exploring and interpreting features learned by a Sparse Autoencoder (SAE) trained on Splatoon ability set data. It is designed to help researchers and developers understand the internal representations of the model, debug feature behavior, and generate insights for further model development.
+An interactive dashboard for exploring features learned by a Sparse Autoencoder (SAE) trained on Splatoon ability set data. Use it to understand the model's internal representations, debug feature behavior, and generate insights.
 
 ## Features
 
-This section details the currently implemented features of the dashboard.
+What's currently implemented:
 
 ### 1. Feature Selector
 - **Dropdown Menu**: Allows selection of a specific SAE feature by its index. The dropdown is dynamically populated based on the loaded SAE model's `hidden_dim`.
@@ -101,8 +101,4 @@ The dashboard provides a simple command-line interface for processing data:
 - [ ] Integrate auto-interpretation scores and human explanations
 - [ ] Add ablation-related scores and visualizations
 - [ ] Further enhancements to interactivity and visual styling
-- [ ] Support for custom datasets and models
-
----
-
-**Contributions and feedback are welcome!** 
+- [ ] Support for custom datasets and models 

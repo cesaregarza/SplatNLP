@@ -1,10 +1,8 @@
 """
 Train a Sparse Auto-Encoder (SAE) on SetCompletionModel activations.
 
-This script is a fusion of two versions, combining the robust engineering
-(DDP-handling, advanced logging, JSON fallbacks) of the original script
-with the enhanced features (token-ff hooking) and more aggressive,
-performance-oriented hyperparameter defaults of a later version.
+Combines DDP handling, logging, and JSON fallbacks from the original script
+with token-ff hooking and updated hyperparameter defaults from a later version.
 """
 
 from __future__ import annotations
@@ -237,7 +235,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def _json_write(path: Path, obj: Any) -> None:
-    """Robustly write object to JSON, trying orjson first then fallback."""
+    """Write object to JSON, trying orjson first then falling back to stdlib."""
     try:
         with open(path, "wb") as f:
             f.write(

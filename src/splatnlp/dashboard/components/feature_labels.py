@@ -1,4 +1,4 @@
-"""Enhanced feature labeling component with categories."""
+"""Feature labeling component with categories."""
 
 import json
 from dataclasses import asdict, dataclass
@@ -41,7 +41,7 @@ class FeatureLabel:
 
 
 class FeatureLabelsManager:
-    """Enhanced feature labeling with categories and metadata."""
+    """Feature labeling with categories and metadata."""
 
     def __init__(self, storage_path: Optional[Path] = None):
         """Initialize the feature labels manager.

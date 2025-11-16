@@ -1,47 +1,47 @@
 # SplatNLP: End-to-End ML Pipeline for Splatoon 3 Gear Set Optimization and Analysis
 
-This repository contains the code for SplatNLP, a project focused on applying machine learning techniques to understand and predict optimal gear loadouts in the complex environment of Nintendo's Splatoon 3.
+This is SplatNLP, a machine learning project for predicting optimal gear loadouts in Splatoon 3.
 
 ## Overview
 
-Optimizing gear loadouts in Splatoon 3 presents a unique challenge due to intricate ability stacking mechanics, weapon-specific synergies, context-dependent effectiveness and noisy real-world data. Traditional ML approaches often struggle with the set-based nature of gear and the complex interactions involved.
+Optimizing gear loadouts in Splatoon 3 is tricky. You've got ability stacking mechanics, weapon-specific synergies, context-dependent effectiveness, and noisy real-world data to deal with. Standard ML approaches don't work well because gear sets are inherently set-based with complex interactions.
 
-This project tackles this challenge through an end-to-end machine learning pipeline. It explores multiple approaches, including representing gear sets using **Doc2Vec embeddings** for analysis and clustering (see the `embeddings` module) and developing the core **`SetCompletionModel` (`SplatGPT`)**, a novel architecture designed specifically for set-based prediction tasks.
+This project tackles the problem with an end-to-end ML pipeline. It includes Doc2Vec embeddings for analysis and clustering (see the `embeddings` module), but the main focus is the **SetCompletionModel** (nicknamed **SplatGPT**), a custom architecture built specifically for set-based prediction tasks.
 
-**Core Model (`SplatGPT`):** The primary model (`SetCompletionModel`) leverages principles from Set Transformers and GPT-2, incorporating unique attention mechanisms to process gear sets effectively while considering weapon context.
+**Core Model (SplatGPT):** The SetCompletionModel combines ideas from Set Transformers and GPT-2, using custom attention mechanisms to process gear sets while accounting for weapon context.
 
-The model is approximately **83 million parameters** in size and is available in two variants:
+The model has about **83 million parameters** and comes in two variants:
 
-- **Full:** Trained on a single H100 GPU for 62 hours, using 5 subset variants per data point (each subset created via randomized masking). This variant is extensively explored and includes a fully-trained monosemantic sparse autoencoder (SAE) with numerous labeled neurons for interpretability.
-- **Ultra:** Trained on four B200 GPUs for 35 hours, utilizing 20 subset variants per data point. Currently undergoing exploration; its monosemantic SAE is actively being trained.
+- **Full:** Trained on a single H100 GPU for 62 hours, using 5 subset variants per data point (each subset created via randomized masking). This variant has been thoroughly explored and includes a fully-trained monosemantic sparse autoencoder (SAE) with labeled neurons for interpretability.
+- **Ultra:** Trained on four B200 GPUs for 35 hours, using 20 subset variants per data point. Still being explored; the monosemantic SAE is being trained.
 
-A Google Colab notebook demonstrating inference and analysis for both variants is coming soon.
+A Google Colab notebook for inference and analysis is coming soon.
 
-**Sparse Autoencoder (SAE):** The SAE is trained on the activations of the primary model to provide a sparse, monosemantic representation of the gear sets. This allows for interpretability and feature analysis of the model's predictions (see the `monosemantic_sae` module). It includes a `SetCompletionHook` that can be used to hook into the primary model and modify the activations during inference for model steering. This is based on Anthropic's work: [Towards Monosemanticity](https://transformer-circuits.pub/2023/monosemantic-features/index.html)
+**Sparse Autoencoder (SAE):** The SAE trains on activations from the primary model to produce sparse, monosemantic representations of gear sets. This makes the model's predictions interpretable and allows for feature analysis (see the `monosemantic_sae` module). It includes a `SetCompletionHook` for hooking into the primary model and modifying activations during inference (model steering). Based on Anthropic's work: [Towards Monosemanticity](https://transformer-circuits.pub/2023/monosemantic-features/index.html)
 
 ---
 
-**Blog Post Deep Dive**
+**Blog Post**
 
-For a comprehensive deep-dive into the problem definition, the novel model architecture (`SplatGPT`), methodology, data processing techniques, results and insights, please read the accompanying blog post:
+For a detailed writeup on the problem definition, model architecture, methodology, data processing, results, and insights, check out the blog post:
 
 [SplatGPT: Set-Based Deep Learning for Splatoon 3 Gear Completion](https://cegarza.com/introducing-splatgpt/)
 
 ---
 ## Key Features
 
-* **End-to-End Pipeline:** Covers data acquisition from stat.ink, sophisticated preprocessing, model training, evaluation, and API serving.
-* **Novel Architecture (`SetCompletionModel`):** Implements a custom model inspired by Set Transformer and GPT-2 principles, featuring attention mechanisms like Induced Set Attention and Pooling Multihead Attention to handle set-based inputs effectively (see `src/splatnlp/model/models.py`).
-* **Model Variants:** Two versions of the `SetCompletionModel` available:
-  - **Full (83M params):** Extensively tested with complete SAE interpretability.
-  - **Ultra (83M params):** Experimental, leveraging significantly more diverse subset variants per data point for richer context, SAE interpretability in progress.
-* **Embedding-Based Analysis:** Provides tools for training Doc2Vec models on gear sets, performing TF-IDF analysis, clustering builds using UMAP and DBSCAN, and visualizing embeddings (`src/splatnlp/embeddings/`).
-* **Advanced Preprocessing:** Includes domain-specific logic for ability bucketing based on Ability Point (AP) thresholds, tokenization, handling game patches, and targeted sampling to bias towards optimal configurations. Uses PyArrow for memory efficiency during partitioning (see `src/splatnlp/preprocessing/`).
-* **Interpretability via Sparse Autoencoders (SAEs):** Incorporates training of SAEs on the *activations* of the primary model for feature analysis and interpretability, following recent research trends (see `src/splatnlp/monosemantic_sae/`).
-* **API Serving:** Provides a FastAPI application (`src/splatnlp/serve/`) to serve the trained `SetCompletionModel` for real-time gear set completion predictions.
-* **Command-Line Tools:** Offers CLIs for orchestrating preprocessing (`src/splatnlp/preprocessing/pipeline.py`), training the main model (`src/splatnlp/model/cli.py`), training SAEs (`src/splatnlp/monosemantic_sae/sae_training/cli.py`), and running embedding experiments (`src/splatnlp/embeddings/cli.py`).
-* **Visualization Utilities:** Contains tools for dimensionality reduction (t-SNE via `embeddings` CLI) and fetching weapon images/abbreviations (`src/splatnlp/viz/`) to support analysis.
-* **Hyperparameter Optimization:** Includes utilities for grid search (`src/splatnlp/model/grid_search.py`).
+* **End-to-End Pipeline:** Data acquisition from stat.ink, preprocessing, model training, evaluation, and API serving.
+* **Custom Architecture (SetCompletionModel):** A model inspired by Set Transformer and GPT-2, with attention mechanisms like Induced Set Attention and Pooling Multihead Attention for handling set-based inputs (see `src/splatnlp/model/models.py`).
+* **Model Variants:** Two versions available:
+  - **Full (83M params):** Well-tested with complete SAE interpretability.
+  - **Ultra (83M params):** Experimental, uses more diverse subset variants per data point. SAE interpretability in progress.
+* **Embedding-Based Analysis:** Tools for training Doc2Vec models on gear sets, TF-IDF analysis, clustering with UMAP and DBSCAN, and embedding visualization (`src/splatnlp/embeddings/`).
+* **Advanced Preprocessing:** Domain-specific logic for ability bucketing based on Ability Point (AP) thresholds, tokenization, patch handling, and targeted sampling toward optimal configurations. Uses PyArrow for memory efficiency (see `src/splatnlp/preprocessing/`).
+* **Interpretability via Sparse Autoencoders (SAEs):** SAE training on model activations for feature analysis and interpretability (see `src/splatnlp/monosemantic_sae/`).
+* **API Serving:** FastAPI application (`src/splatnlp/serve/`) for serving the trained SetCompletionModel.
+* **Command-Line Tools:** CLIs for preprocessing (`src/splatnlp/preprocessing/pipeline.py`), main model training (`src/splatnlp/model/cli.py`), SAE training (`src/splatnlp/monosemantic_sae/sae_training/cli.py`), and embedding experiments (`src/splatnlp/embeddings/cli.py`).
+* **Visualization Utilities:** Tools for dimensionality reduction (t-SNE via `embeddings` CLI) and fetching weapon images/abbreviations (`src/splatnlp/viz/`).
+* **Hyperparameter Optimization:** Grid search utilities (`src/splatnlp/model/grid_search.py`).
 
 ## Project Structure
 
@@ -219,8 +219,8 @@ uvicorn splatnlp.serve.app:app --host 0.0.0.0 --port 9000 --reload
 **6. Query the API Endpoint:**
 
 ```bash
-# Example: Get predictions for a partial build (Splattershot Pro - ID 310)
-# Note: Provide AP values as integers (e.g., 1 main = 10, 1 sub = 3)
+# Get predictions for a partial build (Splattershot Pro, ID 310)
+# AP values are integers (1 main = 10, 1 sub = 3)
 curl -X POST "http://localhost:9000/infer" \
      -H "Content-Type: application/json" \
      -d '{
@@ -232,14 +232,14 @@ curl -X POST "http://localhost:9000/infer" \
           "weapon_id": 310
         }'
 
-# Example: Get baseline build for a weapon (using NULL token logic)
+# Get baseline build for a weapon (uses NULL token logic)
 curl -X POST "http://localhost:9000/infer" \
      -H "Content-Type: application/json" \
      -d '{
           "target": {},
           "weapon_id": 310
         }'
-# Expected response structure (values are examples):
+# Response structure:
 # {
 #   "predictions": [
 #     ["ability_tag_1", 0.95],
@@ -251,15 +251,14 @@ curl -X POST "http://localhost:9000/infer" \
 #   "inference_time": 0.05
 # }
 
-# Example Test GET request (uses hardcoded input)
+# Test GET request (uses hardcoded input)
 curl "http://localhost:9000/infer"
 ```
 
 ## Architecture
 
-(A diagram and detailed explanation of the `SetCompletionModel` architecture can be found in the blog post linked above.)
+See the blog post linked above for a diagram and detailed explanation of the SetCompletionModel architecture.
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
-See the [LICENSE](LICENSE) file for details.
+GNU General Public License v3.0 (GPL-3.0). See the [LICENSE](LICENSE) file.

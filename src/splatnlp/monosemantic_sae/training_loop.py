@@ -70,7 +70,7 @@ def train_epoch_sae(
     subbatch_size: int = 32,
     gradient_clip_val: float | None = None,
 ) -> TrainingStats:
-    """Enhanced training function with proper sequence padding handling."""
+    """Training function with sequence padding handling."""
     stats = TrainingStats()
     subbatch: list[torch.Tensor] = []
     current_sequence_length: int | None = None
