@@ -8,7 +8,9 @@ Core architecture and data processing:
 
 - [Model Architecture](model-architecture.md) - SetCompletionModel internals, attention mechanisms, why set-based
 - [Preprocessing Pipeline](preprocessing-pipeline.md) - Data flow from stat.ink to tokenized training data
+- [Data Augmentation](data-augmentation.md) - Masked subset generation for training diversity
 - [Sparse Autoencoder](sparse-autoencoder.md) - Interpretability via monosemantic feature learning
+- [Build Reconstruction](build-reconstruction.md) - Beam search algorithm for legal gear configurations
 
 ## Infrastructure
 
