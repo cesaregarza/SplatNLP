@@ -5,38 +5,19 @@ from collections import defaultdict
 
 import dash_bootstrap_components as dbc
 import numpy as np
-from dash import Input, Output, State, callback, dcc, html
+import pandas as pd
+from dash import ALL, Input, Output, State, callback, ctx, dcc, html
 
 from splatnlp.utils.constants import MAIN_ONLY_ABILITIES, STANDARD_ABILITIES
 
 logger = logging.getLogger(__name__)
 
-# Build ability options for dropdowns
-ALL_ABILITIES = sorted(MAIN_ONLY_ABILITIES + STANDARD_ABILITIES)
+ALL_ABILITIES = sorted(set(MAIN_ONLY_ABILITIES + STANDARD_ABILITIES))
 ABILITY_OPTIONS = [
     {"label": a.replace("_", " ").title(), "value": a} for a in ALL_ABILITIES
 ]
 
-
-def _make_sub_row(gear: str, count: int = 3) -> dbc.Row:
-    """Create a row of sub ability dropdowns for a gear piece."""
-    return dbc.Row(
-        [
-            dbc.Col(
-                [
-                    dcc.Dropdown(
-                        id=f"inference-sub-{gear}-{i}",
-                        options=ABILITY_OPTIONS,
-                        placeholder="(empty)",
-                        clearable=True,
-                    )
-                ],
-                md=4,
-            )
-            for i in range(count)
-        ],
-        className="mb-2",
-    )
+MAIN_ONLY_SET = set(MAIN_ONLY_ABILITIES)
 
 
 inference_component = html.Div(
@@ -67,64 +48,37 @@ inference_component = html.Div(
             ],
             className="mb-3",
         ),
-        # Main slots (3 gear pieces)
-        html.H5("Main Abilities", className="mt-3"),
-        dbc.Row(
-            [
-                dbc.Col(
-                    [
-                        html.Label("Head"),
-                        dcc.Dropdown(
-                            id="inference-main-head",
-                            options=ABILITY_OPTIONS,
-                            placeholder="(empty)",
-                            clearable=True,
-                        ),
-                    ],
-                    md=4,
-                ),
-                dbc.Col(
-                    [
-                        html.Label("Clothes"),
-                        dcc.Dropdown(
-                            id="inference-main-clothes",
-                            options=ABILITY_OPTIONS,
-                            placeholder="(empty)",
-                            clearable=True,
-                        ),
-                    ],
-                    md=4,
-                ),
-                dbc.Col(
-                    [
-                        html.Label("Shoes"),
-                        dcc.Dropdown(
-                            id="inference-main-shoes",
-                            options=ABILITY_OPTIONS,
-                            placeholder="(empty)",
-                            clearable=True,
-                        ),
-                    ],
-                    md=4,
-                ),
-            ],
+        # Abilities section
+        html.H5("Abilities", className="mt-3"),
+        html.P(
+            "Add abilities and specify how many main/sub slots they occupy.",
+            className="text-muted small",
+        ),
+        # Store for ability rows data
+        dcc.Store(
+            id="inference-abilities-store",
+            storage_type="memory",
+            data=[],
+        ),
+        # Dynamic ability rows container
+        html.Div(id="inference-ability-rows", className="mb-3"),
+        # Add ability button
+        dbc.Button(
+            "+ Add Ability",
+            id="add-ability-btn",
+            color="secondary",
+            size="sm",
             className="mb-3",
         ),
-        # Sub slots (9 total, 3 per gear piece)
-        html.H5("Sub Abilities", className="mt-3"),
-        html.P("Head Subs", className="text-muted small mb-1"),
-        _make_sub_row("head"),
-        html.P("Clothes Subs", className="text-muted small mb-1"),
-        _make_sub_row("clothes"),
-        html.P("Shoes Subs", className="text-muted small mb-1"),
-        _make_sub_row("shoes"),
+        # AP summary
+        html.Div(id="inference-ap-summary", className="mb-3"),
         # Run button
         dbc.Button(
             "Run Inference",
             id="run-inference-btn",
             color="primary",
             size="lg",
-            className="mb-4 mt-3",
+            className="mb-4",
         ),
         # Store for build history
         dcc.Store(id="inference-build-history", storage_type="memory", data=[]),
@@ -174,27 +128,101 @@ inference_component = html.Div(
 )
 
 
-def slots_to_ap_dict(
-    main_head: str | None,
-    main_clothes: str | None,
-    main_shoes: str | None,
-    sub_slots: list[str | None],
-) -> dict[str, int]:
-    """Convert slot selections to an AP dictionary.
+def render_ability_row(row_data: dict, row_index: int) -> dbc.Card:
+    """Render a single ability row."""
+    ability = row_data.get("ability")
+    mains = row_data.get("mains", 0)
+    subs = row_data.get("subs", 0)
+
+    is_main_only = ability in MAIN_ONLY_SET if ability else False
+
+    # Ability dropdown
+    ability_dropdown = dcc.Dropdown(
+        id={"type": "ability-select", "index": row_index},
+        options=ABILITY_OPTIONS,
+        value=ability,
+        placeholder="Select ability...",
+        clearable=True,
+        style={"minWidth": "200px"},
+    )
+
+    # Slot selectors (only for standard abilities)
+    if is_main_only:
+        slot_selectors = html.Span(
+            "(Main Only - 1 main)",
+            className="text-muted ms-3 align-self-center",
+        )
+    else:
+        slot_selectors = html.Div(
+            [
+                html.Label("Mains:", className="me-1 ms-3"),
+                dcc.Dropdown(
+                    id={"type": "mains-select", "index": row_index},
+                    options=[{"label": str(i), "value": i} for i in range(4)],
+                    value=mains,
+                    clearable=False,
+                    style={"width": "70px"},
+                ),
+                html.Label("Subs:", className="me-1 ms-2"),
+                dcc.Dropdown(
+                    id={"type": "subs-select", "index": row_index},
+                    options=[{"label": str(i), "value": i} for i in range(10)],
+                    value=subs,
+                    clearable=False,
+                    style={"width": "70px"},
+                ),
+            ],
+            className="d-flex align-items-center",
+        )
+
+    # Remove button
+    remove_btn = dbc.Button(
+        "×",
+        id={"type": "remove-ability-btn", "index": row_index},
+        color="danger",
+        size="sm",
+        className="ms-auto",
+    )
+
+    return dbc.Card(
+        dbc.CardBody(
+            [
+                html.Div(
+                    [
+                        ability_dropdown,
+                        slot_selectors,
+                        remove_btn,
+                    ],
+                    className="d-flex align-items-center",
+                ),
+            ],
+            className="py-2",
+        ),
+        className="mb-2",
+    )
+
+
+def abilities_to_ap_dict(abilities_data: list[dict]) -> dict[str, int]:
+    """Convert ability rows to an AP dictionary.
 
     Main slots = 10 AP each, Sub slots = 3 AP each.
+    Main-only abilities always count as 1 main (10 AP).
     """
     ap_dict: dict[str, int] = defaultdict(int)
 
-    # Main slots (10 AP each)
-    for ability in [main_head, main_clothes, main_shoes]:
-        if ability:
-            ap_dict[ability] += 10
+    for row in abilities_data:
+        ability = row.get("ability")
+        if not ability:
+            continue
 
-    # Sub slots (3 AP each)
-    for ability in sub_slots:
-        if ability:
-            ap_dict[ability] += 3
+        if ability in MAIN_ONLY_SET:
+            # Main-only abilities count as 1 main
+            ap_dict[ability] += 10
+        else:
+            # Standard abilities: mains * 10 + subs * 3
+            mains = row.get("mains", 0)
+            subs = row.get("subs", 0)
+            ap_dict[ability] += mains * 10 + subs * 3
 
     return dict(ap_dict)
 
@@ -331,32 +359,161 @@ def populate_weapon_options(trigger):
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
     from splatnlp.preprocessing.transform.mappings import generate_maps
 
-    logger.info(f"populate_weapon_options called with trigger={trigger}")
-
-    if not hasattr(DASHBOARD_CONTEXT, "inv_weapon_vocab"):
-        logger.warning("No inv_weapon_vocab in DASHBOARD_CONTEXT")
+    inv_weapon_vocab = getattr(DASHBOARD_CONTEXT, "inv_weapon_vocab", None)
+    if inv_weapon_vocab is None:
         return []
 
     _, id_to_name, _ = generate_maps()
-    inv_weapon_vocab = DASHBOARD_CONTEXT.inv_weapon_vocab
-
-    logger.info(f"Found {len(inv_weapon_vocab)} weapons in vocab")
 
     options = []
     for weapon_idx, weapon_key in inv_weapon_vocab.items():
-        # weapon_key is like "weapon_id_40"
         wid_str = weapon_key.replace("weapon_id_", "")
         weapon_name = id_to_name.get(wid_str, weapon_key)
         if "Replica" not in weapon_name:
-            # Format: "Weapon Name (ID)" for searchability
             label = f"{weapon_name} ({wid_str})"
             options.append({"label": label, "value": weapon_key})
 
-    logger.info(f"Returning {len(options)} weapon options")
-
-    # Sort by label
     options.sort(key=lambda x: x["label"])
     return options
+
+
+# Callback to manage ability rows (add/remove/update)
+@callback(
+    Output("inference-abilities-store", "data"),
+    [
+        Input("add-ability-btn", "n_clicks"),
+        Input({"type": "remove-ability-btn", "index": ALL}, "n_clicks"),
+        Input({"type": "ability-select", "index": ALL}, "value"),
+        Input({"type": "mains-select", "index": ALL}, "value"),
+        Input({"type": "subs-select", "index": ALL}, "value"),
+    ],
+    State("inference-abilities-store", "data"),
+    prevent_initial_call=True,
+)
+def manage_ability_rows(
+    add_clicks,
+    remove_clicks,
+    ability_values,
+    mains_values,
+    subs_values,
+    current_data,
+):
+    """Manage the ability rows store."""
+    if current_data is None:
+        current_data = []
+
+    triggered_id = ctx.triggered_id
+
+    # Add new row
+    if triggered_id == "add-ability-btn":
+        current_data.append({"ability": None, "mains": 0, "subs": 0})
+        return current_data
+
+    # Remove row
+    if (
+        isinstance(triggered_id, dict)
+        and triggered_id.get("type") == "remove-ability-btn"
+    ):
+        remove_index = triggered_id["index"]
+        current_data = [
+            row for i, row in enumerate(current_data) if i != remove_index
+        ]
+        # Re-index remaining rows
+        return current_data
+
+    # Update ability selection
+    if (
+        isinstance(triggered_id, dict)
+        and triggered_id.get("type") == "ability-select"
+    ):
+        update_index = triggered_id["index"]
+        if update_index < len(current_data):
+            new_ability = (
+                ability_values[update_index]
+                if update_index < len(ability_values)
+                else None
+            )
+            current_data[update_index]["ability"] = new_ability
+            # Reset mains/subs if switching to main-only
+            if new_ability in MAIN_ONLY_SET:
+                current_data[update_index]["mains"] = 0
+                current_data[update_index]["subs"] = 0
+        return current_data
+
+    # Update mains selection
+    if (
+        isinstance(triggered_id, dict)
+        and triggered_id.get("type") == "mains-select"
+    ):
+        update_index = triggered_id["index"]
+        if update_index < len(current_data):
+            current_data[update_index]["mains"] = (
+                mains_values[update_index]
+                if update_index < len(mains_values)
+                else 0
+            )
+        return current_data
+
+    # Update subs selection
+    if (
+        isinstance(triggered_id, dict)
+        and triggered_id.get("type") == "subs-select"
+    ):
+        update_index = triggered_id["index"]
+        if update_index < len(current_data):
+            current_data[update_index]["subs"] = (
+                subs_values[update_index]
+                if update_index < len(subs_values)
+                else 0
+            )
+        return current_data
+
+    return current_data
+
+
+# Callback to render ability rows from store
+@callback(
+    [
+        Output("inference-ability-rows", "children"),
+        Output("inference-ap-summary", "children"),
+    ],
+    Input("inference-abilities-store", "data"),
+)
+def render_ability_rows(abilities_data):
+    """Render the ability rows and AP summary from store data."""
+    if not abilities_data:
+        return (
+            html.Div(
+                "No abilities added. Click '+ Add Ability' to start.",
+                className="text-muted",
+            ),
+            html.Div(),
+        )
+
+    rows = [render_ability_row(row, i) for i, row in enumerate(abilities_data)]
+
+    # Calculate AP summary
+    ap_dict = abilities_to_ap_dict(abilities_data)
+    total_ap = sum(ap_dict.values())
+
+    if ap_dict:
+        ap_parts = [
+            f"{a.replace('_', ' ').title()}: {ap}AP"
+            for a, ap in sorted(ap_dict.items())
+        ]
+        summary = dbc.Alert(
+            [
+                html.Strong(f"Total: {total_ap} AP"),
+                html.Br(),
+                html.Small(" | ".join(ap_parts)),
+            ],
+            color="info",
+            className="py-2",
+        )
+    else:
+        summary = html.Div()
+
+    return rows, summary
 
 
 @callback(
@@ -371,24 +528,8 @@ def populate_weapon_options(trigger):
     Input("run-inference-btn", "n_clicks"),
     [
         State("inference-weapon-dropdown", "value"),
-        State("inference-main-head", "value"),
-        State("inference-main-clothes", "value"),
-        State("inference-main-shoes", "value"),
-        # Head subs
-        State("inference-sub-head-0", "value"),
-        State("inference-sub-head-1", "value"),
-        State("inference-sub-head-2", "value"),
-        # Clothes subs
-        State("inference-sub-clothes-0", "value"),
-        State("inference-sub-clothes-1", "value"),
-        State("inference-sub-clothes-2", "value"),
-        # Shoes subs
-        State("inference-sub-shoes-0", "value"),
-        State("inference-sub-shoes-1", "value"),
-        State("inference-sub-shoes-2", "value"),
-        # Current feature for activation display
+        State("inference-abilities-store", "data"),
         State("feature-dropdown", "value"),
-        # Build history
         State("inference-build-history", "data"),
     ],
     prevent_initial_call=True,
@@ -396,18 +537,7 @@ def populate_weapon_options(trigger):
 def run_inference(
     n_clicks,
     weapon_id,
-    main_head,
-    main_clothes,
-    main_shoes,
-    sub_head_0,
-    sub_head_1,
-    sub_head_2,
-    sub_clothes_0,
-    sub_clothes_1,
-    sub_clothes_2,
-    sub_shoes_0,
-    sub_shoes_1,
-    sub_shoes_2,
+    abilities_data,
     current_feature_id,
     build_history,
 ):
@@ -420,11 +550,9 @@ def run_inference(
     from splatnlp.utils.reconstruct.allocator import Allocator
     from splatnlp.utils.reconstruct.beam_search import reconstruct_build
 
-    # Initialize history if None
     if build_history is None:
         build_history = []
 
-    # Helper to render current history
     def render_history(history):
         if not history:
             return html.Div("No builds yet", className="text-muted")
@@ -432,7 +560,6 @@ def run_inference(
             [format_build_history_entry(e, i) for i, e in enumerate(history)]
         )
 
-    # Validate inputs
     if not weapon_id:
         return (
             dbc.Alert("Please select a weapon.", color="warning"),
@@ -443,20 +570,7 @@ def run_inference(
             render_history(build_history),
         )
 
-    if not hasattr(DASHBOARD_CONTEXT, "primary_model"):
-        return (
-            dbc.Alert(
-                "Model not loaded. Run dashboard with --model-path to enable inference.",
-                color="danger",
-            ),
-            "",
-            "",
-            "",
-            build_history,
-            render_history(build_history),
-        )
-
-    model = DASHBOARD_CONTEXT.primary_model
+    model = getattr(DASHBOARD_CONTEXT, "primary_model", None)
     if model is None:
         return (
             dbc.Alert(
@@ -474,29 +588,11 @@ def run_inference(
     weapon_vocab = DASHBOARD_CONTEXT.weapon_vocab
     sae_model = getattr(DASHBOARD_CONTEXT, "sae_model", None)
 
-    # Collect sub slots
-    sub_slots = [
-        sub_head_0,
-        sub_head_1,
-        sub_head_2,
-        sub_clothes_0,
-        sub_clothes_1,
-        sub_clothes_2,
-        sub_shoes_0,
-        sub_shoes_1,
-        sub_shoes_2,
-    ]
-
     try:
-        # Convert slots to AP dict
-        ap_dict = slots_to_ap_dict(
-            main_head, main_clothes, main_shoes, sub_slots
-        )
-        logger.info(f"AP dict: {ap_dict}")
+        abilities_data = abilities_data or []
+        ap_dict = abilities_to_ap_dict(abilities_data)
 
-        # Tokenize the build
         tokens = tokenize_build(ap_dict)
-        logger.info(f"Tokens: {tokens}")
 
         # Build prediction function (without hook for reconstruction)
         predict_fn_factory = build_predict_abilities(
@@ -527,7 +623,7 @@ def run_inference(
             pred_rows.append({"Token": tok, "Probability": f"{prob:.4f}"})
 
         pred_table = dbc.Table.from_dataframe(
-            __import__("pandas").DataFrame(pred_rows),
+            pd.DataFrame(pred_rows),
             striped=True,
             bordered=True,
             hover=True,
@@ -587,13 +683,6 @@ def run_inference(
                         feature_activation = float(
                             all_activations[current_feature_id]
                         )
-                        logger.info(
-                            f"Feature {current_feature_id} activation on input build: {feature_activation:.4f}"
-                        )
-
-                    # Log build and top activations
-                    logger.info(f"Build tokens: {tokens}")
-                    logger.info(f"Top 10 activations: {top_activations}")
 
                 # Remove the hook
                 handle.remove()
@@ -607,14 +696,14 @@ def run_inference(
             weapon_id=weapon_id,
             initial_context=tokens,
             allocator=allocator,
-            beam_size=10,  # Increased from 5
-            max_steps=10,  # Increased from 6
+            beam_size=10,
+            max_steps=10,
             top_k=1,
         )
 
         # Format result
         completed_build = None
-        if builds and len(builds) > 0:
+        if builds:
             completed_build = builds[0]
             result_display = format_build_display(completed_build)
         else:
@@ -652,12 +741,7 @@ def run_inference(
             },
         }
 
-        # Prepend to history and limit to 5
         updated_history = [history_entry] + build_history[:4]
-
-        logger.info(
-            f"Added build to history. Total entries: {len(updated_history)}"
-        )
 
         return (
             dbc.Alert(status_msg, color="success"),

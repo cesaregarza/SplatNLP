@@ -31,7 +31,9 @@ class TokenSweepResult:
 
     token_name: str
     add_delta: float | None  # Activation change when adding token
-    remove_delta: float | None  # Activation change when removing (None if not in base)
+    remove_delta: (
+        float | None
+    )  # Activation change when removing (None if not in base)
     was_in_base: bool  # Whether token was in base build
 
 
@@ -152,17 +154,72 @@ layout = html.Div(
         dcc.Store(
             id="ablation-secondary-store"
         ),  # Store for modified/secondary build data
+        dcc.Store(
+            id="ablation-custom-build-store"
+        ),  # Store for custom build data
         html.H3("Ablation Analysis"),
         dbc.Row(
             [
                 dbc.Col(
                     [
-                        html.H4("Primary Build Details"),
+                        html.H4("Primary Build"),
+                        # Toggle between Top Examples and Custom Build
+                        dbc.RadioItems(
+                            id="primary-build-source",
+                            options=[
+                                {
+                                    "label": "From Top Examples",
+                                    "value": "examples",
+                                },
+                                {"label": "Custom Build", "value": "custom"},
+                            ],
+                            value="examples",
+                            inline=True,
+                            className="mb-2",
+                        ),
+                        # Display for Top Examples primary build
                         html.Div(
                             id="primary-build-display",
                             children="No primary build selected.",
                             className="mb-3 p-2 border rounded bg-light",
                             style={"minHeight": "100px"},
+                        ),
+                        # Custom build input (shown when Custom Build is selected)
+                        dbc.Collapse(
+                            dbc.Card(
+                                dbc.CardBody(
+                                    [
+                                        html.Label(
+                                            "Select Weapon:",
+                                            className="fw-bold",
+                                        ),
+                                        dcc.Dropdown(
+                                            id="custom-primary-weapon-dropdown",
+                                            options=[],
+                                            placeholder="Select weapon...",
+                                            className="mb-2",
+                                        ),
+                                        html.Label(
+                                            "Select Abilities:",
+                                            className="fw-bold",
+                                        ),
+                                        dcc.Dropdown(
+                                            id="custom-primary-abilities-dropdown",
+                                            options=[],
+                                            multi=True,
+                                            placeholder="Select abilities...",
+                                            className="mb-2",
+                                        ),
+                                        html.Div(
+                                            id="custom-primary-summary",
+                                            className="text-muted small",
+                                        ),
+                                    ]
+                                ),
+                                className="mb-3",
+                            ),
+                            id="custom-build-collapse",
+                            is_open=False,
                         ),
                     ],
                     md=6,
@@ -370,8 +427,14 @@ layout = html.Div(
                                         dbc.RadioItems(
                                             id="full-sweep-aggregation-method",
                                             options=[
-                                                {"label": "Mean", "value": "mean"},
-                                                {"label": "Median", "value": "median"},
+                                                {
+                                                    "label": "Mean",
+                                                    "value": "mean",
+                                                },
+                                                {
+                                                    "label": "Median",
+                                                    "value": "median",
+                                                },
                                             ],
                                             value="mean",
                                             inline=True,
@@ -463,6 +526,91 @@ def populate_weapon_dropdown(_):
     options.sort(key=lambda x: x["label"])
 
     return options
+
+
+# Callback to populate custom primary weapon dropdown
+@dash.callback(
+    Output("custom-primary-weapon-dropdown", "options"),
+    Input("page-load-trigger", "data"),
+)
+def populate_custom_weapon_dropdown(_):
+    from splatnlp.dashboard.app import DASHBOARD_CONTEXT
+
+    if (
+        not hasattr(DASHBOARD_CONTEXT, "inv_weapon_vocab")
+        or DASHBOARD_CONTEXT.inv_weapon_vocab is None
+    ):
+        return []
+
+    weapon_name_mapping = generate_weapon_name_mapping(
+        DASHBOARD_CONTEXT.inv_weapon_vocab
+    )
+
+    options = []
+    for weapon_id, raw_name in DASHBOARD_CONTEXT.inv_weapon_vocab.items():
+        english_name = weapon_name_mapping.get(weapon_id, raw_name)
+        options.append({"label": english_name, "value": weapon_id})
+
+    options.sort(key=lambda x: x["label"])
+    return options
+
+
+# Callback to populate custom primary abilities dropdown
+@dash.callback(
+    Output("custom-primary-abilities-dropdown", "options"),
+    Input("page-load-trigger", "data"),
+)
+def populate_custom_abilities_dropdown(_):
+    from splatnlp.dashboard.app import DASHBOARD_CONTEXT
+
+    if (
+        not hasattr(DASHBOARD_CONTEXT, "vocab")
+        or DASHBOARD_CONTEXT.vocab is None
+    ):
+        return []
+
+    return [
+        {"label": tok, "value": tok}
+        for tok in sorted(DASHBOARD_CONTEXT.vocab.keys())
+        if not tok.startswith("<")
+    ]
+
+
+# Callback to toggle custom build collapse
+@dash.callback(
+    Output("custom-build-collapse", "is_open"),
+    Input("primary-build-source", "value"),
+)
+def toggle_custom_build_collapse(source):
+    return source == "custom"
+
+
+# Callback to show custom build summary
+@dash.callback(
+    Output("custom-primary-summary", "children"),
+    [
+        Input("custom-primary-weapon-dropdown", "value"),
+        Input("custom-primary-abilities-dropdown", "value"),
+    ],
+)
+def update_custom_build_summary(weapon_id, abilities):
+    from splatnlp.dashboard.app import DASHBOARD_CONTEXT
+
+    if not weapon_id and not abilities:
+        return "Select a weapon and abilities to create a custom build."
+
+    parts = []
+
+    if weapon_id:
+        inv_weapon_vocab = getattr(DASHBOARD_CONTEXT, "inv_weapon_vocab", {})
+        weapon_name_mapping = generate_weapon_name_mapping(inv_weapon_vocab)
+        weapon_name = weapon_name_mapping.get(weapon_id, str(weapon_id))
+        parts.append(f"Weapon: {weapon_name}")
+
+    if abilities:
+        parts.append(f"Abilities: {len(abilities)} selected")
+
+    return " | ".join(parts)
 
 
 # Callback to display primary build details and pre-fill secondary input
@@ -622,10 +770,15 @@ def compute_feature_activation(
 @dash.callback(
     Output("ablation-results-display", "children"),
     Input("run-ablation-button", "n_clicks"),
-    State("ablation-primary-store", "data"),
-    State("secondary-build-input", "value"),
-    State("secondary-weapon-dropdown", "value"),
-    State("feature-dropdown", "value"),  # Added state for selected feature
+    [
+        State("ablation-primary-store", "data"),
+        State("secondary-build-input", "value"),
+        State("secondary-weapon-dropdown", "value"),
+        State("feature-dropdown", "value"),
+        State("primary-build-source", "value"),
+        State("custom-primary-weapon-dropdown", "value"),
+        State("custom-primary-abilities-dropdown", "value"),
+    ],
 )
 def run_ablation_analysis(
     n_clicks,
@@ -633,6 +786,9 @@ def run_ablation_analysis(
     secondary_build_list,
     secondary_weapon_id,
     selected_feature_id,
+    build_source,
+    custom_weapon_id,
+    custom_abilities,
 ):
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
@@ -646,34 +802,49 @@ def run_ablation_analysis(
             "Please select a feature from the dropdown on the left to see its specific ablation analysis."
         )
 
-    if not primary_data:
-        return "Please select a primary build first."
-
-    if not secondary_build_list or len(secondary_build_list) == 0:
-        return "Please select secondary ability tokens."
-
-    # Get primary build info
+    # Get vocab mappings
     inv_vocab = getattr(DASHBOARD_CONTEXT, "inv_vocab", {})
     inv_weapon_vocab = getattr(DASHBOARD_CONTEXT, "inv_weapon_vocab", {})
 
-    primary_weapon_id = primary_data.get("weapon_id_token")
-    primary_ability_token_ids = primary_data.get("ability_input_tokens", [])
+    # Determine primary build based on source
+    if build_source == "custom":
+        # Use custom build
+        if not custom_weapon_id:
+            return dbc.Alert(
+                "Please select a weapon for the custom build.", color="warning"
+            )
 
-    if primary_weapon_id is None:
-        return "Weapon ID token missing from primary build data."
+        primary_weapon_id = custom_weapon_id
+        primary_ability_names = custom_abilities if custom_abilities else []
+    else:
+        # Use primary from Top Examples
+        if not primary_data:
+            return dbc.Alert(
+                "Please select a primary build from Top Examples.",
+                color="warning",
+            )
 
-    # Convert primary token IDs back to names
-    primary_ability_names = [
-        inv_vocab.get(token_id, f"Unknown_{token_id}")
-        for token_id in primary_ability_token_ids
-    ]
+        primary_weapon_id = primary_data.get("weapon_id_token")
+        primary_ability_token_ids = primary_data.get("ability_input_tokens", [])
+
+        if primary_weapon_id is None:
+            return dbc.Alert(
+                "Weapon ID token missing from primary build data.",
+                color="danger",
+            )
+
+        # Convert primary token IDs back to names
+        primary_ability_names = [
+            inv_vocab.get(token_id, f"Unknown_{token_id}")
+            for token_id in primary_ability_token_ids
+        ]
+
+    # Secondary build is optional - if not provided, just show primary activation
+    has_secondary = secondary_build_list and len(secondary_build_list) > 0
 
     # Get weapon names (use secondary weapon if selected, otherwise use primary)
-    secondary_weapon_id = (
-        secondary_weapon_id
-        if secondary_weapon_id is not None
-        else primary_weapon_id
-    )
+    if secondary_weapon_id is None:
+        secondary_weapon_id = primary_weapon_id
 
     primary_weapon_raw = inv_weapon_vocab.get(
         primary_weapon_id, f"Unknown_weapon_{primary_weapon_id}"
@@ -687,15 +858,10 @@ def run_ablation_analysis(
         primary_ability_names, primary_weapon_raw, selected_feature_id
     )
     if primary_activation is None:
-        return "Could not compute primary activation. Check model and inputs."
-
-    # Compute secondary activation with potentially different weapon
-    secondary_activation = compute_feature_activation(
-        secondary_build_list, secondary_weapon_raw, selected_feature_id
-    )
-
-    if secondary_activation is None:
-        return "Could not compute secondary activation. Check model and inputs."
+        return dbc.Alert(
+            "Could not compute primary activation. Check model and inputs.",
+            color="danger",
+        )
 
     # Get feature display name
     feature_name_or_id = f"Feature {selected_feature_id}"
@@ -709,51 +875,77 @@ def run_ablation_analysis(
             )
         )
 
-    # Calculate difference
-    diff = secondary_activation - primary_activation
-
     # Get English weapon names for display
     weapon_name_mapping = generate_weapon_name_mapping(inv_weapon_vocab)
     primary_weapon_english = weapon_name_mapping.get(
         primary_weapon_id, primary_weapon_raw
     )
-    secondary_weapon_english = weapon_name_mapping.get(
-        secondary_weapon_id, secondary_weapon_raw
+
+    # Build result display
+    primary_abilities_str = (
+        ", ".join(primary_ability_names) if primary_ability_names else "(empty)"
     )
 
-    # Display results
-    results_display = html.Div(
-        [
-            html.H5(f"Ablation for {feature_name_or_id}:"),
-            html.P(
-                f"Primary Build: {', '.join(primary_ability_names)} + {primary_weapon_english}"
-            ),
-            html.P(f"Primary Activation: {primary_activation:.4f}"),
-            html.Hr(),
-            html.P(
-                f"Secondary Build: {', '.join(secondary_build_list)} + {secondary_weapon_english}"
-            ),
-            html.P(f"Secondary Activation: {secondary_activation:.4f}"),
-            html.Hr(),
-            html.P(
-                f"Difference: {diff:.4f}",
-                style={
-                    "font-weight": "bold",
-                    "color": "green" if diff > 0 else "red",
-                },
-            ),
-            (
+    result_sections = [
+        html.H5(f"Ablation for {feature_name_or_id}:"),
+        html.P(
+            f"Primary Build: {primary_abilities_str} + {primary_weapon_english}"
+        ),
+        html.P(f"Primary Activation: {primary_activation:.4f}"),
+    ]
+
+    # If secondary build provided, compute and show comparison
+    if has_secondary:
+        secondary_activation = compute_feature_activation(
+            secondary_build_list, secondary_weapon_raw, selected_feature_id
+        )
+
+        if secondary_activation is None:
+            return dbc.Alert(
+                "Could not compute secondary activation. Check model and inputs.",
+                color="danger",
+            )
+
+        diff = secondary_activation - primary_activation
+        secondary_weapon_english = weapon_name_mapping.get(
+            secondary_weapon_id, secondary_weapon_raw
+        )
+
+        result_sections.extend(
+            [
+                html.Hr(),
                 html.P(
-                    f"{'⚠️ Weapon changed' if primary_weapon_id != secondary_weapon_id else ''}",
+                    f"Secondary Build: {', '.join(secondary_build_list)} + {secondary_weapon_english}"
+                ),
+                html.P(f"Secondary Activation: {secondary_activation:.4f}"),
+                html.Hr(),
+                html.P(
+                    f"Difference: {diff:.4f}",
+                    style={
+                        "font-weight": "bold",
+                        "color": "green" if diff > 0 else "red",
+                    },
+                ),
+            ]
+        )
+
+        if primary_weapon_id != secondary_weapon_id:
+            result_sections.append(
+                html.P(
+                    "⚠️ Weapon changed",
                     style={"font-style": "italic", "color": "blue"},
                 )
-                if primary_weapon_id != secondary_weapon_id
-                else html.Div()
-            ),
-        ]
-    )
+            )
+    else:
+        # No secondary - just show primary result
+        result_sections.append(
+            html.P(
+                "No secondary build specified. Add abilities to the secondary build to compare.",
+                className="text-muted mt-3",
+            )
+        )
 
-    return results_display
+    return html.Div(result_sections)
 
 
 # ---------------------------------------------------------------------------
@@ -821,45 +1013,65 @@ def populate_sweep_weapons_dropdown(_):
 
 @dash.callback(
     Output("sweep-base-build-display", "children"),
-    Input("ablation-primary-store", "data"),
-    Input("feature-dropdown", "value"),
+    [
+        Input("ablation-primary-store", "data"),
+        Input("feature-dropdown", "value"),
+        Input("primary-build-source", "value"),
+        Input("custom-primary-weapon-dropdown", "value"),
+        Input("custom-primary-abilities-dropdown", "value"),
+    ],
 )
-def display_sweep_base_build(primary_data, feature_id):
+def display_sweep_base_build(
+    primary_data, feature_id, build_source, custom_weapon_id, custom_abilities
+):
     """Display the base build info in the sweep section."""
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
-    if not primary_data:
-        return html.P(
-            "Select a primary build from Top Examples to use as the base build.",
-            className="text-muted mb-0",
-        )
-
     inv_vocab = getattr(DASHBOARD_CONTEXT, "inv_vocab", {})
     inv_weapon_vocab = getattr(DASHBOARD_CONTEXT, "inv_weapon_vocab", {})
+    weapon_name_mapping = generate_weapon_name_mapping(inv_weapon_vocab)
 
-    weapon_id = primary_data.get("weapon_id_token", "N/A")
-    ability_token_ids = primary_data.get("ability_input_tokens", [])
+    # Determine build source
+    if build_source == "custom":
+        if not custom_weapon_id:
+            return html.P(
+                "Select a weapon for your custom build.",
+                className="text-muted mb-0",
+            )
+        weapon_id = custom_weapon_id
+        ability_names = custom_abilities if custom_abilities else []
+    else:
+        if not primary_data:
+            return html.P(
+                "Select a primary build from Top Examples to use as the base build.",
+                className="text-muted mb-0",
+            )
+        weapon_id = primary_data.get("weapon_id_token", "N/A")
+        ability_token_ids = primary_data.get("ability_input_tokens", [])
+        ability_names = [
+            str(inv_vocab.get(token_id, token_id))
+            for token_id in ability_token_ids
+        ]
 
-    ability_names = [
-        str(inv_vocab.get(token_id, token_id))
-        for token_id in ability_token_ids
-    ]
-    abilities_str = ", ".join(ability_names) if ability_names else "None"
+    abilities_str = ", ".join(ability_names) if ability_names else "(empty)"
 
     # Get weapon name
-    weapon_name_mapping = generate_weapon_name_mapping(inv_weapon_vocab)
     weapon_raw = inv_weapon_vocab.get(weapon_id, f"Weapon {weapon_id}")
     weapon_english = weapon_name_mapping.get(weapon_id, weapon_raw)
 
     # Get feature name
-    feature_name = f"Feature {feature_id}" if feature_id else "No feature selected"
+    feature_name = (
+        f"Feature {feature_id}" if feature_id else "No feature selected"
+    )
     if (
         feature_id
         and hasattr(DASHBOARD_CONTEXT, "feature_labels_manager")
         and DASHBOARD_CONTEXT.feature_labels_manager
     ):
-        feature_name = DASHBOARD_CONTEXT.feature_labels_manager.get_display_name(
-            feature_id
+        feature_name = (
+            DASHBOARD_CONTEXT.feature_labels_manager.get_display_name(
+                feature_id
+            )
         )
 
     return html.Div(
@@ -908,8 +1120,10 @@ def compute_sensitivity_sweep(
         hasattr(DASHBOARD_CONTEXT, "feature_labels_manager")
         and DASHBOARD_CONTEXT.feature_labels_manager
     ):
-        feature_name = DASHBOARD_CONTEXT.feature_labels_manager.get_display_name(
-            feature_id
+        feature_name = (
+            DASHBOARD_CONTEXT.feature_labels_manager.get_display_name(
+                feature_id
+            )
         )
 
     # Get weapon mappings
@@ -929,7 +1143,11 @@ def compute_sensitivity_sweep(
         add_activation = compute_feature_activation(
             add_tokens, weapon_raw_name, feature_id
         )
-        add_delta = (add_activation - base_activation) if add_activation is not None else None
+        add_delta = (
+            (add_activation - base_activation)
+            if add_activation is not None
+            else None
+        )
 
         # Remove test: only if token was in base
         remove_delta = None
@@ -967,7 +1185,9 @@ def compute_sensitivity_sweep(
         test_weapon_raw = inv_weapon_vocab.get(
             weapon_id, f"Unknown_weapon_{weapon_id}"
         )
-        test_weapon_display = weapon_name_mapping.get(weapon_id, test_weapon_raw)
+        test_weapon_display = weapon_name_mapping.get(
+            weapon_id, test_weapon_raw
+        )
 
         if is_current:
             # Current weapon has 0 delta
@@ -977,7 +1197,11 @@ def compute_sensitivity_sweep(
             swap_activation = compute_feature_activation(
                 base_tokens, test_weapon_raw, feature_id
             )
-            swap_delta = (swap_activation - base_activation) if swap_activation is not None else None
+            swap_delta = (
+                (swap_activation - base_activation)
+                if swap_activation is not None
+                else None
+            )
 
         weapon_results.append(
             WeaponSweepResult(
@@ -1023,10 +1247,20 @@ def format_sweep_markdown(sweep_results: SweepResults) -> str:
         lines.append("|-------|------------|---------------|-------|")
 
         for result in sweep_results.token_results:
-            add_text = f"{result.add_delta:+.4f}" if result.add_delta is not None else "—"
-            remove_text = f"{result.remove_delta:+.4f}" if result.remove_delta is not None else "—"
+            add_text = (
+                f"{result.add_delta:+.4f}"
+                if result.add_delta is not None
+                else "—"
+            )
+            remove_text = (
+                f"{result.remove_delta:+.4f}"
+                if result.remove_delta is not None
+                else "—"
+            )
             notes = "(in base)" if result.was_in_base else ""
-            lines.append(f"| {result.token_name} | {add_text} | {remove_text} | {notes} |")
+            lines.append(
+                f"| {result.token_name} | {add_text} | {remove_text} | {notes} |"
+            )
 
         lines.append("")
 
@@ -1038,7 +1272,11 @@ def format_sweep_markdown(sweep_results: SweepResults) -> str:
         lines.append("|--------|-------------|-------|")
 
         for result in sweep_results.weapon_results:
-            delta_text = f"{result.swap_delta:+.4f}" if result.swap_delta is not None else "—"
+            delta_text = (
+                f"{result.swap_delta:+.4f}"
+                if result.swap_delta is not None
+                else "—"
+            )
             notes = "(current)" if result.is_current else ""
             lines.append(f"| {result.weapon_name} | {delta_text} | {notes} |")
 
@@ -1052,8 +1290,12 @@ def build_sweep_results_display(sweep_results: SweepResults) -> html.Div:
     if not sweep_results:
         return html.P("No results to display.")
 
-    has_tokens = sweep_results.token_results and len(sweep_results.token_results) > 0
-    has_weapons = sweep_results.weapon_results and len(sweep_results.weapon_results) > 0
+    has_tokens = (
+        sweep_results.token_results and len(sweep_results.token_results) > 0
+    )
+    has_weapons = (
+        sweep_results.weapon_results and len(sweep_results.weapon_results) > 0
+    )
 
     if not has_tokens and not has_weapons:
         return html.P("No results to display.")
@@ -1088,7 +1330,8 @@ def build_sweep_results_display(sweep_results: SweepResults) -> html.Div:
                                     style={"fontSize": "1.2rem"},
                                 ),
                                 html.Small(
-                                    "Copy MD", className="d-block text-muted mt-1"
+                                    "Copy MD",
+                                    className="d-block text-muted mt-1",
                                 ),
                             ],
                             className="text-center",
@@ -1111,16 +1354,27 @@ def build_sweep_results_display(sweep_results: SweepResults) -> html.Div:
     # --- Token Results Section ---
     if has_tokens:
         token_rows = []
-        max_token_delta = max(
-            abs(r.add_delta) for r in sweep_results.token_results if r.add_delta is not None
-        ) or 1.0
+        max_token_delta = (
+            max(
+                abs(r.add_delta)
+                for r in sweep_results.token_results
+                if r.add_delta is not None
+            )
+            or 1.0
+        )
 
         for result in sweep_results.token_results:
             # Format add delta
             if result.add_delta is not None:
-                add_color = "green" if result.add_delta > 0 else "red" if result.add_delta < 0 else "gray"
+                add_color = (
+                    "green"
+                    if result.add_delta > 0
+                    else "red" if result.add_delta < 0 else "gray"
+                )
                 add_text = f"{result.add_delta:+.4f}"
-                bar_width = min(100, int(abs(result.add_delta) / max_token_delta * 100))
+                bar_width = min(
+                    100, int(abs(result.add_delta) / max_token_delta * 100)
+                )
             else:
                 add_color = "gray"
                 add_text = "—"
@@ -1128,13 +1382,21 @@ def build_sweep_results_display(sweep_results: SweepResults) -> html.Div:
 
             # Format remove delta
             if result.remove_delta is not None:
-                remove_color = "green" if result.remove_delta > 0 else "red" if result.remove_delta < 0 else "gray"
+                remove_color = (
+                    "green"
+                    if result.remove_delta > 0
+                    else "red" if result.remove_delta < 0 else "gray"
+                )
                 remove_text = f"{result.remove_delta:+.4f}"
             else:
                 remove_text = "—"
                 remove_color = "gray"
 
-            bar_color = "bg-success" if result.add_delta and result.add_delta > 0 else "bg-danger"
+            bar_color = (
+                "bg-success"
+                if result.add_delta and result.add_delta > 0
+                else "bg-danger"
+            )
 
             token_rows.append(
                 html.Tr(
@@ -1142,10 +1404,14 @@ def build_sweep_results_display(sweep_results: SweepResults) -> html.Div:
                         html.Td(
                             [
                                 result.token_name,
-                                html.Span(
-                                    " (in base)",
-                                    className="text-muted small",
-                                ) if result.was_in_base else "",
+                                (
+                                    html.Span(
+                                        " (in base)",
+                                        className="text-muted small",
+                                    )
+                                    if result.was_in_base
+                                    else ""
+                                ),
                             ]
                         ),
                         html.Td(
@@ -1215,21 +1481,36 @@ def build_sweep_results_display(sweep_results: SweepResults) -> html.Div:
     # --- Weapon Results Section ---
     if has_weapons:
         weapon_rows = []
-        max_weapon_delta = max(
-            abs(r.swap_delta) for r in sweep_results.weapon_results if r.swap_delta is not None
-        ) or 1.0
+        max_weapon_delta = (
+            max(
+                abs(r.swap_delta)
+                for r in sweep_results.weapon_results
+                if r.swap_delta is not None
+            )
+            or 1.0
+        )
 
         for result in sweep_results.weapon_results:
             if result.swap_delta is not None:
-                delta_color = "green" if result.swap_delta > 0 else "red" if result.swap_delta < 0 else "gray"
+                delta_color = (
+                    "green"
+                    if result.swap_delta > 0
+                    else "red" if result.swap_delta < 0 else "gray"
+                )
                 delta_text = f"{result.swap_delta:+.4f}"
-                bar_width = min(100, int(abs(result.swap_delta) / max_weapon_delta * 100))
+                bar_width = min(
+                    100, int(abs(result.swap_delta) / max_weapon_delta * 100)
+                )
             else:
                 delta_color = "gray"
                 delta_text = "—"
                 bar_width = 0
 
-            bar_color = "bg-success" if result.swap_delta and result.swap_delta > 0 else "bg-danger"
+            bar_color = (
+                "bg-success"
+                if result.swap_delta and result.swap_delta > 0
+                else "bg-danger"
+            )
 
             weapon_rows.append(
                 html.Tr(
@@ -1237,10 +1518,14 @@ def build_sweep_results_display(sweep_results: SweepResults) -> html.Div:
                         html.Td(
                             [
                                 result.weapon_name,
-                                html.Span(
-                                    " (current)",
-                                    className="text-muted small",
-                                ) if result.is_current else "",
+                                (
+                                    html.Span(
+                                        " (current)",
+                                        className="text-muted small",
+                                    )
+                                    if result.is_current
+                                    else ""
+                                ),
                             ]
                         ),
                         html.Td(
@@ -1306,13 +1591,25 @@ def build_sweep_results_display(sweep_results: SweepResults) -> html.Div:
 @dash.callback(
     Output("sweep-results-display", "children"),
     Input("run-sweep-button", "n_clicks"),
-    State("ablation-primary-store", "data"),
-    State("sweep-tokens-dropdown", "value"),
-    State("sweep-weapons-dropdown", "value"),
-    State("feature-dropdown", "value"),
+    [
+        State("ablation-primary-store", "data"),
+        State("sweep-tokens-dropdown", "value"),
+        State("sweep-weapons-dropdown", "value"),
+        State("feature-dropdown", "value"),
+        State("primary-build-source", "value"),
+        State("custom-primary-weapon-dropdown", "value"),
+        State("custom-primary-abilities-dropdown", "value"),
+    ],
 )
 def run_sensitivity_sweep(
-    n_clicks, primary_data, tokens_to_test, weapons_to_test, feature_id
+    n_clicks,
+    primary_data,
+    tokens_to_test,
+    weapons_to_test,
+    feature_id,
+    build_source,
+    custom_weapon_id,
+    custom_abilities,
 ):
     """Run the token and weapon sensitivity sweep."""
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
@@ -1321,12 +1618,6 @@ def run_sensitivity_sweep(
         return html.P(
             "Select tokens and/or weapons to test and click 'Run Sweep'.",
             className="text-muted",
-        )
-
-    if not primary_data:
-        return dbc.Alert(
-            "Please select a primary build first (from Top Examples).",
-            color="warning",
         )
 
     has_tokens = tokens_to_test and len(tokens_to_test) > 0
@@ -1344,21 +1635,38 @@ def run_sensitivity_sweep(
             color="warning",
         )
 
-    # Get base build info
+    # Get vocab mappings
     inv_vocab = getattr(DASHBOARD_CONTEXT, "inv_vocab", {})
     inv_weapon_vocab = getattr(DASHBOARD_CONTEXT, "inv_weapon_vocab", {})
 
-    weapon_id = primary_data.get("weapon_id_token")
-    ability_token_ids = primary_data.get("ability_input_tokens", [])
+    # Determine build source
+    if build_source == "custom":
+        if not custom_weapon_id:
+            return dbc.Alert(
+                "Please select a weapon for the custom build.",
+                color="warning",
+            )
+        weapon_id = custom_weapon_id
+        base_tokens = custom_abilities if custom_abilities else []
+    else:
+        if not primary_data:
+            return dbc.Alert(
+                "Please select a primary build first (from Top Examples).",
+                color="warning",
+            )
+        weapon_id = primary_data.get("weapon_id_token")
+        ability_token_ids = primary_data.get("ability_input_tokens", [])
 
-    if weapon_id is None:
-        return dbc.Alert("Weapon ID missing from primary build.", color="danger")
+        if weapon_id is None:
+            return dbc.Alert(
+                "Weapon ID missing from primary build.", color="danger"
+            )
 
-    # Convert token IDs to names
-    base_tokens = [
-        str(inv_vocab.get(token_id, f"Unknown_{token_id}"))
-        for token_id in ability_token_ids
-    ]
+        # Convert token IDs to names
+        base_tokens = [
+            str(inv_vocab.get(token_id, f"Unknown_{token_id}"))
+            for token_id in ability_token_ids
+        ]
 
     # Get weapon raw name
     weapon_raw = inv_weapon_vocab.get(weapon_id, f"Unknown_weapon_{weapon_id}")
@@ -1397,11 +1705,21 @@ def run_sensitivity_sweep(
     [
         State("ablation-primary-store", "data"),
         State("full-sweep-build-queue", "data"),
+        State("primary-build-source", "value"),
+        State("custom-primary-weapon-dropdown", "value"),
+        State("custom-primary-abilities-dropdown", "value"),
     ],
     prevent_initial_call=True,
 )
 def manage_build_queue(
-    add_clicks, clear_clicks, remove_clicks, primary_data, current_queue
+    add_clicks,
+    clear_clicks,
+    remove_clicks,
+    primary_data,
+    current_queue,
+    build_source,
+    custom_weapon_id,
+    custom_abilities,
 ):
     """Manage the build queue for full sweep analysis."""
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
@@ -1422,33 +1740,44 @@ def manage_build_queue(
 
     # Handle add primary build
     if triggered_id == "add-primary-to-queue-button":
-        if not primary_data:
-            return current_queue
-
         inv_vocab = getattr(DASHBOARD_CONTEXT, "inv_vocab", {})
         inv_weapon_vocab = getattr(DASHBOARD_CONTEXT, "inv_weapon_vocab", {})
+        weapon_name_mapping = generate_weapon_name_mapping(inv_weapon_vocab)
 
-        weapon_id = primary_data.get("weapon_id_token")
-        ability_token_ids = primary_data.get("ability_input_tokens", [])
+        # Determine build source
+        if build_source == "custom":
+            if not custom_weapon_id:
+                return current_queue
 
-        if weapon_id is None:
-            return current_queue
+            weapon_id = custom_weapon_id
+            ability_tokens = custom_abilities if custom_abilities else []
+        else:
+            if not primary_data:
+                return current_queue
 
-        # Convert token IDs to names
-        ability_tokens = [
-            str(inv_vocab.get(token_id, f"Unknown_{token_id}"))
-            for token_id in ability_token_ids
-        ]
+            weapon_id = primary_data.get("weapon_id_token")
+            ability_token_ids = primary_data.get("ability_input_tokens", [])
+
+            if weapon_id is None:
+                return current_queue
+
+            # Convert token IDs to names
+            ability_tokens = [
+                str(inv_vocab.get(token_id, f"Unknown_{token_id}"))
+                for token_id in ability_token_ids
+            ]
 
         # Get weapon name
-        weapon_name_mapping = generate_weapon_name_mapping(inv_weapon_vocab)
         weapon_raw = inv_weapon_vocab.get(weapon_id, f"Unknown_{weapon_id}")
         weapon_name = weapon_name_mapping.get(weapon_id, weapon_raw)
 
         # Create description
-        abilities_str = ", ".join(ability_tokens[:3])
-        if len(ability_tokens) > 3:
-            abilities_str += f"... (+{len(ability_tokens) - 3})"
+        if ability_tokens:
+            abilities_str = ", ".join(ability_tokens[:3])
+            if len(ability_tokens) > 3:
+                abilities_str += f"... (+{len(ability_tokens) - 3})"
+        else:
+            abilities_str = "(empty)"
         description = f"{abilities_str} + {weapon_name}"
 
         # Add to queue (as dict for JSON serialization)
@@ -1567,7 +1896,10 @@ def compute_token_statistics(queue_data):
                 family_data[family]["ap_counts"][ap_value] += 1
 
     if not family_data:
-        return html.P("No ability tokens in builds.", className="text-muted"), True
+        return (
+            html.P("No ability tokens in builds.", className="text-muted"),
+            True,
+        )
 
     # Sort families by number of builds (descending)
     sorted_families = sorted(
@@ -1638,16 +1970,22 @@ def run_full_sweep_for_build(
         hasattr(DASHBOARD_CONTEXT, "feature_labels_manager")
         and DASHBOARD_CONTEXT.feature_labels_manager
     ):
-        feature_name = DASHBOARD_CONTEXT.feature_labels_manager.get_display_name(
-            feature_id
+        feature_name = (
+            DASHBOARD_CONTEXT.feature_labels_manager.get_display_name(
+                feature_id
+            )
         )
 
     # Compute base activation
-    base_activation = compute_feature_activation(base_tokens, weapon_raw, feature_id)
+    base_activation = compute_feature_activation(
+        base_tokens, weapon_raw, feature_id
+    )
     if base_activation is None:
         return None
 
-    logger.info(f"Build {build_idx + 1}: Base activation = {base_activation:.4f}")
+    logger.info(
+        f"Build {build_idx + 1}: Base activation = {base_activation:.4f}"
+    )
 
     # --- Token Sweep ---
     # For each token, we strip tokens of the same family from the base before testing.
@@ -1671,7 +2009,9 @@ def run_full_sweep_for_build(
 
         # Get or compute stripped base and its activation
         if cache_key in stripped_base_cache:
-            stripped_base, stripped_base_activation = stripped_base_cache[cache_key]
+            stripped_base, stripped_base_activation = stripped_base_cache[
+                cache_key
+            ]
         else:
             # Strip tokens of this family from base (for isolated testing)
             if ap_value is not None:
@@ -1694,11 +2034,16 @@ def run_full_sweep_for_build(
             if stripped_base_activation is None:
                 stripped_base_activation = 0.0
 
-            stripped_base_cache[cache_key] = (stripped_base, stripped_base_activation)
+            stripped_base_cache[cache_key] = (
+                stripped_base,
+                stripped_base_activation,
+            )
 
         # Compute activation with stripped base + test token
         test_tokens = stripped_base + [token]
-        test_activation = compute_feature_activation(test_tokens, weapon_raw, feature_id)
+        test_activation = compute_feature_activation(
+            test_tokens, weapon_raw, feature_id
+        )
 
         if test_activation is None:
             continue
@@ -1714,7 +2059,9 @@ def run_full_sweep_for_build(
             family_deltas[family][ap_value] = delta
         else:
             # Main-only ability
-            main_only_results.append(MainOnlyResult(ability_name=token, delta=delta))
+            main_only_results.append(
+                MainOnlyResult(ability_name=token, delta=delta)
+            )
 
     # Convert family_deltas to AbilityFamilyResult list
     ability_families = []
@@ -1734,7 +2081,9 @@ def run_full_sweep_for_build(
     # --- Weapon Sweep ---
     logger.info(f"  Testing {len(all_weapon_ids)} weapons...")
 
-    weapon_deltas: dict[int, tuple[str, float]] = {}  # weapon_id -> (name, delta)
+    weapon_deltas: dict[int, tuple[str, float]] = (
+        {}
+    )  # weapon_id -> (name, delta)
 
     for i, test_weapon_id in enumerate(all_weapon_ids):
         if (i + 1) % 30 == 0:
@@ -1743,7 +2092,9 @@ def run_full_sweep_for_build(
         test_weapon_raw = inv_weapon_vocab.get(
             test_weapon_id, f"Unknown_{test_weapon_id}"
         )
-        test_weapon_name = weapon_name_mapping.get(test_weapon_id, test_weapon_raw)
+        test_weapon_name = weapon_name_mapping.get(
+            test_weapon_id, test_weapon_raw
+        )
 
         if test_weapon_id == weapon_id:
             # Current weapon, delta is 0
@@ -1847,7 +2198,9 @@ def run_null_base_sweep(
         (null_base_activation, by_special, by_sub, by_class, individual_weapons)
         where individual_weapons is list of (weapon_name, activation) tuples
     """
-    logger.info(f"Running NULL base weapon sweep for {len(all_weapon_ids)} weapons...")
+    logger.info(
+        f"Running NULL base weapon sweep for {len(all_weapon_ids)} weapons..."
+    )
     logger.info(f"  Activation threshold: {activation_threshold:.4f}")
 
     # Compute raw activation for each weapon with NULL base
@@ -1858,7 +2211,9 @@ def run_null_base_sweep(
         test_weapon_raw = inv_weapon_vocab.get(
             test_weapon_id, f"Unknown_{test_weapon_id}"
         )
-        test_weapon_name = weapon_name_mapping.get(test_weapon_id, test_weapon_raw)
+        test_weapon_name = weapon_name_mapping.get(
+            test_weapon_id, test_weapon_raw
+        )
 
         test_activation = compute_feature_activation(
             ["<NULL>"], test_weapon_raw, feature_id
@@ -2129,7 +2484,9 @@ def build_weapon_group_bar_chart(
     colors = ["green" if v > 0 else "red" for v in values]
 
     # Use appropriate hover label
-    hover_label = "Avg Activation" if "Activation" in y_axis_label else "Avg Delta"
+    hover_label = (
+        "Avg Activation" if "Activation" in y_axis_label else "Avg Delta"
+    )
 
     fig = go.Figure(
         go.Bar(
@@ -2170,7 +2527,11 @@ def format_full_sweep_markdown(results: FullSweepResults) -> str:
     if results.ability_families:
         lines.append("## Ability Families by AP")
         lines.append("")
-        lines.append("| Ability | " + " | ".join(str(ap) for ap in [3, 6, 12, 15, 21, 29, 38, 51, 57]) + " |")
+        lines.append(
+            "| Ability | "
+            + " | ".join(str(ap) for ap in [3, 6, 12, 15, 21, 29, 38, 51, 57])
+            + " |"
+        )
         lines.append("|" + "----|" * 10)
 
         for family in results.ability_families:
@@ -2280,7 +2641,8 @@ def build_full_sweep_display(results: FullSweepResults) -> html.Div:
                                     style={"fontSize": "1.2rem"},
                                 ),
                                 html.Small(
-                                    "Copy MD", className="d-block text-muted mt-1"
+                                    "Copy MD",
+                                    className="d-block text-muted mt-1",
                                 ),
                             ],
                             className="text-center",
@@ -2336,7 +2698,9 @@ def build_full_sweep_display(results: FullSweepResults) -> html.Div:
         weapon_charts.append(
             dbc.Col(
                 dcc.Graph(
-                    figure=build_weapon_group_bar_chart(results.by_sub, "By Sub Weapon"),
+                    figure=build_weapon_group_bar_chart(
+                        results.by_sub, "By Sub Weapon"
+                    ),
                     config={"displayModeBar": False},
                 ),
                 md=4,
@@ -2385,13 +2749,15 @@ def build_full_sweep_display(results: FullSweepResults) -> html.Div:
         # Individual weapons table (collapsible)
         if results.null_base_weapons:
             weapon_rows = [
-                html.Tr([
-                    html.Td(name, style={"fontSize": "0.85rem"}),
-                    html.Td(
-                        f"{activation:.4f}",
-                        style={"fontSize": "0.85rem", "textAlign": "right"},
-                    ),
-                ])
+                html.Tr(
+                    [
+                        html.Td(name, style={"fontSize": "0.85rem"}),
+                        html.Td(
+                            f"{activation:.4f}",
+                            style={"fontSize": "0.85rem", "textAlign": "right"},
+                        ),
+                    ]
+                )
                 for name, activation in results.null_base_weapons
             ]
 
@@ -2402,10 +2768,17 @@ def build_full_sweep_display(results: FullSweepResults) -> html.Div:
                             dbc.Table(
                                 [
                                     html.Thead(
-                                        html.Tr([
-                                            html.Th("Weapon Kit"),
-                                            html.Th("Activation", style={"textAlign": "right"}),
-                                        ])
+                                        html.Tr(
+                                            [
+                                                html.Th("Weapon Kit"),
+                                                html.Th(
+                                                    "Activation",
+                                                    style={
+                                                        "textAlign": "right"
+                                                    },
+                                                ),
+                                            ]
+                                        )
                                     ),
                                     html.Tbody(weapon_rows),
                                 ],
@@ -2413,7 +2786,10 @@ def build_full_sweep_display(results: FullSweepResults) -> html.Div:
                                 bordered=True,
                                 hover=True,
                                 size="sm",
-                                style={"maxHeight": "400px", "overflowY": "auto"},
+                                style={
+                                    "maxHeight": "400px",
+                                    "overflowY": "auto",
+                                },
                             ),
                             title=f"Individual Weapon Kits ({len(results.null_base_weapons)} weapons)",
                         ),
@@ -2484,7 +2860,9 @@ def build_full_sweep_display(results: FullSweepResults) -> html.Div:
     State("full-sweep-aggregation-method", "value"),
     prevent_initial_call=True,
 )
-def run_full_sweep_callback(n_clicks, queue_data, feature_id, aggregation_method):
+def run_full_sweep_callback(
+    n_clicks, queue_data, feature_id, aggregation_method
+):
     """Run the full sweep analysis."""
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
@@ -2520,7 +2898,9 @@ def run_full_sweep_callback(n_clicks, queue_data, feature_id, aggregation_method
         weapon_properties_df = get_weapon_properties_df()
     except Exception as e:
         logger.error(f"Failed to get weapon properties: {e}")
-        return dbc.Alert(f"Failed to get weapon properties: {e}", color="danger")
+        return dbc.Alert(
+            f"Failed to get weapon properties: {e}", color="danger"
+        )
 
     logger.info(
         f"Starting full sweep: {len(queue_data)} builds, "
@@ -2530,7 +2910,9 @@ def run_full_sweep_callback(n_clicks, queue_data, feature_id, aggregation_method
     # Run sweep for each build
     all_results = []
     for i, build in enumerate(queue_data):
-        logger.info(f"Processing build {i + 1}/{len(queue_data)}: {build.get('description', '')}")
+        logger.info(
+            f"Processing build {i + 1}/{len(queue_data)}: {build.get('description', '')}"
+        )
         result = run_full_sweep_for_build(
             build=build,
             feature_id=feature_id,
@@ -2550,7 +2932,9 @@ def run_full_sweep_callback(n_clicks, queue_data, feature_id, aggregation_method
             color="danger",
         )
 
-    logger.info(f"Full sweep complete. Aggregating {len(all_results)} results...")
+    logger.info(
+        f"Full sweep complete. Aggregating {len(all_results)} results..."
+    )
 
     # Aggregate results
     aggregated = aggregate_sweep_results(all_results, aggregation_method)

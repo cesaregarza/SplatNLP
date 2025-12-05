@@ -153,12 +153,11 @@ def update_top_examples_grid(selected_feature_id, active_tab):
             and example["ability_input_tokens"] is not None
         ):
             try:
-                # Convert tags to names using vocabulary
                 ability_tags = [
                     DASHBOARD_CONTEXT.inv_vocab.get(int(tag), f"Token_{tag}")
                     for tag in example["ability_input_tokens"]
                 ]
-            except Exception as e:
+            except (TypeError, ValueError) as e:
                 logger.warning(f"Error processing ability tags: {e}")
                 ability_tags = ["Error processing tags"]
 

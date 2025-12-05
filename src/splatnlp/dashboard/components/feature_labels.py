@@ -7,7 +7,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, dcc, html
 
@@ -66,33 +65,25 @@ class FeatureLabelsManager:
 
     def _load_labels(self) -> Dict[int, FeatureLabel]:
         """Load feature labels from storage."""
-        if self.storage_path.exists():
-            try:
-                with open(self.storage_path, "r") as f:
-                    data = json.load(f)
-                    # Convert string keys to int and dict to FeatureLabel
-                    return {
-                        int(k): FeatureLabel.from_dict(v)
-                        for k, v in data.items()
-                    }
-            except Exception:
-                return {}
-        return {}
+        if not self.storage_path.exists():
+            return {}
+        with open(self.storage_path, "r") as f:
+            data = json.load(f)
+        return {
+            int(k): FeatureLabel.from_dict(v) for k, v in data.items()
+        }
 
     def _migrate_from_names_if_needed(self):
         """Migrate from old feature_names.json if it exists."""
         old_path = self.storage_path.parent / "feature_names.json"
         if old_path.exists() and not self.feature_labels:
-            try:
-                with open(old_path, "r") as f:
-                    old_data = json.load(f)
-                    for k, name in old_data.items():
-                        self.feature_labels[int(k)] = FeatureLabel(
-                            name=name, timestamp=datetime.now().isoformat()
-                        )
-                    self.save_labels()
-            except Exception:
-                pass
+            with open(old_path, "r") as f:
+                old_data = json.load(f)
+            for k, name in old_data.items():
+                self.feature_labels[int(k)] = FeatureLabel(
+                    name=name, timestamp=datetime.now().isoformat()
+                )
+            self.save_labels()
 
     def save_labels(self) -> None:
         """Save feature labels to storage."""
