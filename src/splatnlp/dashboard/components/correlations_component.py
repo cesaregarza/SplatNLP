@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 import polars as pl
-from dash import Input, Output, State, callback, dcc, html
+from dash import Input, Output, State, callback, dcc, html, no_update
 
 # App context will be monkey-patched by the run script
 # DASHBOARD_CONTEXT = None
@@ -37,14 +37,21 @@ correlations_component = html.Div(
         Output("token-logit-correlations-display", "children"),
         Output("correlations-error-message", "children"),
     ],
-    [Input("feature-dropdown", "value")],
+    [
+        Input("feature-dropdown", "value"),
+        Input("active-tab-store", "data"),
+    ],
 )
-def update_correlations_display(selected_feature_id):
+def update_correlations_display(selected_feature_id, active_tab):
     import logging
 
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
     logger = logging.getLogger(__name__)
+
+    # Lazy loading: skip if tab is not active
+    if active_tab != "tab-logits":
+        return no_update, no_update, no_update
 
     if selected_feature_id is None:
         return [], [], "Select an SAE feature to view correlations."
@@ -185,6 +192,21 @@ def update_correlations_display(selected_feature_id):
 
         # Since ability_tags is an array, we need to expand it to calculate correlations
         try:
+            if not isinstance(selected_activations, pd.DataFrame) or (
+                "ability_tags" not in selected_activations.columns
+            ):
+                token_logit_influences_display_children.append(
+                    html.P(
+                        "Ability tag correlations unavailable for this backend.",
+                        className="ms-3",
+                    )
+                )
+                return (
+                    sae_corr_display_children,
+                    token_logit_influences_display_children,
+                    "",
+                )
+
             # Create a dictionary to store mean activations per ability tag
             tag_activations = {}
 

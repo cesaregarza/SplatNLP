@@ -756,3 +756,88 @@ class EfficientFSDatabase:
             stats["top_weapons"] = weapon_counts.to_dicts()
 
         return stats
+
+    def get_all_feature_activations_for_pagerank(
+        self,
+        feature_id: int,
+        include_negative: bool = True,
+    ) -> pl.DataFrame:
+        """
+        Get ALL non-zero activations for PageRank analysis.
+
+        Unlike get_feature_activations() which returns top-K sorted,
+        PageRank needs ALL co-occurrences to build the complete graph.
+
+        Args:
+            feature_id: The feature to analyze
+            include_negative: If True, include negative activations
+
+        Returns:
+            DataFrame with 'activation', 'ability_input_tokens', and 'weapon_id' columns
+        """
+        all_examples = []
+        n_batches = self.metadata.get("n_batches", 0)
+
+        for batch_idx in range(n_batches):
+            zarr_path = (
+                self.data_dir / "activations" / f"batch_{batch_idx:04d}.zarr"
+            )
+            if not zarr_path.exists():
+                continue
+
+            try:
+                z = zarr.open(str(zarr_path), mode="r")
+                feature_acts = z[:, feature_id]
+
+                if include_negative:
+                    mask = feature_acts != 0
+                else:
+                    mask = feature_acts > 0
+
+                if not mask.any():
+                    continue
+
+                indices = np.where(mask)[0]
+                activations = feature_acts[mask]
+
+                meta_df = self._get_batch_metadata(batch_idx)
+                if len(meta_df) == 0:
+                    continue
+
+                for idx, act in zip(indices, activations):
+                    if idx >= len(meta_df):
+                        continue
+
+                    row = meta_df[int(idx)]
+                    ability_tokens = row["ability_tokens"].item()
+                    weapon_id = row["weapon_id_token"].item()
+
+                    # Handle different return types
+                    if hasattr(ability_tokens, "to_list"):
+                        ability_tokens = ability_tokens.to_list()
+                    elif isinstance(ability_tokens, np.ndarray):
+                        ability_tokens = ability_tokens.tolist()
+
+                    all_examples.append(
+                        {
+                            "activation": float(act),
+                            "ability_input_tokens": ability_tokens,
+                            "weapon_id": int(weapon_id),
+                        }
+                    )
+
+            except Exception as e:
+                logger.warning(
+                    f"Error processing batch {batch_idx} for PageRank: {e}"
+                )
+                continue
+
+        if all_examples:
+            return pl.DataFrame(all_examples)
+        return pl.DataFrame(
+            schema={
+                "activation": pl.Float64,
+                "ability_input_tokens": pl.List(pl.Int64),
+                "weapon_id": pl.Int64,
+            }
+        )

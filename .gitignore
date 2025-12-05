@@ -37,12 +37,19 @@ env/
 
 # Data and Models
 data/
+data
 models/
 saved_models/
+saved_models
 outputs/
+outputs
 sae_outputs/
 sae_grid_search_outputs/
 test_data/
+test_data
+dashboard_outputs/
+bench/
+decomp_models/
 *.db
 *.csv
 *.json

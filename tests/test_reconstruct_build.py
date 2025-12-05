@@ -33,8 +33,11 @@ def test_conflicting_predictions_select_one_head():
         return {}
 
     allocator = Allocator()
-    build = reconstruct_build(predict_fn, "w", [], allocator, beam_size=2, max_steps=2)
-    assert build is not None
+    builds = reconstruct_build(
+        predict_fn, "w", [], allocator, beam_size=2, max_steps=2
+    )
+    assert builds
+    build = builds[0]
     assert build.mains["head"] in {"comeback", "last_ditch_effort"}
 
 
@@ -59,3 +62,30 @@ def test_exceed_sub_slots_returns_none():
     )
     assert build is None
 
+
+def test_full_build_not_pruned_when_expansions_are_invalid():
+    """
+    When the initial context already consumes all 57 AP, any additional token
+    makes allocation impossible. The valid starting build should still be
+    returned rather than being pruned by the beam.
+    """
+
+    def suggest_extra_token(tokens, weapon_id):
+        # Always suggest adding another ability (which would exceed 57 AP)
+        return {"ink_saver_main_3": 1.0}
+
+    allocator = Allocator()
+    builds = reconstruct_build(
+        suggest_extra_token,
+        "w",
+        ["special_charge_up_57"],
+        allocator,
+        beam_size=1,
+        max_steps=1,
+    )
+    assert builds
+    build = builds[0]
+    assert build.total_ap == 57
+    # Special Charge Up should stay on all mains with 9 subs to hit 57 AP
+    assert set(build.mains.values()) == {"special_charge_up"}
+    assert build.subs.get("special_charge_up") == 9

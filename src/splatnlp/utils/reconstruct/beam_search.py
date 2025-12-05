@@ -253,6 +253,15 @@ def reconstruct_build(
         cap = AbilityToken.from_vocab_entry(tok)
         initial_capstones[tok] = cap
 
+    # Track the best build so far and tracing storage
+    top_candidates: list[tuple[float, Build, list[TraceFrame]]] = []
+
+    # Evaluate the raw user-provided context before any greedy expansion so a
+    # valid starting build is always considered.
+    user_build, user_penalty = allocator.allocate(dict(initial_capstones))
+    if user_build is not None:
+        top_candidates.append((0.0 - alpha * user_penalty, user_build, []))
+
     # 2) Run greedy closure to get initial state
     if record_traces:
         initial_capstones, step, greedy_trace = greedy_closure(
@@ -280,8 +289,16 @@ def reconstruct_build(
         )
     ]
 
-    # 3) Track the best build so far and tracing storage
-    top_candidates: list[tuple[float, Build, list[TraceFrame]]] = []
+    # Evaluate the greedy state before any expansions so a valid starting build
+    # cannot be pruned from the beam (e.g., when the context already fills all
+    # 57 AP and any added token would make allocation impossible).
+    initial_build, initial_penalty = allocator.allocate(initial_capstones)
+    if initial_build is not None:
+        initial_score = beam[0].log_prob - alpha * initial_penalty
+        if not any(b == initial_build for _, b, _ in top_candidates):
+            top_candidates.append(
+                (initial_score, initial_build, list(greedy_trace))
+            )
 
     # 4) Run beam search for refinements
     # Continue step numbering from the greedy phase

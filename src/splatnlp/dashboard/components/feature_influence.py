@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, dcc, html
+from dash import Input, Output, State, callback, dcc, html, no_update
 from dash.dash_table import DataTable
 
 from splatnlp.dashboard.fs_database import FSDatabase
@@ -25,6 +25,26 @@ feature_influence_component = html.Div(
                     type="default",
                     children=[
                         html.Div(id="influence-summary"),
+                        # Search box for filtering
+                        html.Div(
+                            [
+                                html.Label(
+                                    "Filter tokens:",
+                                    className="me-2 fw-bold",
+                                ),
+                                dcc.Input(
+                                    id="influence-search-input",
+                                    type="text",
+                                    placeholder="Search tokens...",
+                                    debounce=True,
+                                    className="form-control",
+                                    style={"maxWidth": "300px"},
+                                ),
+                            ],
+                            className="d-flex align-items-center mb-3",
+                        ),
+                        # Store for full influence data
+                        dcc.Store(id="influence-data-store"),
                         html.Div(
                             [
                                 html.Div(
@@ -77,23 +97,28 @@ feature_influence_component = html.Div(
 @callback(
     [
         Output("influence-summary", "children"),
-        Output("positive-influence-table", "children"),
-        Output("negative-influence-table", "children"),
+        Output("influence-data-store", "data"),
         Output("influence-chart", "figure"),
     ],
-    [Input("feature-dropdown", "value")],
+    [
+        Input("feature-dropdown", "value"),
+        Input("active-tab-store", "data"),
+    ],
     State("feature-dropdown", "value"),
 )
 def update_feature_influence(
-    selected_feature_id: int | None, _: int | None
-) -> tuple[Any, Any, Any, dict]:
-    """Update feature influence displays."""
+    selected_feature_id: int | None, active_tab: str | None, _: int | None
+) -> tuple[Any, Any, dict]:
+    """Update feature influence displays and store data."""
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
+
+    # Lazy loading: skip if tab is not active
+    if active_tab != "tab-influence":
+        return no_update, no_update, no_update
 
     empty_return = (
         html.Div("Select a feature to view influence data"),
-        html.Div(),
-        html.Div(),
+        {"pos_data": [], "neg_data": []},
         {"data": [], "layout": {}},
     )
 
@@ -110,8 +135,7 @@ def update_feature_influence(
                 "Influence data not available. Please run precomputation script.",
                 className="alert alert-warning",
             ),
-            html.Div(),
-            html.Div(),
+            {"pos_data": [], "neg_data": []},
             {"data": [], "layout": {}},
         )
 
@@ -129,8 +153,7 @@ def update_feature_influence(
                 f"No influence data for Feature {selected_feature_id}",
                 className="alert alert-info",
             ),
-            html.Div(),
-            html.Div(),
+            {"pos_data": [], "neg_data": []},
             {"data": [], "layout": {}},
         )
 
@@ -156,34 +179,46 @@ def update_feature_influence(
             else:
                 break  # We've reached the end of available influences
 
+        # Positive influences: only include if value > 0
         if pos_tok_col in feature_row and pd.notna(feature_row[pos_tok_col]):
-            pos_data.append(
-                {
-                    "Rank": i,
-                    "Token": feature_row[pos_tok_col],
-                    "Influence": f"{feature_row[pos_val_col]:.4f}",
-                }
-            )
+            val = float(feature_row[pos_val_col])
+            if val > 0:
+                pos_data.append(
+                    {
+                        "Rank": i,
+                        "Token": feature_row[pos_tok_col],
+                        "Influence": f"{val:.4f}",
+                        "raw_value": val,
+                    }
+                )
 
+        # Negative influences: only include if value < 0
         if neg_tok_col in feature_row and pd.notna(feature_row[neg_tok_col]):
-            neg_data.append(
-                {
-                    "Rank": i,
-                    "Token": feature_row[neg_tok_col],
-                    "Influence": f"{feature_row[neg_val_col]:.4f}",
-                }
-            )
+            val = float(feature_row[neg_val_col])
+            if val < 0:
+                neg_data.append(
+                    {
+                        "Rank": i,
+                        "Token": feature_row[neg_tok_col],
+                        "Influence": f"{val:.4f}",
+                        "raw_value": val,
+                    }
+                )
 
     # Calculate summary statistics based on actual available data
     pos_sum = sum(
         float(feature_row[f"+{i}_val"])
         for i in range(1, max_influences + 1)
-        if f"+{i}_val" in feature_row and pd.notna(feature_row[f"+{i}_val"])
+        if f"+{i}_val" in feature_row
+        and pd.notna(feature_row[f"+{i}_val"])
+        and float(feature_row[f"+{i}_val"]) > 0
     )
     neg_sum = sum(
         float(feature_row[f"-{i}_val"])
         for i in range(1, max_influences + 1)
-        if f"-{i}_val" in feature_row and pd.notna(feature_row[f"-{i}_val"])
+        if f"-{i}_val" in feature_row
+        and pd.notna(feature_row[f"-{i}_val"])
+        and float(feature_row[f"-{i}_val"]) < 0
     )
     net_influence = pos_sum + neg_sum
 
@@ -220,7 +255,7 @@ def update_feature_influence(
             html.P(
                 [
                     html.Small(
-                        f"Showing {len(pos_data)} positive and {len(neg_data)} negative influences",
+                        f"Found {len(pos_data)} positive and {len(neg_data)} negative influences",
                         className="text-muted",
                     ),
                 ],
@@ -229,64 +264,19 @@ def update_feature_influence(
         ]
     )
 
-    # Create tables - show all available data (up to 30 items)
-    pos_table = DataTable(
-        data=pos_data,  # Show all available positive influences
-        columns=[
-            {"name": "Rank", "id": "Rank"},
-            {"name": "Token", "id": "Token"},
-            {"name": "Influence", "id": "Influence"},
-        ],
-        style_cell={"textAlign": "left"},
-        style_data_conditional=[
-            {
-                "if": {"row_index": 0},
-                "backgroundColor": "rgba(0, 255, 0, 0.1)",
-            },
-            {
-                "if": {"row_index": 1},
-                "backgroundColor": "rgba(0, 255, 0, 0.08)",
-            },
-            {
-                "if": {"row_index": 2},
-                "backgroundColor": "rgba(0, 255, 0, 0.06)",
-            },
-        ],
-        style_table={"height": "auto", "overflowY": "auto"},
-    )
+    # Store full data for filtering
+    store_data = {
+        "pos_data": pos_data,
+        "neg_data": neg_data,
+    }
 
-    neg_table = DataTable(
-        data=neg_data,  # Show all available negative influences
-        columns=[
-            {"name": "Rank", "id": "Rank"},
-            {"name": "Token", "id": "Token"},
-            {"name": "Influence", "id": "Influence"},
-        ],
-        style_cell={"textAlign": "left"},
-        style_data_conditional=[
-            {
-                "if": {"row_index": 0},
-                "backgroundColor": "rgba(255, 0, 0, 0.1)",
-            },
-            {
-                "if": {"row_index": 1},
-                "backgroundColor": "rgba(255, 0, 0, 0.08)",
-            },
-            {
-                "if": {"row_index": 2},
-                "backgroundColor": "rgba(255, 0, 0, 0.06)",
-            },
-        ],
-        style_table={"height": "auto", "overflowY": "auto"},
-    )
-
-    # Create visualization
+    # Create visualization (top 15 each)
     fig = go.Figure()
 
     # Add positive influences
     if pos_data:
         pos_tokens = [d["Token"] for d in pos_data[:15]]
-        pos_values = [float(d["Influence"]) for d in pos_data[:15]]
+        pos_values = [d["raw_value"] for d in pos_data[:15]]
         fig.add_trace(
             go.Bar(
                 x=pos_values,
@@ -302,7 +292,7 @@ def update_feature_influence(
     # Add negative influences
     if neg_data:
         neg_tokens = [d["Token"] for d in neg_data[:15]]
-        neg_values = [float(d["Influence"]) for d in neg_data[:15]]
+        neg_values = [d["raw_value"] for d in neg_data[:15]]
         fig.add_trace(
             go.Bar(
                 x=neg_values,
@@ -328,4 +318,94 @@ def update_feature_influence(
         ),
     )
 
-    return summary, pos_table, neg_table, fig
+    return summary, store_data, fig
+
+
+@callback(
+    [
+        Output("positive-influence-table", "children"),
+        Output("negative-influence-table", "children"),
+    ],
+    [
+        Input("influence-data-store", "data"),
+        Input("influence-search-input", "value"),
+    ],
+)
+def filter_influence_tables(
+    store_data: dict | None, search_term: str | None
+) -> tuple[Any, Any]:
+    """Filter influence tables based on search term."""
+    if store_data is None:
+        return html.Div(), html.Div()
+
+    pos_data = store_data.get("pos_data", [])
+    neg_data = store_data.get("neg_data", [])
+
+    # Apply search filter if provided
+    if search_term:
+        search_lower = search_term.lower()
+        pos_data = [d for d in pos_data if search_lower in d["Token"].lower()]
+        neg_data = [d for d in neg_data if search_lower in d["Token"].lower()]
+
+    # Prepare display data (remove raw_value for table display)
+    pos_display = [
+        {"Rank": d["Rank"], "Token": d["Token"], "Influence": d["Influence"]}
+        for d in pos_data
+    ]
+    neg_display = [
+        {"Rank": d["Rank"], "Token": d["Token"], "Influence": d["Influence"]}
+        for d in neg_data
+    ]
+
+    # Create tables
+    pos_table = DataTable(
+        data=pos_display,
+        columns=[
+            {"name": "Rank", "id": "Rank"},
+            {"name": "Token", "id": "Token"},
+            {"name": "Influence", "id": "Influence"},
+        ],
+        style_cell={"textAlign": "left"},
+        style_data_conditional=[
+            {
+                "if": {"filter_query": "{Rank} = 1"},
+                "backgroundColor": "rgba(0, 255, 0, 0.1)",
+            },
+            {
+                "if": {"filter_query": "{Rank} = 2"},
+                "backgroundColor": "rgba(0, 255, 0, 0.08)",
+            },
+            {
+                "if": {"filter_query": "{Rank} = 3"},
+                "backgroundColor": "rgba(0, 255, 0, 0.06)",
+            },
+        ],
+        style_table={"height": "auto", "overflowY": "auto"},
+    )
+
+    neg_table = DataTable(
+        data=neg_display,
+        columns=[
+            {"name": "Rank", "id": "Rank"},
+            {"name": "Token", "id": "Token"},
+            {"name": "Influence", "id": "Influence"},
+        ],
+        style_cell={"textAlign": "left"},
+        style_data_conditional=[
+            {
+                "if": {"filter_query": "{Rank} = 1"},
+                "backgroundColor": "rgba(255, 0, 0, 0.1)",
+            },
+            {
+                "if": {"filter_query": "{Rank} = 2"},
+                "backgroundColor": "rgba(255, 0, 0, 0.08)",
+            },
+            {
+                "if": {"filter_query": "{Rank} = 3"},
+                "backgroundColor": "rgba(255, 0, 0, 0.06)",
+            },
+        ],
+        style_table={"height": "auto", "overflowY": "auto"},
+    )
+
+    return pos_table, neg_table

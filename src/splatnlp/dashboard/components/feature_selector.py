@@ -1,7 +1,7 @@
 from typing import List, Optional, Tuple
 
 import dash_bootstrap_components as dbc
-from dash import Input, Output, State, callback, dcc, html
+from dash import Input, Output, State, callback, callback_context, dcc, html, no_update
 
 # DASHBOARD_CONTEXT will be populated by the main script in app.py
 
@@ -14,6 +14,8 @@ feature_selector_layout = html.Div(
             value=None,  # Default selection, will be updated by URL or set to 0
             clearable=False,
             searchable=True,
+            persistence=True,
+            persistence_type="session",
         ),
     ],
     className="mb-4",
@@ -40,8 +42,15 @@ def populate_feature_options(
 
     logger = logging.getLogger(__name__)
 
+    # Check what triggered this callback
+    ctx = callback_context
+    triggered_id = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else None
+
+    # If triggered by label update, only refresh options, don't change the value
+    labels_only_update = triggered_id == "feature-labels-updated"
+
     logger.debug(
-        f"Dropdown refresh triggered, labels_updated_counter: {labels_updated_counter}"
+        f"Dropdown refresh triggered by {triggered_id}, labels_updated_counter: {labels_updated_counter}"
     )
 
     options: List[dict] = []
@@ -122,7 +131,7 @@ def populate_feature_options(
             default_value = -1
 
     # Determine initial value: URL query param > current_value (if valid) > default_value from DB list
-    final_value = default_value
+    final_value = current_value if current_value is not None else default_value
 
     if search_query:
         try:
@@ -145,16 +154,6 @@ def populate_feature_options(
                 f"FeatureSelector: Error parsing URL query for feature: {e}"
             )
             # Keep final_value as default_value if URL parsing fails or feature is invalid
-
-    # If URL did not set a valid feature, and a current_value exists and is valid, keep it.
-    # This handles cases where user has selected something, then page reloads for other reasons (e.g. label update).
-    elif current_value is not None and any(
-        opt["value"] == current_value
-        for opt in options
-        if not opt.get("disabled")
-    ):
-        final_value = current_value
-
     # Ensure final_value is sensible if the list of options is empty or only contains disabled items.
     if not options or all(opt.get("disabled") for opt in options):
         final_value = -1  # Or some other indicator of no valid selection
@@ -168,8 +167,14 @@ def populate_feature_options(
             ]
 
     logger.debug(
-        f"Populating feature dropdown. Options count: {len(options)}. Final value: {final_value}"
+        f"Populating feature dropdown. Options count: {len(options)}. Final value: {final_value}. Labels only: {labels_only_update}"
     )
+
+    # If this was triggered by a label update, don't change the selected value
+    # This prevents a loop where saving labels triggers dropdown change which triggers editor refresh
+    if labels_only_update:
+        return options, no_update
+
     return options, final_value
 
 

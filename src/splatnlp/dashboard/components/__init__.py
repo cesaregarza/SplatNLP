@@ -5,6 +5,9 @@ from splatnlp.dashboard.components.activation_hist import (
 from splatnlp.dashboard.components.correlations_component import (
     correlations_component,
 )
+from splatnlp.dashboard.components.cluster_map_component import (
+    cluster_map_component,
+)
 from splatnlp.dashboard.components.example_features_component import (
     example_features_component,
 )
@@ -26,6 +29,15 @@ from splatnlp.dashboard.components.top_examples_component import (
 from splatnlp.dashboard.components.top_logits_component import (
     top_logits_component,
 )
+from splatnlp.dashboard.components.feature_comparison_component import (
+    feature_comparison_component,
+)
+from splatnlp.dashboard.components.pagerank_component import (
+    pagerank_component,
+)
+from splatnlp.dashboard.components.inference_component import (
+    inference_component,
+)
 
 __all__ = [
     "activation_hist_component",
@@ -38,4 +50,8 @@ __all__ = [
     "correlations_component",
     "ablation_component",
     "example_features_component",
+    "cluster_map_component",
+    "feature_comparison_component",
+    "pagerank_component",
+    "inference_component",
 ]

@@ -77,9 +77,11 @@ def generate_weapon_name_mapping(
 ) -> dict[int, str]:
     """Generate a mapping of weapon IDs to weapon names."""
     _, id_to_name, _ = generate_maps()
-    return {
-        k: id_to_name[v.split("_")[-1]] for k, v in inv_weapon_vocab.items()
-    }
+    result = {}
+    for k, v in inv_weapon_vocab.items():
+        weapon_id_str = v.split("_")[-1]
+        result[k] = id_to_name.get(weapon_id_str, f"Weapon {weapon_id_str}")
+    return result
 
 
 class WeaponProperties(TypedDict):

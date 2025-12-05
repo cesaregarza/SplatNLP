@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import plotly.express as px
-from dash import Input, Output, callback, dcc, html
+from dash import Input, Output, callback, dcc, html, no_update
 
 from splatnlp.model.models import SetCompletionModel
 
@@ -127,14 +127,20 @@ def compute_logit_influences(
     [
         Input("feature-dropdown", "value"),
         Input("filter-tokens-radio", "value"),
+        Input("active-tab-store", "data"),
     ],
 )
 def update_top_logits_graph(
     selected_feature_id: int | None,
     filter_type: str,
+    active_tab: str | None,
 ) -> tuple[dict[str, Any], dict[str, Any], str]:
     """Update the top logits graphs when a feature is selected."""
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
+
+    # Lazy loading: skip if tab is not active
+    if active_tab != "tab-logits":
+        return no_update, no_update, no_update
 
     if selected_feature_id is None:
         return {}, {}, "No feature selected."

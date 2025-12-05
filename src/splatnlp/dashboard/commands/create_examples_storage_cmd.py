@@ -48,12 +48,14 @@ class OptimizedExampleStorage:
         top_k: int = 100,
         activation_threshold: float = 0.1,
         n_features: int = 24576,
+        include_negative: bool = False,
     ):
         self.data_dir = Path(data_dir)
         self.output_dir = Path(output_dir)
         self.top_k = top_k
         self.threshold = activation_threshold
         self.n_features = n_features
+        self.include_negative = include_negative
 
         # Create output directory
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -116,9 +118,16 @@ class OptimizedExampleStorage:
 
             # Find all non-zero activations efficiently
             # This gives us (sample_idx, feature_idx) pairs where activation > threshold
-            sample_indices, feature_indices = np.where(
-                act_chunk > self.threshold
-            )
+            if self.include_negative:
+                # Include both positive and negative activations
+                sample_indices, feature_indices = np.where(
+                    np.abs(act_chunk) > self.threshold
+                )
+            else:
+                # Only positive activations
+                sample_indices, feature_indices = np.where(
+                    act_chunk > self.threshold
+                )
 
             if chunk_idx % 5 == 0:
                 logger.info(
@@ -254,6 +263,7 @@ class OptimizedExampleStorage:
             "threshold": self.threshold,
             "total_examples": len(all_examples),
             "features_with_examples": len(feature_index),
+            "includes_negative_activations": self.include_negative,
         }
 
         with open(self.output_dir / "storage_metadata.json", "wb") as f:
@@ -336,16 +346,56 @@ class OptimizedExampleReader:
 
 def main():
     """Build optimized storage."""
+    import argparse
 
-    data_dir = Path("/mnt/e/activations_ultra_efficient")
-    output_dir = Path("/mnt/e/dashboard_examples_optimized")
+    parser = argparse.ArgumentParser(
+        description="Build optimized example storage for the dashboard."
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=str,
+        default="/mnt/e/activations_ultra_efficient",
+        help="Path to the activation data directory",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="/mnt/e/dashboard_examples_optimized",
+        help="Path to output directory",
+    )
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=100,
+        help="Number of top examples to keep per feature",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.1,
+        help="Activation threshold",
+    )
+    parser.add_argument(
+        "--include-negative",
+        action="store_true",
+        help="Include negative activations (required for PageRank analysis)",
+    )
+
+    args = parser.parse_args()
+
+    data_dir = Path(args.data_dir)
+    output_dir = Path(args.output_dir)
 
     builder = OptimizedExampleStorage(
         data_dir=data_dir,
         output_dir=output_dir,
-        top_k=100,
-        activation_threshold=0.1,
+        top_k=args.top_k,
+        activation_threshold=args.threshold,
+        include_negative=args.include_negative,
     )
+
+    if args.include_negative:
+        logger.info("Including negative activations (required for PageRank)")
 
     builder.process_all_batches()
 

@@ -94,11 +94,15 @@ from splatnlp.dashboard.components import (
     ablation_component,
     activation_hist_component,
     correlations_component,
+    cluster_map_component,
     example_features_component,
+    feature_comparison_component,
     feature_influence_component,
     feature_selector_layout,
     feature_summary_component,
+    inference_component,
     intervals_grid_component,
+    pagerank_component,
     token_analysis,
     top_examples_component,
     top_logits_component,
@@ -118,6 +122,7 @@ app.layout = dbc.Container(
         dcc.Location(id="url", refresh=False),
         dcc.Store(id="page-load-trigger", storage_type="memory"),
         dcc.Store(id="feature-labels-updated", storage_type="memory", data=0),
+        dcc.Store(id="active-tab-store", storage_type="memory", data="tab-overview"),
         dbc.Row(
             [
                 dbc.Col(
@@ -142,6 +147,11 @@ app.layout = dbc.Container(
                                         feature_summary_component,
                                         activation_hist_component,
                                     ],
+                                ),
+                                dbc.Tab(
+                                    label="Clusters",
+                                    tab_id="tab-clusters",
+                                    children=cluster_map_component,
                                 ),
                                 dbc.Tab(
                                     label="Top Examples",
@@ -181,6 +191,21 @@ app.layout = dbc.Container(
                                     tab_id="tab-ablation",
                                     children=ablation_component,
                                 ),
+                                dbc.Tab(
+                                    label="Feature Comparison",
+                                    tab_id="tab-comparison",
+                                    children=feature_comparison_component,
+                                ),
+                                dbc.Tab(
+                                    label="PageRank",
+                                    tab_id="tab-pagerank",
+                                    children=pagerank_component,
+                                ),
+                                dbc.Tab(
+                                    label="Inference",
+                                    tab_id="tab-inference",
+                                    children=inference_component,
+                                ),
                             ],
                         )
                     ],
@@ -193,6 +218,17 @@ app.layout = dbc.Container(
 )
 
 
+# Callback to track active tab for lazy loading
+@app.callback(
+    Output("active-tab-store", "data"),
+    Input("analysis-tabs", "active_tab"),
+)
+def track_active_tab(active_tab):
+    """Track which tab is currently active for lazy loading optimization."""
+    logger.debug(f"Active tab changed to: {active_tab}")
+    return active_tab
+
+
 # Register callbacks for the example features component
 @app.callback(
     [
@@ -200,10 +236,20 @@ app.layout = dbc.Container(
         Output("example-indices-store", "data"),
         Output("example-features-error", "children"),
     ],
-    [Input("feature-dropdown", "value")],
+    [
+        Input("feature-dropdown", "value"),
+        Input("active-tab-store", "data"),
+    ],
 )
-def update_example_cards(selected_feature_id):
+def update_example_cards(selected_feature_id, active_tab):
     """Load top examples for the selected feature and create cards."""
+    # Lazy loading: skip if tab is not active
+    if active_tab != "tab-example-features":
+        logger.debug(
+            f"Skipping update_example_cards - tab {active_tab} is not active"
+        )
+        return no_update, no_update, no_update
+
     logger.info(
         f"update_example_cards called with feature_id={selected_feature_id}"
     )
@@ -356,13 +402,14 @@ def update_feature_label_editor(selected_feature_id):
         Output("labeling-statistics-container", "children"),
     ],
     [
-        Input("save-label-btn", "n_clicks"),
-        Input("delete-label-btn", "n_clicks"),
+        Input("save-feature-labels-btn", "n_clicks"),
+        Input("clear-feature-labels-btn", "n_clicks"),
     ],
     [
         State("feature-dropdown", "value"),
-        State("feature-label-input", "value"),
-        State("feature-confidence-dropdown", "value"),
+        State("feature-name-input", "value"),
+        State("feature-category-radio", "value"),
+        State("feature-notes-textarea", "value"),
         State("feature-labels-updated", "data"),
     ],
 )
@@ -370,12 +417,17 @@ def handle_label_actions(
     save_clicks,
     delete_clicks,
     feature_id,
-    label_text,
-    confidence,
+    feature_name,
+    category,
+    notes,
     update_counter,
 ):
     """Handle save and delete actions for feature labels."""
     from dash import callback_context
+    from splatnlp.dashboard.components.feature_labels import FeatureLabel
+
+    if update_counter is None:
+        update_counter = 0
 
     if not callback_context.triggered:
         # Initial load - just show statistics
@@ -396,47 +448,44 @@ def handle_label_actions(
     button_id = callback_context.triggered[0]["prop_id"].split(".")[0]
     manager = DASHBOARD_CONTEXT.feature_labels_manager
 
-    if button_id == "save-label-btn" and feature_id is not None:
-        if label_text:
-            success = manager.set_label(feature_id, label_text, confidence)
-            if success:
-                # Update statistics
-                stats = create_labeling_statistics(manager)
-                return (
-                    html.Div(
-                        f"✓ Label saved for feature {feature_id}",
-                        className="text-success",
-                    ),
-                    update_counter + 1,
-                    stats,
-                )
-            return (
-                html.Div("Failed to save label", className="text-danger"),
-                update_counter,
-                create_labeling_statistics(manager),
-            )
+    logger.info(
+        "handle_label_actions triggered",
+        extra={
+            "button_id": button_id,
+            "feature_id": feature_id,
+            "feature_name": feature_name,
+            "category": category,
+        },
+    )
+
+    if button_id == "save-feature-labels-btn" and feature_id is not None:
+        label_obj = FeatureLabel(
+            name=feature_name or "",
+            category=category or "",
+            notes=notes or "",
+        )
+        manager.set_label(feature_id, label_obj)
+        stats = create_labeling_statistics(manager)
         return (
-            html.Div("Please enter a label", className="text-warning"),
-            update_counter,
-            create_labeling_statistics(manager),
+            html.Div(
+                f"✓ Label saved for feature {feature_id}",
+                className="text-success",
+            ),
+            update_counter + 1,
+            stats,
         )
 
-    elif button_id == "delete-label-btn" and feature_id is not None:
-        success = manager.delete_label(feature_id)
-        if success:
-            stats = create_labeling_statistics(manager)
-            return (
-                html.Div(
-                    f"✓ Label deleted for feature {feature_id}",
-                    className="text-success",
-                ),
-                update_counter + 1,
-                stats,
-            )
+    if button_id == "clear-feature-labels-btn" and feature_id is not None:
+        manager.feature_labels.pop(feature_id, None)
+        manager.save_labels()
+        stats = create_labeling_statistics(manager)
         return (
-            html.Div("No label to delete", className="text-info"),
-            update_counter,
-            create_labeling_statistics(manager),
+            html.Div(
+                f"Label cleared for feature {feature_id}",
+                className="text-info",
+            ),
+            update_counter + 1,
+            stats,
         )
 
     return "", update_counter, create_labeling_statistics(manager)
@@ -445,10 +494,17 @@ def handle_label_actions(
 # Add callbacks for new token analysis components
 @app.callback(
     Output("single-token-examples", "children"),
-    Input("feature-dropdown", "value"),
+    [
+        Input("feature-dropdown", "value"),
+        Input("active-tab-store", "data"),
+    ],
 )
-def update_single_token_examples(feature_id):
+def update_single_token_examples(feature_id, active_tab):
     """Update single token examples when feature selection changes."""
+    # Lazy loading: skip if tab is not active
+    if active_tab != "tab-tokens":
+        return no_update
+
     if feature_id is None:
         return "Select a feature to see single token examples."
 
@@ -471,10 +527,17 @@ def update_single_token_examples(feature_id):
 
 @app.callback(
     Output("token-pair-examples", "children"),
-    Input("feature-dropdown", "value"),
+    [
+        Input("feature-dropdown", "value"),
+        Input("active-tab-store", "data"),
+    ],
 )
-def update_token_pair_examples(feature_id):
+def update_token_pair_examples(feature_id, active_tab):
     """Update token pair examples when feature selection changes."""
+    # Lazy loading: skip if tab is not active
+    if active_tab != "tab-tokens":
+        return no_update
+
     if feature_id is None:
         return "Select a feature to see token pair examples."
 
@@ -497,10 +560,17 @@ def update_token_pair_examples(feature_id):
 
 @app.callback(
     Output("token-triple-examples", "children"),
-    Input("feature-dropdown", "value"),
+    [
+        Input("feature-dropdown", "value"),
+        Input("active-tab-store", "data"),
+    ],
 )
-def update_token_triple_examples(feature_id):
+def update_token_triple_examples(feature_id, active_tab):
     """Update token triple examples when feature selection changes."""
+    # Lazy loading: skip if tab is not active
+    if active_tab != "tab-tokens":
+        return no_update
+
     if feature_id is None:
         return "Select a feature to see token triple examples."
 

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import joblib
 import orjson
+import pandas as pd
 import torch
 
 from splatnlp.dashboard.app import DASHBOARD_CONTEXT as app_context_ref
@@ -43,6 +44,7 @@ def load_dashboard_data(args_ns: argparse.Namespace):
 
     primary_model = None
     sae_model = None
+    feature_clusters = None
     if args_ns.enable_dynamic_tooltips:
         logger.info("Loading models for dynamic tooltips...")
         primary_model = SetCompletionModel(
@@ -214,6 +216,27 @@ def load_dashboard_data(args_ns: argparse.Namespace):
             f"For command '{args_ns.main_command}', no database or precomputed analytics available. Command may not function as expected."
         )
 
+    # Optional feature clusters (for visualization)
+    clusters_path = getattr(args_ns, "feature_clusters_path", None)
+    if clusters_path:
+        cluster_path_obj = Path(clusters_path)
+        if cluster_path_obj.exists():
+            try:
+                feature_clusters = pd.read_parquet(cluster_path_obj)
+                logger.info(
+                    "Loaded feature clusters from "
+                    f"{cluster_path_obj} ({len(feature_clusters)} rows)."
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Could not load feature clusters from "
+                    f"{cluster_path_obj}: {exc}"
+                )
+        else:
+            logger.warning(
+                f"Feature clusters path not found: {cluster_path_obj}"
+            )
+
     # Get model type from args, default to "full" if not specified
     model_type = getattr(args_ns, "model_type", "full")
     feature_labels_manager = FeatureLabelsManager(model_type=model_type)
@@ -230,6 +253,7 @@ def load_dashboard_data(args_ns: argparse.Namespace):
         feature_labels_manager=feature_labels_manager,
         device=DEVICE,
         model_type=model_type,
+        feature_clusters=feature_clusters,
     )
     return dashboard_context_data
 
@@ -340,6 +364,11 @@ def setup_run_parser(subparsers):
     run_parser.add_argument("--primary-num-inducing", type=int, default=32)
     run_parser.add_argument("--sae-expansion-factor", type=float, default=4.0)
 
+    run_parser.add_argument(
+        "--feature-clusters-path",
+        type=str,
+        help="Path to feature cluster parquet for visualization.",
+    )
     run_parser.add_argument("--host", type=str, default="127.0.0.1")
     run_parser.add_argument("--port", type=int, default=8050)
     run_parser.add_argument("--debug", action="store_true")
@@ -456,6 +485,7 @@ def run_dashboard_server(args):
     )
     app_context_ref.device = dashboard_data_obj.device
     app_context_ref.model_type = dashboard_data_obj.model_type
+    app_context_ref.feature_clusters = dashboard_data_obj.feature_clusters
 
     # Set influence data if available
     if hasattr(dashboard_data_obj.db_context, "influence_data"):

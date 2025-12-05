@@ -15,7 +15,7 @@ The model is approximately **83 million parameters** in size and is available in
 - **Full:** Trained on a single H100 GPU for 62 hours, using 5 subset variants per data point (each subset created via randomized masking). This variant is extensively explored and includes a fully-trained monosemantic sparse autoencoder (SAE) with numerous labeled neurons for interpretability.
 - **Ultra:** Trained on four B200 GPUs for 35 hours, utilizing 20 subset variants per data point. Currently undergoing exploration; its monosemantic SAE is actively being trained.
 
-A Google Colab notebook demonstrating inference and analysis for both variants is coming soon.
+Both variants are represented in `saved_models/` for offline inspection (see the quickstart below).
 
 **Sparse Autoencoder (SAE):** The SAE is trained on the activations of the primary model to provide a sparse, monosemantic representation of the gear sets. This allows for interpretability and feature analysis of the model's predictions (see the `monosemantic_sae` module). It includes a `SetCompletionHook` that can be used to hook into the primary model and modify the activations during inference for model steering. This is based on Anthropic's work: [Towards Monosemanticity](https://transformer-circuits.pub/2023/monosemantic-features/index.html)
 
@@ -62,6 +62,53 @@ SplatNLP/
 ├── pyproject.toml                  # Project dependencies and configuration
 └── README.md                       # Project overview
 ```
+## Quickstart (local CPU demo, no downloads)
+
+This uses the included 83M param checkpoint and vocabs in `saved_models/dataset_v0_2`.
+
+1. Install dependencies (dev extras include formatting/testing):\
+   `poetry install --with dev`
+2. Run a one-off inference:
+
+   ```bash
+   poetry run python - <<'PY'
+   import orjson, torch
+   from pathlib import Path
+   from splatnlp.model.models import SetCompletionModel
+   from splatnlp.serve.tokenize import tokenize_build
+
+   base = Path("saved_models/dataset_v0_2")
+   params = orjson.loads(base.joinpath("model_params.json").read_bytes())
+   vocab = orjson.loads(base.joinpath("vocab.json").read_bytes())
+   weapon_vocab = orjson.loads(base.joinpath("weapon_vocab.json").read_bytes())
+
+   model = SetCompletionModel(**params)
+   model.load_state_dict(torch.load(base / "model.pth", map_location="cpu"))
+   model.eval()
+
+   tokens = tokenize_build({"ink_saver_main": 6, "run_speed_up": 12, "intensify_action": 10})
+   weapon_id = "weapon_id_1001"
+   input_tokens = torch.tensor([[vocab[t] for t in tokens]])
+   input_weapons = torch.tensor([[weapon_vocab[weapon_id]]])
+   key_padding_mask = input_tokens == params["pad_token_id"]
+
+   with torch.no_grad():
+       preds = torch.sigmoid(
+           model(input_tokens, input_weapons, key_padding_mask=key_padding_mask)
+       ).squeeze()
+
+   skip = {vocab["<PAD>"], vocab["<NULL>"]}
+   inv_vocab = {v: k for k, v in vocab.items()}
+   scores = [(i, float(p)) for i, p in enumerate(preds.tolist()) if i not in skip]
+   top5 = sorted(scores, key=lambda x: x[1], reverse=True)[:5]
+   print("tokens:", tokens)
+   print("top-5:", [(inv_vocab[i], p) for i, p in top5])
+   PY
+   ```
+
+3. (Optional) Run the test suite (uses the small fixtures under `test_data/`):\
+   `poetry run pytest -q`
+
 ## Setup
 
 1.  **Clone the repository:**
@@ -77,13 +124,18 @@ SplatNLP/
     # On Windows:
     # venv\Scripts\activate
     ```
-3.  **Install dependencies using Poetry:**
+3.  **Install dependencies using Poetry (includes dev/test tools):**
     ```bash
     pip install poetry # If you don't have poetry installed
-    poetry install
+    poetry install --with dev
     ```
 4.  **(Optional) Set environment variables for serving:**
     The API server (`src/splatnlp/serve/app.py`) loads model artifacts from URLs specified by environment variables. See `src/splatnlp/serve/load_model.py` for details (e.g., `VOCAB_URL`, `MODEL_URL`, `PARAMS_URL`, `WEAPON_VOCAB_URL`, `INFO_URL` or `DO_SPACES_ML_ENDPOINT`/`DO_SPACES_ML_DIR`).
+
+## Development workflow
+
+- Format: `poetry run isort .` then `poetry run black .` (line length 80)
+- Test: `poetry run pytest -q` (uses fixtures under `test_data/`)
 
 ## Usage Examples
 
@@ -208,7 +260,7 @@ python -m scripts.train_sae \
 **5. Run the API Server (Serves `SetCompletionModel`):**
 *(Requires model artifacts accessible via URLs configured through environment variables)*
 
-> NOTE: THIS HAS NO SECURITY MEASURES, IT IS DESIGNED TO BE USED IN A LOCAL ENVIRONMENT OR SILOED OFF IN A CONTAINERIZED ENVIRONMENT WITH STRICT NETWORKING POLICIES. DO NOT DEPLOY THIS IN A PRODUCTION ENVIRONMENT WITHOUT ADDING THE APPROPRIATE SECURITY MEASURES.
+> NOTE: THIS HAS NO SECURITY MEASURES, IT IS DESIGNED TO BE USED IN A LOCAL ENVIRONMENT OR SILOED OFF IN A CONTAINERIZED ENVIRONMENT WITH STRICT NETWORKING POLICIES. DO NOT DEPLOY THIS IN A PRODUCTION ENVIRONMENT WITHOUT ADDING THE APPROPRIATE SECURITY MEASURES. Artifacts are fetched over HTTP and deserialized with `torch.load` (pickle), so only point the env vars at trusted, integrity-checked endpoints.
 
 ```bash
 # Ensure environment variables for model URLs are set (see src/splatnlp/serve/load_model.py)
