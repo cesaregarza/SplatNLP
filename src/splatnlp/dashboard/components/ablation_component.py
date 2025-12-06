@@ -1,23 +1,79 @@
-import json  # For potentially displaying dicts or if data is stored as JSON string
+import json
 import logging
 import re
 import statistics
+from collections import Counter
 from dataclasses import dataclass, field
+from itertools import combinations
 from typing import Literal
 
 import dash
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
-import torch  # Import PyTorch
+import torch
 from dash import ALL, Input, Output, State, callback_context, dcc, html
 
-# Import weapon name mapping utility
 from splatnlp.dashboard.utils.converters import (
     generate_weapon_name_mapping,
     get_weapon_properties_df,
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Activation Data Cache
+# ---------------------------------------------------------------------------
+
+# Simple cache for activation data to avoid repeated loading
+# Key: feature_id, Value: (data, timestamp)
+_activation_cache: dict = {}
+_CACHE_MAX_SIZE = 5  # Keep last 5 features in cache
+
+
+def get_cached_activations(feature_id: int):
+    """Get activation data from cache or load it."""
+    import time
+
+    from splatnlp.dashboard.app import DASHBOARD_CONTEXT
+
+    # Check cache
+    if feature_id in _activation_cache:
+        data, ts = _activation_cache[feature_id]
+        logger.debug(f"[Cache] Hit for feature {feature_id}")
+        return data
+
+    # Load from database
+    logger.info(f"[Cache] Miss for feature {feature_id}, loading...")
+    db = DASHBOARD_CONTEXT.db
+    try:
+        data = db.get_all_feature_activations_for_pagerank(feature_id)
+    except Exception as e:
+        logger.error(f"Failed to get activations: {e}")
+        return None
+
+    if data is not None and len(data) > 0:
+        # Evict oldest if cache full
+        if len(_activation_cache) >= _CACHE_MAX_SIZE:
+            oldest_key = min(
+                _activation_cache.keys(), key=lambda k: _activation_cache[k][1]
+            )
+            del _activation_cache[oldest_key]
+            logger.debug(f"[Cache] Evicted feature {oldest_key}")
+
+        _activation_cache[feature_id] = (data, time.time())
+        logger.info(
+            f"[Cache] Stored feature {feature_id} ({len(data)} examples)"
+        )
+
+    return data
+
+
+def clear_activation_cache():
+    """Clear the activation cache."""
+    global _activation_cache
+    _activation_cache = {}
+    logger.info("[Cache] Cleared")
 
 
 # ---------------------------------------------------------------------------
@@ -59,10 +115,6 @@ class SweepResults:
     token_results: list[TokenSweepResult]
     weapon_results: list[WeaponSweepResult]
 
-
-# ---------------------------------------------------------------------------
-# Data Structures for Full Sweep Analysis
-# ---------------------------------------------------------------------------
 
 # Regex to parse ability tokens: "swim_speed_up_21" -> ("swim_speed_up", 21)
 ABILITY_FAMILY_RE = re.compile(r"^([a-z_]+?)_(\d+)$")
@@ -133,8 +185,11 @@ class FullSweepResults:
     null_base_by_special: list[WeaponGroupResult] = field(default_factory=list)
     null_base_by_sub: list[WeaponGroupResult] = field(default_factory=list)
     null_base_by_class: list[WeaponGroupResult] = field(default_factory=list)
-    # Individual weapon activations (filtered by threshold) - (name, activation)
-    null_base_weapons: list[tuple[str, float]] = field(default_factory=list)
+    # Individual weapon activations (filtered by threshold)
+    # Each entry: (name, activation, special, sub, weapon_class)
+    null_base_weapons: list[tuple[str, float, str, str, str]] = field(
+        default_factory=list
+    )
 
 
 @dataclass
@@ -145,6 +200,73 @@ class BuildQueueItem:
     weapon_name: str
     ability_tokens: list[str] = field(default_factory=list)
     description: str = ""
+
+
+@dataclass
+class FrequentItemset:
+    """Result of frequent itemset mining."""
+
+    tokens: tuple[str, ...]  # The token combination
+    support_high: float  # Support in high-activation examples
+    support_baseline: float  # Support in baseline examples
+    lift: float  # Ratio of support_high / support_baseline
+    count_high: int  # Raw count in high activation examples
+
+
+@dataclass
+class ContrastiveItemsetResults:
+    """Results of contrastive frequent itemset analysis."""
+
+    feature_id: int
+    high_threshold_pct: float  # e.g., 1.0 for top 1%
+    n_high_examples: int
+    n_baseline_examples: int
+    itemsets_by_size: dict  # size (2,3,4) -> list[FrequentItemset]
+
+
+@dataclass
+class InteractionScore:
+    """Pairwise or 3-way interaction score."""
+
+    tokens: tuple[str, ...]  # 2 or 3 tokens
+    interaction_value: float  # I > 0: synergy, I < 0: redundancy
+    std_error: float  # Standard error across base contexts
+    n_contexts: int  # Number of base contexts tested
+
+
+@dataclass
+class InteractionSweepResults:
+    """Results of interaction sweep analysis."""
+
+    feature_id: int
+    family_mode: bool  # Whether tokens were collapsed by family
+    candidate_tokens: list[str]  # The pool of tokens tested
+    n_base_contexts: int  # Number of contexts sampled
+    pairwise: list[InteractionScore]
+    three_way: list[InteractionScore] | None  # Optional
+
+
+@dataclass
+class MinimalActivatingSet:
+    """A minimal subset of tokens that maintains activation."""
+
+    original_tokens: list[str]  # Full original token set
+    minimal_tokens: list[str]  # Minimal subset found
+    weapon_name: str  # Weapon used for this example
+    original_activation: float
+    minimal_activation: float
+    retention_ratio: float  # minimal_activation / original_activation
+
+
+@dataclass
+class MinimalSetResults:
+    """Results of minimal activating sets analysis."""
+
+    feature_id: int
+    threshold_ratio: float  # e.g., 0.8 for 80% retention
+    n_examples_analyzed: int
+    minimal_sets: list[MinimalActivatingSet]
+    common_cores: list[tuple[tuple[str, ...], int]]  # (core_tokens, frequency)
 
 
 # Define the layout for the Ablation tab
@@ -463,6 +585,333 @@ layout = html.Div(
                 ),
             ],
             id="full-sweep-accordion-wrapper",
+            start_collapsed=True,
+            className="mt-3",
+        ),
+        # ---------------------------------------------------------------------------
+        # Higher-Order Interaction Analysis Section
+        # ---------------------------------------------------------------------------
+        html.Hr(className="my-4"),
+        html.H4("Higher-Order Interaction Analysis"),
+        html.P(
+            "Discover token combinations, synergies, and minimal activating patterns.",
+            className="text-muted small mb-3",
+        ),
+        dbc.Accordion(
+            [
+                # 1. Contrastive Frequent Itemsets
+                dbc.AccordionItem(
+                    [
+                        html.P(
+                            "Mine token combinations that are over-represented in "
+                            "high-activation examples compared to baseline.",
+                            className="text-muted small mb-3",
+                        ),
+                        dbc.Row(
+                            [
+                                dbc.Col(
+                                    [
+                                        html.Label(
+                                            "High Activation Threshold:",
+                                            className="fw-bold",
+                                        ),
+                                        dcc.Dropdown(
+                                            id="itemset-high-threshold",
+                                            options=[
+                                                {
+                                                    "label": "Top 1%",
+                                                    "value": 1.0,
+                                                },
+                                                {
+                                                    "label": "Top 5%",
+                                                    "value": 5.0,
+                                                },
+                                                {
+                                                    "label": "Top 10%",
+                                                    "value": 10.0,
+                                                },
+                                            ],
+                                            value=5.0,
+                                            clearable=False,
+                                        ),
+                                    ],
+                                    md=3,
+                                ),
+                                dbc.Col(
+                                    [
+                                        html.Label(
+                                            "Mode:", className="fw-bold"
+                                        ),
+                                        dbc.Checklist(
+                                            id="itemset-family-mode",
+                                            options=[
+                                                {
+                                                    "label": "Collapse by family",
+                                                    "value": "family",
+                                                }
+                                            ],
+                                            value=[],
+                                            inline=True,
+                                            className="mt-2",
+                                        ),
+                                    ],
+                                    md=3,
+                                ),
+                                dbc.Col(
+                                    [
+                                        html.Label(" ", className="d-block"),
+                                        dbc.Button(
+                                            "Run Itemset Mining",
+                                            id="run-itemset-mining-button",
+                                            color="primary",
+                                            className="w-100",
+                                        ),
+                                    ],
+                                    md=2,
+                                    className="d-flex align-items-end",
+                                ),
+                                dbc.Col(
+                                    [
+                                        html.Label(" ", className="d-block"),
+                                        dcc.Clipboard(
+                                            target_id="itemset-markdown-content",
+                                            title="Copy results as Markdown",
+                                            className="btn btn-outline-secondary w-100",
+                                            style={"fontSize": "0.9rem"},
+                                        ),
+                                    ],
+                                    md=1,
+                                    className="d-flex align-items-end",
+                                ),
+                            ],
+                            className="mb-3",
+                        ),
+                        # Hidden div for markdown clipboard content
+                        html.Div(
+                            "",
+                            id="itemset-markdown-content",
+                            style={"display": "none"},
+                        ),
+                        dcc.Loading(
+                            id="loading-itemset-results",
+                            type="default",
+                            children=html.Div(id="itemset-results-display"),
+                        ),
+                    ],
+                    title="Contrastive Frequent Itemsets",
+                    item_id="itemset-accordion",
+                ),
+                # 2. Interaction Sweep (Pairwise + 3-way)
+                dbc.AccordionItem(
+                    [
+                        html.P(
+                            "Compute pairwise synergy/redundancy scores between tokens. "
+                            "I > 0 means synergy (combo matters), I < 0 means redundancy.",
+                            className="text-muted small mb-3",
+                        ),
+                        dbc.Row(
+                            [
+                                dbc.Col(
+                                    [
+                                        html.Label(
+                                            "Candidate Tokens (select 10-50):",
+                                            className="fw-bold",
+                                        ),
+                                        dcc.Dropdown(
+                                            id="interaction-tokens-dropdown",
+                                            options=[],
+                                            multi=True,
+                                            placeholder="Select tokens to test...",
+                                        ),
+                                    ],
+                                    md=5,
+                                ),
+                                dbc.Col(
+                                    [
+                                        html.Label(
+                                            "# Base Contexts:",
+                                            className="fw-bold",
+                                        ),
+                                        dbc.Input(
+                                            id="interaction-n-contexts",
+                                            type="number",
+                                            value=50,
+                                            min=10,
+                                            max=200,
+                                            step=10,
+                                        ),
+                                    ],
+                                    md=2,
+                                ),
+                                dbc.Col(
+                                    [
+                                        html.Label(
+                                            "Options:", className="fw-bold"
+                                        ),
+                                        dbc.Checklist(
+                                            id="interaction-options",
+                                            options=[
+                                                {
+                                                    "label": "Family mode",
+                                                    "value": "family",
+                                                },
+                                                {
+                                                    "label": "Include 3-way",
+                                                    "value": "three_way",
+                                                },
+                                            ],
+                                            value=[],
+                                            inline=True,
+                                        ),
+                                    ],
+                                    md=3,
+                                ),
+                                dbc.Col(
+                                    [
+                                        html.Label(" ", className="d-block"),
+                                        dbc.Button(
+                                            "Run Sweep",
+                                            id="run-interaction-sweep-button",
+                                            color="primary",
+                                            className="w-100",
+                                        ),
+                                    ],
+                                    md=1,
+                                    className="d-flex align-items-end",
+                                ),
+                                dbc.Col(
+                                    [
+                                        html.Label(" ", className="d-block"),
+                                        dcc.Clipboard(
+                                            target_id="interaction-markdown-content",
+                                            title="Copy results as Markdown",
+                                            className="btn btn-outline-secondary w-100",
+                                            style={"fontSize": "0.9rem"},
+                                        ),
+                                    ],
+                                    md=1,
+                                    className="d-flex align-items-end",
+                                ),
+                            ],
+                            className="mb-3",
+                        ),
+                        # Hidden div for markdown clipboard content
+                        html.Div(
+                            "",
+                            id="interaction-markdown-content",
+                            style={"display": "none"},
+                        ),
+                        dcc.Loading(
+                            id="loading-interaction-results",
+                            type="default",
+                            children=html.Div(id="interaction-results-display"),
+                        ),
+                    ],
+                    title="Interaction Sweep",
+                    item_id="interaction-accordion",
+                ),
+                # 3. Minimal Activating Sets
+                dbc.AccordionItem(
+                    [
+                        html.P(
+                            "Find the smallest token subsets that maintain feature activation. "
+                            "Useful for identifying core patterns and redundant tokens.",
+                            className="text-muted small mb-3",
+                        ),
+                        dbc.Row(
+                            [
+                                dbc.Col(
+                                    [
+                                        html.Label(
+                                            "Retention Threshold:",
+                                            className="fw-bold",
+                                        ),
+                                        dcc.Slider(
+                                            id="minimal-set-threshold",
+                                            min=0.5,
+                                            max=0.95,
+                                            step=0.05,
+                                            value=0.8,
+                                            marks={
+                                                0.5: "50%",
+                                                0.6: "60%",
+                                                0.7: "70%",
+                                                0.8: "80%",
+                                                0.9: "90%",
+                                            },
+                                            tooltip={
+                                                "placement": "bottom",
+                                                "always_visible": True,
+                                            },
+                                        ),
+                                    ],
+                                    md=5,
+                                ),
+                                dbc.Col(
+                                    [
+                                        html.Label(
+                                            "# Examples to Analyze:",
+                                            className="fw-bold",
+                                        ),
+                                        dbc.Input(
+                                            id="minimal-set-n-examples",
+                                            type="number",
+                                            value=50,
+                                            min=10,
+                                            max=200,
+                                            step=10,
+                                        ),
+                                    ],
+                                    md=3,
+                                ),
+                                dbc.Col(
+                                    [
+                                        html.Label(" ", className="d-block"),
+                                        dbc.Button(
+                                            "Find Minimal Sets",
+                                            id="run-minimal-sets-button",
+                                            color="primary",
+                                            className="w-100",
+                                        ),
+                                    ],
+                                    md=2,
+                                    className="d-flex align-items-end",
+                                ),
+                                dbc.Col(
+                                    [
+                                        html.Label(" ", className="d-block"),
+                                        dcc.Clipboard(
+                                            target_id="minimal-sets-markdown-content",
+                                            title="Copy results as Markdown",
+                                            className="btn btn-outline-secondary w-100",
+                                            style={"fontSize": "0.9rem"},
+                                        ),
+                                    ],
+                                    md=1,
+                                    className="d-flex align-items-end",
+                                ),
+                            ],
+                            className="mb-3",
+                        ),
+                        # Hidden div for markdown clipboard content
+                        html.Div(
+                            "",
+                            id="minimal-sets-markdown-content",
+                            style={"display": "none"},
+                        ),
+                        dcc.Loading(
+                            id="loading-minimal-sets-results",
+                            type="default",
+                            children=html.Div(
+                                id="minimal-sets-results-display"
+                            ),
+                        ),
+                    ],
+                    title="Minimal Activating Sets",
+                    item_id="minimal-sets-accordion",
+                ),
+            ],
+            id="higher-order-accordion-wrapper",
             start_collapsed=True,
             className="mt-3",
         ),
@@ -2184,7 +2633,7 @@ def run_null_base_sweep(
     list[WeaponGroupResult],
     list[WeaponGroupResult],
     list[WeaponGroupResult],
-    list[tuple[str, float]],
+    list[tuple[str, float, str, str, str]],
 ]:
     """
     Run NULL base weapon sweep once (independent of build abilities).
@@ -2196,7 +2645,7 @@ def run_null_base_sweep(
 
     Returns:
         (null_base_activation, by_special, by_sub, by_class, individual_weapons)
-        where individual_weapons is list of (weapon_name, activation) tuples
+        where individual_weapons is list of (weapon_name, activation, special, sub, class) tuples
     """
     logger.info(
         f"Running NULL base weapon sweep for {len(all_weapon_ids)} weapons..."
@@ -2239,9 +2688,12 @@ def run_null_base_sweep(
     )
 
     # Group NULL base weapons by special, sub, class
+    # Also build individual weapons list with properties
     null_by_special: dict[str, list[tuple[str, float]]] = {}
     null_by_sub: dict[str, list[tuple[str, float]]] = {}
     null_by_class: dict[str, list[tuple[str, float]]] = {}
+    # Store (name, activation, special, sub, class) for individual weapons
+    individual_weapons_with_props: list[tuple[str, float, str, str, str]] = []
 
     for wid, (wname, activation) in null_weapon_activations.items():
         weapon_id_str = inv_weapon_vocab.get(wid, f"weapon_id_{wid}")
@@ -2266,6 +2718,11 @@ def run_null_base_sweep(
                 null_by_class[wclass] = []
             null_by_class[wclass].append((wname, activation))
 
+            # Add to individual weapons list with properties
+            individual_weapons_with_props.append(
+                (wname, activation, special, sub, wclass)
+            )
+
     # Convert to WeaponGroupResult
     def to_group_results(group_dict: dict) -> list[WeaponGroupResult]:
         results = []
@@ -2284,12 +2741,8 @@ def run_null_base_sweep(
         results.sort(key=lambda x: abs(x.avg_delta), reverse=True)
         return results
 
-    # Build list of individual weapons sorted by activation (descending)
-    individual_weapons = [
-        (name, activation)
-        for name, activation in null_weapon_activations.values()
-    ]
-    individual_weapons.sort(key=lambda x: x[1], reverse=True)
+    # Sort individual weapons by activation (descending)
+    individual_weapons_with_props.sort(key=lambda x: x[1], reverse=True)
 
     logger.info("NULL base weapon sweep complete.")
     return (
@@ -2297,7 +2750,7 @@ def run_null_base_sweep(
         to_group_results(null_by_special),
         to_group_results(null_by_sub),
         to_group_results(null_by_class),
-        individual_weapons,
+        individual_weapons_with_props,
     )
 
 
@@ -2592,10 +3045,18 @@ def format_full_sweep_markdown(results: FullSweepResults) -> str:
         if results.null_base_weapons:
             lines.append("### Individual Weapon Kits")
             lines.append("")
-            lines.append("| Weapon | Activation |")
-            lines.append("|--------|------------|")
-            for name, activation in results.null_base_weapons:
-                lines.append(f"| {name} | {activation:.4f} |")
+            lines.append("| Weapon | Special | Sub | Class | Activation |")
+            lines.append("|--------|---------|-----|-------|------------|")
+            for (
+                name,
+                activation,
+                special,
+                sub,
+                wclass,
+            ) in results.null_base_weapons:
+                lines.append(
+                    f"| {name} | {special} | {sub} | {wclass} | {activation:.4f} |"
+                )
             lines.append("")
 
         # Grouped summaries
@@ -2752,13 +3213,16 @@ def build_full_sweep_display(results: FullSweepResults) -> html.Div:
                 html.Tr(
                     [
                         html.Td(name, style={"fontSize": "0.85rem"}),
+                        html.Td(special, style={"fontSize": "0.85rem"}),
+                        html.Td(sub, style={"fontSize": "0.85rem"}),
+                        html.Td(wclass, style={"fontSize": "0.85rem"}),
                         html.Td(
                             f"{activation:.4f}",
                             style={"fontSize": "0.85rem", "textAlign": "right"},
                         ),
                     ]
                 )
-                for name, activation in results.null_base_weapons
+                for name, activation, special, sub, wclass in results.null_base_weapons
             ]
 
             sections.append(
@@ -2771,6 +3235,9 @@ def build_full_sweep_display(results: FullSweepResults) -> html.Div:
                                         html.Tr(
                                             [
                                                 html.Th("Weapon Kit"),
+                                                html.Th("Special"),
+                                                html.Th("Sub"),
+                                                html.Th("Class"),
                                                 html.Th(
                                                     "Activation",
                                                     style={
@@ -2971,6 +3438,1382 @@ def run_full_sweep_callback(
     aggregated.null_base_weapons = null_base_weapons
 
     return build_full_sweep_display(aggregated)
+
+
+# ---------------------------------------------------------------------------
+# Higher-Order Interaction Analysis Functions
+# ---------------------------------------------------------------------------
+
+
+def get_family_name(token: str) -> str | None:
+    """
+    Extract family name from a token.
+
+    Examples:
+        "swim_speed_up_21" -> "swim_speed_up"
+        "ninja_squid" -> "ninja_squid"
+        "<PAD>" -> None
+    """
+    if token.startswith("<"):
+        return None
+
+    match = ABILITY_FAMILY_RE.match(token)
+    if match:
+        return match.group(1)
+
+    # Main-only abilities don't have AP suffix
+    from splatnlp.utils.constants import MAIN_ONLY_ABILITIES
+
+    if token in MAIN_ONLY_ABILITIES:
+        return token
+
+    return token  # Return as-is if no pattern match
+
+
+def compute_contrastive_itemsets(
+    feature_id: int,
+    high_pct: float = 5.0,
+    family_mode: bool = False,
+) -> ContrastiveItemsetResults | None:
+    """
+    Mine frequent itemsets in high-activation examples vs baseline.
+
+    Args:
+        feature_id: SAE feature to analyze
+        high_pct: Top percentile for "high" activation (e.g., 5.0 = top 5%)
+        family_mode: If True, collapse tokens to ability families
+
+    Returns:
+        ContrastiveItemsetResults with itemsets sorted by lift
+    """
+    from splatnlp.dashboard.app import DASHBOARD_CONTEXT
+
+    logger.info(
+        f"[Itemset Mining] Starting for feature {feature_id}, "
+        f"top {high_pct}%, family_mode={family_mode}"
+    )
+
+    inv_vocab = DASHBOARD_CONTEXT.inv_vocab
+
+    # Get all activations for this feature (cached)
+    logger.info("[Itemset Mining] Loading activation data...")
+    all_data = get_cached_activations(feature_id)
+
+    if all_data is None or len(all_data) == 0:
+        logger.warning("[Itemset Mining] No activation data found")
+        return None
+
+    # Sort by activation and compute percentile thresholds
+    activations = all_data["activation"].to_list()
+    logger.info(f"[Itemset Mining] Loaded {len(activations)} examples")
+    n_total = len(activations)
+
+    high_threshold_idx = int(n_total * (1 - high_pct / 100))
+    mid_low_idx = int(n_total * 0.25)
+    mid_high_idx = int(n_total * 0.75)
+
+    sorted_indices = sorted(range(n_total), key=lambda i: activations[i])
+    high_indices = set(sorted_indices[high_threshold_idx:])
+    mid_indices = set(sorted_indices[mid_low_idx:mid_high_idx])
+
+    # Extract token sets
+    ability_tokens_list = all_data["ability_input_tokens"].to_list()
+
+    def get_token_set(tokens):
+        if family_mode:
+            families = set()
+            for tid in tokens:
+                name = inv_vocab.get(tid, "")
+                family = get_family_name(name)
+                if family:
+                    families.add(family)
+            return frozenset(families)
+        else:
+            return frozenset(
+                inv_vocab.get(t, "") for t in tokens if t in inv_vocab
+            )
+
+    high_sets = []
+    mid_sets = []
+
+    for idx in range(n_total):
+        token_set = get_token_set(ability_tokens_list[idx])
+        if len(token_set) < 2:
+            continue
+        if idx in high_indices:
+            high_sets.append(token_set)
+        elif idx in mid_indices:
+            mid_sets.append(token_set)
+
+    if len(high_sets) == 0 or len(mid_sets) == 0:
+        logger.warning(
+            "[Itemset Mining] Insufficient examples in high/mid groups"
+        )
+        return None
+
+    logger.info(
+        f"[Itemset Mining] Split: {len(high_sets)} high, {len(mid_sets)} baseline"
+    )
+    logger.info("[Itemset Mining] Counting itemsets of size 2, 3, 4...")
+
+    # Count itemsets of size 2, 3, 4
+    def count_itemsets(sets_list, max_size=4):
+        counts = {2: Counter(), 3: Counter(), 4: Counter()}
+        for s in sets_list:
+            s_list = list(s)
+            for size in [2, 3, 4]:
+                if len(s_list) >= size:
+                    for combo in combinations(s_list, size):
+                        counts[size][tuple(sorted(combo))] += 1
+        return counts
+
+    high_counts = count_itemsets(high_sets)
+    mid_counts = count_itemsets(mid_sets)
+
+    n_high = len(high_sets)
+    n_mid = len(mid_sets)
+
+    # Compute lift for each itemset
+    itemsets_by_size = {}
+    min_count_high = max(2, int(n_high * 0.01))  # At least 1% support in high
+
+    for size in [2, 3, 4]:
+        itemsets = []
+        for tokens, count_high in high_counts[size].most_common(200):
+            if count_high < min_count_high:
+                continue
+            count_mid = mid_counts[size].get(tokens, 0)
+            support_high = count_high / n_high
+            support_mid = (count_mid / n_mid) if n_mid > 0 else 0.001
+
+            # Avoid division by zero
+            if support_mid < 0.001:
+                support_mid = 0.001
+
+            lift = support_high / support_mid
+
+            if lift > 1.5:  # Only keep itemsets with meaningful lift
+                itemsets.append(
+                    FrequentItemset(
+                        tokens=tokens,
+                        support_high=support_high,
+                        support_baseline=support_mid,
+                        lift=lift,
+                        count_high=count_high,
+                    )
+                )
+
+        # Sort by lift
+        itemsets.sort(key=lambda x: x.lift, reverse=True)
+        itemsets_by_size[size] = itemsets[:50]  # Top 50 per size
+        logger.info(
+            f"[Itemset Mining] Size-{size}: found {len(itemsets)} itemsets with lift > 1.5"
+        )
+
+    total_itemsets = sum(len(v) for v in itemsets_by_size.values())
+    logger.info(f"[Itemset Mining] Complete. Total itemsets: {total_itemsets}")
+
+    return ContrastiveItemsetResults(
+        feature_id=feature_id,
+        high_threshold_pct=high_pct,
+        n_high_examples=n_high,
+        n_baseline_examples=n_mid,
+        itemsets_by_size=itemsets_by_size,
+    )
+
+
+def compute_interaction_sweep(
+    feature_id: int,
+    candidate_tokens: list[str],
+    n_contexts: int = 50,
+    family_mode: bool = False,
+    include_three_way: bool = False,
+) -> InteractionSweepResults | None:
+    """
+    Compute pairwise (and optional 3-way) interaction scores.
+
+    For each pair (i,j), computes:
+        I_ij(B) = f(B∪{i,j}) - f(B∪{i}) - f(B∪{j}) + f(B)
+
+    I > 0 means synergy, I < 0 means redundancy.
+
+    Args:
+        feature_id: SAE feature to analyze
+        candidate_tokens: List of token names to test (10-50 recommended)
+        n_contexts: Number of base contexts to sample from mid-activation examples
+        family_mode: If True, use family-representative tokens
+        include_three_way: If True, also compute 3-way interactions for top pairs
+
+    Returns:
+        InteractionSweepResults with pairwise (and optional 3-way) scores
+    """
+    import numpy as np
+
+    from splatnlp.dashboard.app import DASHBOARD_CONTEXT
+
+    n_pairs = len(candidate_tokens) * (len(candidate_tokens) - 1) // 2
+    logger.info(
+        f"[Interaction Sweep] Starting for feature {feature_id}: "
+        f"{len(candidate_tokens)} tokens = {n_pairs} pairs, "
+        f"{n_contexts} contexts, 3-way={include_three_way}"
+    )
+
+    inv_vocab = DASHBOARD_CONTEXT.inv_vocab
+    vocab = DASHBOARD_CONTEXT.vocab
+
+    if len(candidate_tokens) < 2:
+        logger.warning("[Interaction Sweep] Need at least 2 tokens")
+        return None
+
+    # Get mid-activation examples for base contexts (cached)
+    logger.info("[Interaction Sweep] Loading activation data...")
+    all_data = get_cached_activations(feature_id)
+
+    if all_data is None or len(all_data) == 0:
+        logger.warning("[Interaction Sweep] No activation data found")
+        return None
+
+    # Sort and get mid-range examples (25-75 percentile)
+    n_total = len(all_data)
+    activations = all_data["activation"].to_list()
+    sorted_indices = sorted(range(n_total), key=lambda i: activations[i])
+    mid_low = int(n_total * 0.25)
+    mid_high = int(n_total * 0.75)
+    mid_indices = sorted_indices[mid_low:mid_high]
+
+    # Sample base contexts
+    import random
+
+    sampled_indices = random.sample(
+        mid_indices, min(n_contexts, len(mid_indices))
+    )
+
+    ability_tokens_list = all_data["ability_input_tokens"].to_list()
+    weapon_ids = all_data["weapon_id"].to_list()
+    inv_weapon_vocab = DASHBOARD_CONTEXT.inv_weapon_vocab
+
+    base_contexts = []
+    for idx in sampled_indices:
+        tokens = [inv_vocab.get(t, "") for t in ability_tokens_list[idx]]
+        tokens = [t for t in tokens if t and not t.startswith("<")]
+        weapon = inv_weapon_vocab.get(weapon_ids[idx], "")
+        if weapon and tokens:
+            base_contexts.append((tokens, weapon))
+
+    if len(base_contexts) < 10:
+        logger.warning("[Interaction Sweep] Insufficient base contexts (<10)")
+        return None
+
+    logger.info(
+        f"[Interaction Sweep] Sampled {len(base_contexts)} base contexts"
+    )
+
+    # Compute pairwise interactions
+    pairwise_scores = []
+    total_pairs = len(candidate_tokens) * (len(candidate_tokens) - 1) // 2
+    pairs_done = 0
+    last_log_pct = 0
+
+    logger.info(
+        f"[Interaction Sweep] Computing {total_pairs} pairwise interactions..."
+    )
+
+    for i, tok_i in enumerate(candidate_tokens):
+        for j, tok_j in enumerate(candidate_tokens):
+            if j <= i:
+                continue
+
+            interactions = []
+            for base_tokens, weapon in base_contexts:
+                # Skip if tokens already in base
+                if tok_i in base_tokens or tok_j in base_tokens:
+                    continue
+
+                # Compute f(B), f(B+i), f(B+j), f(B+i+j)
+                f_B = compute_feature_activation(
+                    base_tokens, weapon, feature_id
+                )
+                f_Bi = compute_feature_activation(
+                    base_tokens + [tok_i], weapon, feature_id
+                )
+                f_Bj = compute_feature_activation(
+                    base_tokens + [tok_j], weapon, feature_id
+                )
+                f_Bij = compute_feature_activation(
+                    base_tokens + [tok_i, tok_j], weapon, feature_id
+                )
+
+                if all(x is not None for x in [f_B, f_Bi, f_Bj, f_Bij]):
+                    I_ij = f_Bij - f_Bi - f_Bj + f_B
+                    interactions.append(I_ij)
+
+            if len(interactions) >= 5:
+                mean_I = np.mean(interactions)
+                std_I = np.std(interactions) / np.sqrt(len(interactions))
+                pairwise_scores.append(
+                    InteractionScore(
+                        tokens=(tok_i, tok_j),
+                        interaction_value=float(mean_I),
+                        std_error=float(std_I),
+                        n_contexts=len(interactions),
+                    )
+                )
+
+            pairs_done += 1
+            pct_done = int(100 * pairs_done / total_pairs)
+            if pct_done >= last_log_pct + 10:
+                logger.info(
+                    f"[Interaction Sweep] Progress: {pairs_done}/{total_pairs} "
+                    f"pairs ({pct_done}%)"
+                )
+                last_log_pct = pct_done
+
+    logger.info(
+        f"[Interaction Sweep] Pairwise complete: {len(pairwise_scores)} valid scores"
+    )
+
+    # Sort by absolute interaction value
+    pairwise_scores.sort(key=lambda x: abs(x.interaction_value), reverse=True)
+
+    # Optional: compute 3-way for top synergistic pairs
+    three_way_scores = None
+    if include_three_way and len(pairwise_scores) >= 3:
+        logger.info("[Interaction Sweep] Computing 3-way interactions...")
+        # Get top 10 synergistic pairs (I > 0)
+        top_synergy = [s for s in pairwise_scores if s.interaction_value > 0][
+            :10
+        ]
+        if len(top_synergy) >= 2:
+            three_way_scores = []
+            # Test triangles formed by top pairs
+            tested_triads = set()
+            for score1 in top_synergy[:5]:
+                for score2 in top_synergy[:5]:
+                    if score1 is score2:
+                        continue
+                    # Find common token or third token
+                    tokens1 = set(score1.tokens)
+                    tokens2 = set(score2.tokens)
+                    all_tokens = tokens1 | tokens2
+                    if len(all_tokens) == 3:
+                        triad = tuple(sorted(all_tokens))
+                        if triad in tested_triads:
+                            continue
+                        tested_triads.add(triad)
+
+                        tok_i, tok_j, tok_k = triad
+                        interactions = []
+
+                        for base_tokens, weapon in base_contexts[:30]:
+                            if any(
+                                t in base_tokens for t in [tok_i, tok_j, tok_k]
+                            ):
+                                continue
+
+                            f_B = compute_feature_activation(
+                                base_tokens, weapon, feature_id
+                            )
+                            f_i = compute_feature_activation(
+                                base_tokens + [tok_i], weapon, feature_id
+                            )
+                            f_j = compute_feature_activation(
+                                base_tokens + [tok_j], weapon, feature_id
+                            )
+                            f_k = compute_feature_activation(
+                                base_tokens + [tok_k], weapon, feature_id
+                            )
+                            f_ij = compute_feature_activation(
+                                base_tokens + [tok_i, tok_j], weapon, feature_id
+                            )
+                            f_ik = compute_feature_activation(
+                                base_tokens + [tok_i, tok_k], weapon, feature_id
+                            )
+                            f_jk = compute_feature_activation(
+                                base_tokens + [tok_j, tok_k], weapon, feature_id
+                            )
+                            f_ijk = compute_feature_activation(
+                                base_tokens + [tok_i, tok_j, tok_k],
+                                weapon,
+                                feature_id,
+                            )
+
+                            vals = [f_B, f_i, f_j, f_k, f_ij, f_ik, f_jk, f_ijk]
+                            if all(v is not None for v in vals):
+                                # 3-way interaction term
+                                I_ijk = (
+                                    f_ijk
+                                    - f_ij
+                                    - f_ik
+                                    - f_jk
+                                    + f_i
+                                    + f_j
+                                    + f_k
+                                    - f_B
+                                )
+                                interactions.append(I_ijk)
+
+                        if len(interactions) >= 3:
+                            three_way_scores.append(
+                                InteractionScore(
+                                    tokens=triad,
+                                    interaction_value=float(
+                                        np.mean(interactions)
+                                    ),
+                                    std_error=float(
+                                        np.std(interactions)
+                                        / np.sqrt(len(interactions))
+                                    ),
+                                    n_contexts=len(interactions),
+                                )
+                            )
+
+            three_way_scores.sort(
+                key=lambda x: abs(x.interaction_value), reverse=True
+            )
+            logger.info(
+                f"[Interaction Sweep] 3-way complete: {len(three_way_scores)} triads"
+            )
+
+    logger.info("[Interaction Sweep] Complete")
+
+    return InteractionSweepResults(
+        feature_id=feature_id,
+        family_mode=family_mode,
+        candidate_tokens=candidate_tokens,
+        n_base_contexts=len(base_contexts),
+        pairwise=pairwise_scores,
+        three_way=three_way_scores,
+    )
+
+
+def compute_minimal_activating_sets(
+    feature_id: int,
+    n_examples: int = 50,
+    threshold_ratio: float = 0.8,
+) -> MinimalSetResults | None:
+    """
+    Find minimal token subsets that maintain feature activation.
+
+    Uses greedy backward elimination: repeatedly remove the token
+    whose removal hurts activation least, until any removal would
+    drop below threshold_ratio * original_activation.
+
+    Args:
+        feature_id: SAE feature to analyze
+        n_examples: Number of top examples to analyze
+        threshold_ratio: Minimum activation retention (e.g., 0.8 = 80%)
+
+    Returns:
+        MinimalSetResults with minimal sets and common cores
+    """
+    from splatnlp.dashboard.app import DASHBOARD_CONTEXT
+
+    logger.info(
+        f"[Minimal Sets] Starting for feature {feature_id}: "
+        f"{n_examples} examples, {threshold_ratio:.0%} threshold"
+    )
+
+    db = DASHBOARD_CONTEXT.db
+    inv_vocab = DASHBOARD_CONTEXT.inv_vocab
+    inv_weapon_vocab = DASHBOARD_CONTEXT.inv_weapon_vocab
+
+    # Get top activating examples
+    logger.info("[Minimal Sets] Loading top examples...")
+    try:
+        top_data = db.get_feature_activations(feature_id, limit=n_examples * 2)
+    except Exception as e:
+        logger.error(f"Failed to get activations: {e}")
+        return None
+
+    if top_data is None or len(top_data) == 0:
+        logger.warning("[Minimal Sets] No examples found")
+        return None
+
+    logger.info(f"[Minimal Sets] Loaded {len(top_data)} candidate examples")
+
+    ability_tokens_list = top_data["ability_input_tokens"].to_list()
+    weapon_ids = top_data["weapon_id_token"].to_list()
+    activations = top_data["activation"].to_list()
+
+    minimal_sets = []
+    processed = 0
+    last_log_pct = 0
+
+    for idx in range(len(top_data)):
+        if processed >= n_examples:
+            break
+
+        tokens = [inv_vocab.get(t, "") for t in ability_tokens_list[idx]]
+        tokens = [t for t in tokens if t and not t.startswith("<")]
+        weapon = inv_weapon_vocab.get(weapon_ids[idx], "")
+
+        if not weapon or len(tokens) < 2:
+            continue
+
+        original_activation = activations[idx]
+        threshold = original_activation * threshold_ratio
+
+        current_tokens = list(tokens)
+        current_activation = original_activation
+
+        # Greedy backward elimination
+        while len(current_tokens) > 1:
+            best_removal = None
+            best_activation_after = -float("inf")
+
+            for i, tok in enumerate(current_tokens):
+                test_tokens = current_tokens[:i] + current_tokens[i + 1 :]
+                test_act = compute_feature_activation(
+                    test_tokens, weapon, feature_id
+                )
+
+                if test_act is not None and test_act > best_activation_after:
+                    best_activation_after = test_act
+                    best_removal = i
+
+            if best_removal is None:
+                break
+
+            if best_activation_after >= threshold:
+                # Safe to remove
+                current_tokens.pop(best_removal)
+                current_activation = best_activation_after
+            else:
+                # Can't remove any more without dropping below threshold
+                break
+
+        minimal_sets.append(
+            MinimalActivatingSet(
+                original_tokens=tokens,
+                minimal_tokens=current_tokens,
+                weapon_name=weapon,
+                original_activation=original_activation,
+                minimal_activation=current_activation,
+                retention_ratio=(
+                    current_activation / original_activation
+                    if original_activation > 0
+                    else 0
+                ),
+            )
+        )
+        processed += 1
+
+        # Log progress every 10%
+        pct_done = int(100 * processed / n_examples)
+        if pct_done >= last_log_pct + 10:
+            logger.info(
+                f"[Minimal Sets] Progress: {processed}/{n_examples} "
+                f"examples ({pct_done}%)"
+            )
+            last_log_pct = pct_done
+
+    if not minimal_sets:
+        logger.warning("[Minimal Sets] No valid minimal sets found")
+        return None
+
+    # Find common cores (2-4 token patterns)
+    core_counter = Counter()
+    for ms in minimal_sets:
+        tokens = tuple(sorted(ms.minimal_tokens))
+        if 2 <= len(tokens) <= 6:
+            # Count the full minimal set
+            core_counter[tokens] += 1
+            # Also count subsets of size 2-3
+            for size in [2, 3]:
+                if len(tokens) >= size:
+                    for combo in combinations(tokens, size):
+                        core_counter[tuple(sorted(combo))] += 1
+
+    # Get most common cores
+    common_cores = [
+        (core, count)
+        for core, count in core_counter.most_common(20)
+        if count >= 2
+    ]
+
+    logger.info(
+        f"[Minimal Sets] Complete: {len(minimal_sets)} sets, "
+        f"{len(common_cores)} common cores"
+    )
+
+    return MinimalSetResults(
+        feature_id=feature_id,
+        threshold_ratio=threshold_ratio,
+        n_examples_analyzed=len(minimal_sets),
+        minimal_sets=minimal_sets,
+        common_cores=common_cores,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Visualization Functions for Higher-Order Analysis
+# ---------------------------------------------------------------------------
+
+
+def build_itemset_display(results: ContrastiveItemsetResults) -> html.Div:
+    """Build display for contrastive itemset results."""
+    if results is None:
+        return html.Div("No results to display.", className="text-muted")
+
+    sections = []
+
+    # Summary
+    sections.append(
+        dbc.Alert(
+            [
+                html.Strong("Analysis Summary: "),
+                f"Top {results.high_threshold_pct}% = {results.n_high_examples} examples, "
+                f"Baseline (25-75%) = {results.n_baseline_examples} examples",
+            ],
+            color="info",
+            className="mb-3",
+        )
+    )
+
+    # Tables for each size
+    for size in [2, 3, 4]:
+        itemsets = results.itemsets_by_size.get(size, [])
+        if not itemsets:
+            continue
+
+        rows = []
+        for item in itemsets[:20]:
+            tokens_str = ", ".join(item.tokens)
+            rows.append(
+                html.Tr(
+                    [
+                        html.Td(tokens_str),
+                        html.Td(
+                            f"{item.lift:.2f}", style={"textAlign": "right"}
+                        ),
+                        html.Td(
+                            f"{item.support_high:.1%}",
+                            style={"textAlign": "right"},
+                        ),
+                        html.Td(
+                            f"{item.support_baseline:.1%}",
+                            style={"textAlign": "right"},
+                        ),
+                        html.Td(
+                            str(item.count_high), style={"textAlign": "right"}
+                        ),
+                    ]
+                )
+            )
+
+        sections.append(
+            html.Div(
+                [
+                    html.H6(f"Size-{size} Itemsets (Top {len(itemsets)})"),
+                    dbc.Table(
+                        [
+                            html.Thead(
+                                html.Tr(
+                                    [
+                                        html.Th("Tokens"),
+                                        html.Th(
+                                            "Lift", style={"textAlign": "right"}
+                                        ),
+                                        html.Th(
+                                            "Support (High)",
+                                            style={"textAlign": "right"},
+                                        ),
+                                        html.Th(
+                                            "Support (Base)",
+                                            style={"textAlign": "right"},
+                                        ),
+                                        html.Th(
+                                            "Count",
+                                            style={"textAlign": "right"},
+                                        ),
+                                    ]
+                                )
+                            ),
+                            html.Tbody(rows),
+                        ],
+                        striped=True,
+                        bordered=True,
+                        hover=True,
+                        size="sm",
+                    ),
+                ],
+                className="mb-4",
+            )
+        )
+
+    if not sections:
+        return html.Div(
+            "No significant itemsets found. Try lowering the threshold.",
+            className="text-muted",
+        )
+
+    return html.Div(sections)
+
+
+def build_interaction_heatmap(results: InteractionSweepResults) -> html.Div:
+    """Build clustered heatmap for interaction sweep results."""
+    if results is None or len(results.pairwise) == 0:
+        return html.Div(
+            "No interaction results to display.", className="text-muted"
+        )
+
+    import numpy as np
+
+    sections = []
+
+    # Summary
+    sections.append(
+        dbc.Alert(
+            [
+                html.Strong("Interaction Sweep: "),
+                f"{len(results.candidate_tokens)} tokens, "
+                f"{results.n_base_contexts} base contexts, "
+                f"{len(results.pairwise)} pairs computed",
+            ],
+            color="info",
+            className="mb-3",
+        )
+    )
+
+    # Top synergies and redundancies table
+    synergies = [s for s in results.pairwise if s.interaction_value > 0][:10]
+    redundancies = [s for s in results.pairwise if s.interaction_value < 0][:10]
+
+    def make_interaction_table(scores, title, color):
+        if not scores:
+            return html.Div()
+        rows = []
+        for s in scores:
+            tokens_str = " + ".join(s.tokens)
+            rows.append(
+                html.Tr(
+                    [
+                        html.Td(tokens_str),
+                        html.Td(
+                            f"{s.interaction_value:+.4f}",
+                            style={
+                                "textAlign": "right",
+                                "color": (
+                                    "green"
+                                    if s.interaction_value > 0
+                                    else "red"
+                                ),
+                            },
+                        ),
+                        html.Td(
+                            f"±{s.std_error:.4f}", style={"textAlign": "right"}
+                        ),
+                        html.Td(
+                            str(s.n_contexts), style={"textAlign": "right"}
+                        ),
+                    ]
+                )
+            )
+        return html.Div(
+            [
+                html.H6(title, style={"color": color}),
+                dbc.Table(
+                    [
+                        html.Thead(
+                            html.Tr(
+                                [
+                                    html.Th("Token Pair"),
+                                    html.Th("I", style={"textAlign": "right"}),
+                                    html.Th("SE", style={"textAlign": "right"}),
+                                    html.Th("N", style={"textAlign": "right"}),
+                                ]
+                            )
+                        ),
+                        html.Tbody(rows),
+                    ],
+                    striped=True,
+                    bordered=True,
+                    size="sm",
+                ),
+            ],
+            className="mb-3",
+        )
+
+    sections.append(
+        dbc.Row(
+            [
+                dbc.Col(
+                    make_interaction_table(
+                        synergies, "Top Synergies (I > 0)", "green"
+                    ),
+                    md=6,
+                ),
+                dbc.Col(
+                    make_interaction_table(
+                        redundancies, "Top Redundancies (I < 0)", "red"
+                    ),
+                    md=6,
+                ),
+            ]
+        )
+    )
+
+    # Build heatmap if we have enough data
+    if len(results.pairwise) >= 3:
+        # Create token index
+        all_tokens = set()
+        for s in results.pairwise:
+            all_tokens.update(s.tokens)
+        token_list = sorted(all_tokens)
+        token_to_idx = {t: i for i, t in enumerate(token_list)}
+        n = len(token_list)
+
+        # Fill matrix
+        matrix = np.zeros((n, n))
+        for s in results.pairwise:
+            i = token_to_idx[s.tokens[0]]
+            j = token_to_idx[s.tokens[1]]
+            matrix[i, j] = s.interaction_value
+            matrix[j, i] = s.interaction_value
+
+        # Create heatmap
+        fig = go.Figure(
+            data=go.Heatmap(
+                z=matrix,
+                x=token_list,
+                y=token_list,
+                colorscale=[
+                    [0, "blue"],
+                    [0.5, "white"],
+                    [1, "red"],
+                ],
+                zmid=0,
+                colorbar=dict(title="Interaction"),
+            )
+        )
+        fig.update_layout(
+            title="Pairwise Interaction Heatmap",
+            xaxis_title="Token",
+            yaxis_title="Token",
+            height=max(400, 50 * n),
+            xaxis=dict(tickangle=45),
+        )
+
+        sections.append(dcc.Graph(figure=fig))
+
+    # 3-way interactions if available
+    if results.three_way:
+        rows = []
+        for s in results.three_way[:10]:
+            tokens_str = " + ".join(s.tokens)
+            rows.append(
+                html.Tr(
+                    [
+                        html.Td(tokens_str),
+                        html.Td(
+                            f"{s.interaction_value:+.4f}",
+                            style={
+                                "textAlign": "right",
+                                "color": (
+                                    "green"
+                                    if s.interaction_value > 0
+                                    else "red"
+                                ),
+                            },
+                        ),
+                        html.Td(
+                            f"±{s.std_error:.4f}", style={"textAlign": "right"}
+                        ),
+                    ]
+                )
+            )
+
+        sections.append(
+            html.Div(
+                [
+                    html.H6("3-Way Interactions"),
+                    dbc.Table(
+                        [
+                            html.Thead(
+                                html.Tr(
+                                    [
+                                        html.Th("Token Triad"),
+                                        html.Th(
+                                            "I", style={"textAlign": "right"}
+                                        ),
+                                        html.Th(
+                                            "SE", style={"textAlign": "right"}
+                                        ),
+                                    ]
+                                )
+                            ),
+                            html.Tbody(rows),
+                        ],
+                        striped=True,
+                        bordered=True,
+                        size="sm",
+                    ),
+                ],
+                className="mt-4",
+            )
+        )
+
+    return html.Div(sections)
+
+
+def build_minimal_sets_display(results: MinimalSetResults) -> html.Div:
+    """Build display for minimal activating sets results."""
+    if results is None:
+        return html.Div("No results to display.", className="text-muted")
+
+    sections = []
+
+    # Summary
+    avg_reduction = sum(
+        1 - len(ms.minimal_tokens) / len(ms.original_tokens)
+        for ms in results.minimal_sets
+        if len(ms.original_tokens) > 0
+    ) / len(results.minimal_sets)
+
+    sections.append(
+        dbc.Alert(
+            [
+                html.Strong("Minimal Sets Analysis: "),
+                f"{results.n_examples_analyzed} examples analyzed, "
+                f"threshold = {results.threshold_ratio:.0%} retention, "
+                f"avg token reduction = {avg_reduction:.1%}",
+            ],
+            color="info",
+            className="mb-3",
+        )
+    )
+
+    # Common cores
+    if results.common_cores:
+        core_rows = []
+        for core, count in results.common_cores[:15]:
+            core_str = ", ".join(core)
+            core_rows.append(
+                html.Tr(
+                    [
+                        html.Td(core_str),
+                        html.Td(str(len(core)), style={"textAlign": "center"}),
+                        html.Td(str(count), style={"textAlign": "right"}),
+                    ]
+                )
+            )
+
+        sections.append(
+            html.Div(
+                [
+                    html.H6(
+                        "Common Cores (recurring patterns in minimal sets)"
+                    ),
+                    dbc.Table(
+                        [
+                            html.Thead(
+                                html.Tr(
+                                    [
+                                        html.Th("Core Tokens"),
+                                        html.Th(
+                                            "Size",
+                                            style={"textAlign": "center"},
+                                        ),
+                                        html.Th(
+                                            "Count",
+                                            style={"textAlign": "right"},
+                                        ),
+                                    ]
+                                )
+                            ),
+                            html.Tbody(core_rows),
+                        ],
+                        striped=True,
+                        bordered=True,
+                        size="sm",
+                    ),
+                ],
+                className="mb-4",
+            )
+        )
+
+    # Individual minimal sets
+    rows = []
+    for ms in results.minimal_sets[:20]:
+        orig_str = ", ".join(ms.original_tokens[:6])
+        if len(ms.original_tokens) > 6:
+            orig_str += f" (+{len(ms.original_tokens) - 6} more)"
+        min_str = ", ".join(ms.minimal_tokens)
+
+        rows.append(
+            html.Tr(
+                [
+                    html.Td(min_str, style={"fontWeight": "bold"}),
+                    html.Td(orig_str, className="text-muted small"),
+                    html.Td(
+                        f"{len(ms.original_tokens)} → {len(ms.minimal_tokens)}",
+                        style={"textAlign": "center"},
+                    ),
+                    html.Td(
+                        f"{ms.retention_ratio:.1%}",
+                        style={"textAlign": "right"},
+                    ),
+                ]
+            )
+        )
+
+    sections.append(
+        html.Div(
+            [
+                html.H6("Individual Minimal Sets"),
+                dbc.Table(
+                    [
+                        html.Thead(
+                            html.Tr(
+                                [
+                                    html.Th("Minimal Set"),
+                                    html.Th("Original Tokens"),
+                                    html.Th(
+                                        "Reduction",
+                                        style={"textAlign": "center"},
+                                    ),
+                                    html.Th(
+                                        "Retention",
+                                        style={"textAlign": "right"},
+                                    ),
+                                ]
+                            )
+                        ),
+                        html.Tbody(rows),
+                    ],
+                    striped=True,
+                    bordered=True,
+                    hover=True,
+                    size="sm",
+                ),
+            ]
+        )
+    )
+
+    return html.Div(sections)
+
+
+# ---------------------------------------------------------------------------
+# Markdown Formatters for Clipboard Export
+# ---------------------------------------------------------------------------
+
+
+def format_itemsets_as_markdown(results: ContrastiveItemsetResults) -> str:
+    """Format itemset results as Markdown for clipboard export."""
+    if results is None:
+        return ""
+
+    lines = [
+        "## Contrastive Frequent Itemsets",
+        "",
+        f"**Feature:** {results.feature_id}",
+        f"**High activation:** Top {results.high_threshold_pct}% "
+        f"({results.n_high_examples} examples)",
+        f"**Baseline:** 25-75% ({results.n_baseline_examples} examples)",
+        "",
+    ]
+
+    for size in [2, 3, 4]:
+        itemsets = results.itemsets_by_size.get(size, [])
+        if not itemsets:
+            continue
+
+        lines.append(f"### Size-{size} Itemsets")
+        lines.append("")
+        lines.append(
+            "| Tokens | Lift | Support (High) | Support (Base) | Count |"
+        )
+        lines.append(
+            "|--------|------|----------------|----------------|-------|"
+        )
+
+        for item in itemsets[:20]:
+            tokens_str = ", ".join(item.tokens)
+            lines.append(
+                f"| {tokens_str} | {item.lift:.2f} | "
+                f"{item.support_high:.1%} | {item.support_baseline:.1%} | "
+                f"{item.count_high} |"
+            )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def format_interactions_as_markdown(results: InteractionSweepResults) -> str:
+    """Format interaction sweep results as Markdown for clipboard export."""
+    if results is None or len(results.pairwise) == 0:
+        return ""
+
+    lines = [
+        "## Interaction Sweep Results",
+        "",
+        f"**Feature:** {results.feature_id}",
+        f"**Tokens tested:** {len(results.candidate_tokens)}",
+        f"**Base contexts:** {results.n_base_contexts}",
+        f"**Pairs computed:** {len(results.pairwise)}",
+        "",
+    ]
+
+    # Top synergies
+    synergies = [s for s in results.pairwise if s.interaction_value > 0][:15]
+    if synergies:
+        lines.append("### Top Synergies (I > 0)")
+        lines.append("")
+        lines.append("| Token Pair | I | SE | N |")
+        lines.append("|------------|---|----|----|")
+        for s in synergies:
+            tokens_str = " + ".join(s.tokens)
+            lines.append(
+                f"| {tokens_str} | {s.interaction_value:+.4f} | "
+                f"±{s.std_error:.4f} | {s.n_contexts} |"
+            )
+        lines.append("")
+
+    # Top redundancies
+    redundancies = [s for s in results.pairwise if s.interaction_value < 0][:15]
+    if redundancies:
+        lines.append("### Top Redundancies (I < 0)")
+        lines.append("")
+        lines.append("| Token Pair | I | SE | N |")
+        lines.append("|------------|---|----|----|")
+        for s in redundancies:
+            tokens_str = " + ".join(s.tokens)
+            lines.append(
+                f"| {tokens_str} | {s.interaction_value:+.4f} | "
+                f"±{s.std_error:.4f} | {s.n_contexts} |"
+            )
+        lines.append("")
+
+    # 3-way interactions
+    if results.three_way:
+        lines.append("### 3-Way Interactions")
+        lines.append("")
+        lines.append("| Token Triad | I | SE |")
+        lines.append("|-------------|---|----|")
+        for s in results.three_way[:10]:
+            tokens_str = " + ".join(s.tokens)
+            lines.append(
+                f"| {tokens_str} | {s.interaction_value:+.4f} | "
+                f"±{s.std_error:.4f} |"
+            )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def format_minimal_sets_as_markdown(results: MinimalSetResults) -> str:
+    """Format minimal sets results as Markdown for clipboard export."""
+    if results is None:
+        return ""
+
+    avg_reduction = sum(
+        1 - len(ms.minimal_tokens) / len(ms.original_tokens)
+        for ms in results.minimal_sets
+        if len(ms.original_tokens) > 0
+    ) / max(len(results.minimal_sets), 1)
+
+    lines = [
+        "## Minimal Activating Sets",
+        "",
+        f"**Feature:** {results.feature_id}",
+        f"**Threshold:** {results.threshold_ratio:.0%} retention",
+        f"**Examples analyzed:** {results.n_examples_analyzed}",
+        f"**Average token reduction:** {avg_reduction:.1%}",
+        "",
+    ]
+
+    # Common cores
+    if results.common_cores:
+        lines.append("### Common Cores")
+        lines.append("")
+        lines.append("| Core Tokens | Size | Count |")
+        lines.append("|-------------|------|-------|")
+        for core, count in results.common_cores[:15]:
+            core_str = ", ".join(core)
+            lines.append(f"| {core_str} | {len(core)} | {count} |")
+        lines.append("")
+
+    # Individual minimal sets
+    lines.append("### Individual Minimal Sets")
+    lines.append("")
+    lines.append("| Minimal Set | Original Size | Minimal Size | Retention |")
+    lines.append("|-------------|---------------|--------------|-----------|")
+    for ms in results.minimal_sets[:20]:
+        min_str = ", ".join(ms.minimal_tokens)
+        lines.append(
+            f"| {min_str} | {len(ms.original_tokens)} | "
+            f"{len(ms.minimal_tokens)} | {ms.retention_ratio:.1%} |"
+        )
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Callbacks for Higher-Order Analysis
+# ---------------------------------------------------------------------------
+
+
+@dash.callback(
+    Output("interaction-tokens-dropdown", "options"),
+    Input("page-load-trigger", "data"),
+)
+def populate_interaction_tokens_dropdown(_):
+    """Populate token dropdown for interaction sweep."""
+    from splatnlp.dashboard.app import DASHBOARD_CONTEXT
+
+    if (
+        not hasattr(DASHBOARD_CONTEXT, "vocab")
+        or DASHBOARD_CONTEXT.vocab is None
+    ):
+        return []
+
+    return [
+        {"label": tok, "value": tok}
+        for tok in sorted(DASHBOARD_CONTEXT.vocab.keys())
+        if not tok.startswith("<")
+    ]
+
+
+@dash.callback(
+    [
+        Output("itemset-results-display", "children"),
+        Output("itemset-markdown-content", "children"),
+    ],
+    Input("run-itemset-mining-button", "n_clicks"),
+    [
+        State("feature-dropdown", "value"),
+        State("itemset-high-threshold", "value"),
+        State("itemset-family-mode", "value"),
+        State("active-tab-store", "data"),
+    ],
+    prevent_initial_call=True,
+)
+def run_itemset_mining_callback(
+    n_clicks, feature_id, threshold, family_mode, active_tab
+):
+    """Run contrastive frequent itemset mining."""
+    if active_tab != "tab-ablation":
+        return dash.no_update, dash.no_update
+
+    if feature_id is None:
+        return dbc.Alert("Please select a feature first.", color="warning"), ""
+
+    try:
+        family = "family" in (family_mode or [])
+        results = compute_contrastive_itemsets(
+            feature_id=feature_id,
+            high_pct=threshold or 5.0,
+            family_mode=family,
+        )
+        return build_itemset_display(results), format_itemsets_as_markdown(
+            results
+        )
+    except Exception as e:
+        logger.exception("Error in itemset mining")
+        return dbc.Alert(f"Error: {str(e)}", color="danger"), ""
+
+
+@dash.callback(
+    [
+        Output("interaction-results-display", "children"),
+        Output("interaction-markdown-content", "children"),
+    ],
+    Input("run-interaction-sweep-button", "n_clicks"),
+    [
+        State("feature-dropdown", "value"),
+        State("interaction-tokens-dropdown", "value"),
+        State("interaction-n-contexts", "value"),
+        State("interaction-options", "value"),
+        State("active-tab-store", "data"),
+    ],
+    prevent_initial_call=True,
+)
+def run_interaction_sweep_callback(
+    n_clicks, feature_id, tokens, n_contexts, options, active_tab
+):
+    """Run interaction sweep analysis."""
+    if active_tab != "tab-ablation":
+        return dash.no_update, dash.no_update
+
+    if feature_id is None:
+        return dbc.Alert("Please select a feature first.", color="warning"), ""
+
+    if not tokens or len(tokens) < 2:
+        return (
+            dbc.Alert(
+                "Please select at least 2 tokens to analyze.", color="warning"
+            ),
+            "",
+        )
+
+    if len(tokens) > 50:
+        return (
+            dbc.Alert(
+                "Too many tokens selected. Please select 50 or fewer.",
+                color="warning",
+            ),
+            "",
+        )
+
+    try:
+        options = options or []
+        family_mode = "family" in options
+        three_way = "three_way" in options
+
+        results = compute_interaction_sweep(
+            feature_id=feature_id,
+            candidate_tokens=tokens,
+            n_contexts=n_contexts or 50,
+            family_mode=family_mode,
+            include_three_way=three_way,
+        )
+        return (
+            build_interaction_heatmap(results),
+            format_interactions_as_markdown(results),
+        )
+    except Exception as e:
+        logger.exception("Error in interaction sweep")
+        return dbc.Alert(f"Error: {str(e)}", color="danger"), ""
+
+
+@dash.callback(
+    [
+        Output("minimal-sets-results-display", "children"),
+        Output("minimal-sets-markdown-content", "children"),
+    ],
+    Input("run-minimal-sets-button", "n_clicks"),
+    [
+        State("feature-dropdown", "value"),
+        State("minimal-set-threshold", "value"),
+        State("minimal-set-n-examples", "value"),
+        State("active-tab-store", "data"),
+    ],
+    prevent_initial_call=True,
+)
+def run_minimal_sets_callback(
+    n_clicks, feature_id, threshold, n_examples, active_tab
+):
+    """Find minimal activating sets."""
+    if active_tab != "tab-ablation":
+        return dash.no_update, dash.no_update
+
+    if feature_id is None:
+        return dbc.Alert("Please select a feature first.", color="warning"), ""
+
+    try:
+        results = compute_minimal_activating_sets(
+            feature_id=feature_id,
+            n_examples=n_examples or 50,
+            threshold_ratio=threshold or 0.8,
+        )
+        return (
+            build_minimal_sets_display(results),
+            format_minimal_sets_as_markdown(results),
+        )
+    except Exception as e:
+        logger.exception("Error in minimal sets analysis")
+        return dbc.Alert(f"Error: {str(e)}", color="danger"), ""
 
 
 # Make the layout accessible for app.py

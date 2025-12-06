@@ -43,6 +43,7 @@ class FeatureLabelsManager:
     """Enhanced feature labeling with categories and metadata."""
 
     def __init__(
+        
         self, storage_path: Optional[Path] = None, model_type: str = "full"
     ):
         """Initialize the feature labels manager.

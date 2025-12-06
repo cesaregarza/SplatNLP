@@ -1,11 +1,7 @@
-import json
 import logging
 
-import dash
 import dash_ag_grid as dag
 import dash_bootstrap_components as dbc
-import numpy as np
-import pandas as pd
 from dash import Input, Output, State, callback, dcc, html, no_update
 
 from splatnlp.dashboard.fs_database import FSDatabase
@@ -111,9 +107,8 @@ def update_top_examples_grid(selected_feature_id, active_tab):
             "headerName": "Original Index",
             "width": 120,
         },
-        # Hidden columns for build data (used by Add to Sweep Queue)
         {"field": "weapon_id", "hide": True},
-        {"field": "ability_tokens_json", "hide": True},
+        {"field": "ability_tokens", "hide": True},
     ]
 
     if selected_feature_id is None:
@@ -168,9 +163,8 @@ def update_top_examples_grid(selected_feature_id, active_tab):
                 "Input Abilities": ", ".join(ability_tags),
                 "SAE Feature Activation": f"{example.get('activation', 0):.4f}",
                 "Original Index": example.get("index", "N/A"),
-                # Hidden data for sweep queue
                 "weapon_id": example.get("weapon_id"),
-                "ability_tokens_json": json.dumps(ability_tags),
+                "ability_tokens": ability_tags,
             }
         )
 
@@ -190,10 +184,10 @@ def add_selected_examples_to_sweep_queue(n_clicks, selected_rows, current_queue)
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
     if not n_clicks:
-        return dash.no_update, ""
+        return no_update, ""
 
     if not selected_rows or len(selected_rows) == 0:
-        return dash.no_update, "No rows selected"
+        return no_update, "No rows selected"
 
     # Initialize queue if None
     if current_queue is None:
@@ -205,15 +199,10 @@ def add_selected_examples_to_sweep_queue(n_clicks, selected_rows, current_queue)
     added_count = 0
     for row in selected_rows:
         weapon_id = row.get("weapon_id")
-        ability_tokens_json = row.get("ability_tokens_json", "[]")
+        ability_tokens = row.get("ability_tokens", [])
 
         if weapon_id is None:
             continue
-
-        try:
-            ability_tokens = json.loads(ability_tokens_json)
-        except json.JSONDecodeError:
-            ability_tokens = []
 
         # Get weapon name
         weapon_name = weapon_name_mapping.get(weapon_id, row.get("Weapon", "Unknown"))
