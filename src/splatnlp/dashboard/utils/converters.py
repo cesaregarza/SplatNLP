@@ -1,5 +1,6 @@
 import logging
 from functools import lru_cache
+from pathlib import Path
 from typing import Sequence, TypedDict
 
 import numpy as np
@@ -75,13 +76,67 @@ def weapon_to_name(
 def generate_weapon_name_mapping(
     inv_weapon_vocab: dict[int, str],
 ) -> dict[int, str]:
-    """Generate a mapping of weapon IDs to weapon names."""
-    _, id_to_name, _ = generate_maps()
-    result = {}
+    """Generate a mapping of weapon IDs to weapon names.
+
+    Prefers the local splatoon3-meta reference to avoid network calls.
+    Falls back to `generate_maps` if the local file is unavailable.
+    """
+    id_to_name = _load_local_weapon_names()
+    result: dict[int, str] = {}
     for k, v in inv_weapon_vocab.items():
         weapon_id_str = v.split("_")[-1]
         result[k] = id_to_name.get(weapon_id_str, f"Weapon {weapon_id_str}")
     return result
+
+
+@lru_cache(maxsize=1)
+def _load_local_weapon_names() -> dict[str, str]:
+    """Load weapon ID -> name mapping from the local splatoon3-meta reference."""
+    # Search upward from this file to find the repo root that contains .claude
+    candidates: list[Path] = []
+    for parent in Path(__file__).resolve().parents:
+        candidates.append(
+            parent
+            / ".claude"
+            / "skills"
+            / "splatoon3-meta"
+            / "references"
+            / "weapons.md"
+        )
+
+    for path in candidates:
+        if path.exists():
+            try:
+                mapping: dict[str, str] = {}
+                with path.open() as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line.startswith("|"):
+                            continue
+                        # Expected row format: | ID | Name | Sub | Special |
+                        parts = [p.strip() for p in line.strip("|").split("|")]
+                        if len(parts) < 2:
+                            continue
+                        weapon_id, weapon_name = parts[0], parts[1]
+                        if weapon_id.isdigit() and weapon_name:
+                            mapping[weapon_id] = weapon_name
+                if mapping:
+                    logger.info(
+                        "Loaded local weapon names from %s (%d entries)",
+                        path,
+                        len(mapping),
+                    )
+                    return mapping
+            except Exception as exc:  # pragma: no cover - best effort
+                logger.debug(f"Failed to load local weapon names from {path}: {exc}")
+
+    # Fallback to network-based mapping as a last resort
+    try:
+        _, id_to_name, _ = generate_maps()
+        return id_to_name
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.debug(f"Fallback weapon name mapping failed: {exc}")
+        return {}
 
 
 class WeaponProperties(TypedDict):

@@ -761,6 +761,9 @@ class EfficientFSDatabase:
         self,
         feature_id: int,
         include_negative: bool = True,
+        limit: int | None = None,
+        sample_frac: float | None = None,
+        include_abilities: bool = True,
     ) -> pl.DataFrame:
         """
         Get ALL non-zero activations for PageRank analysis.
@@ -771,11 +774,15 @@ class EfficientFSDatabase:
         Args:
             feature_id: The feature to analyze
             include_negative: If True, include negative activations
+            limit: Optional max rows to return (after sampling)
+            sample_frac: Optional fraction 0-1 to randomly downsample rows
+            include_abilities: If False, omit ability tokens to speed up scans
 
         Returns:
             DataFrame with 'activation', 'ability_input_tokens', and 'weapon_id' columns
         """
-        all_examples = []
+        # Use batch-wise joins instead of Python loops for speed
+        all_batches: list[pl.DataFrame] = []
         n_batches = self.metadata.get("n_batches", 0)
 
         for batch_idx in range(n_batches):
@@ -797,34 +804,35 @@ class EfficientFSDatabase:
                 if not mask.any():
                     continue
 
-                indices = np.where(mask)[0]
-                activations = feature_acts[mask]
+                indices = np.where(mask)[0].astype(np.int64)
+                activations = feature_acts[mask].astype(np.float32)
 
                 meta_df = self._get_batch_metadata(batch_idx)
                 if len(meta_df) == 0:
                     continue
 
-                for idx, act in zip(indices, activations):
-                    if idx >= len(meta_df):
-                        continue
+                # Join activations to metadata on sample_id for vectorized throughput
+                act_df = pl.DataFrame(
+                    {"sample_id": indices, "activation": activations}
+                )
 
-                    row = meta_df[int(idx)]
-                    ability_tokens = row["ability_tokens"].item()
-                    weapon_id = row["weapon_id_token"].item()
+                batch_df = act_df.join(meta_df, on="sample_id", how="inner")
 
-                    # Handle different return types
-                    if hasattr(ability_tokens, "to_list"):
-                        ability_tokens = ability_tokens.to_list()
-                    elif isinstance(ability_tokens, np.ndarray):
-                        ability_tokens = ability_tokens.tolist()
-
-                    all_examples.append(
-                        {
-                            "activation": float(act),
-                            "ability_input_tokens": ability_tokens,
-                            "weapon_id": int(weapon_id),
-                        }
+                select_cols = [
+                    pl.col("activation").cast(pl.Float32),
+                    pl.col("weapon_id_token")
+                    .cast(pl.Int64)
+                    .alias("weapon_id"),
+                ]
+                if include_abilities:
+                    select_cols.append(
+                        pl.col("ability_tokens").alias("ability_input_tokens")
                     )
+
+                batch_df = batch_df.select(select_cols)
+
+                if len(batch_df) > 0:
+                    all_batches.append(batch_df)
 
             except Exception as e:
                 logger.warning(
@@ -832,12 +840,22 @@ class EfficientFSDatabase:
                 )
                 continue
 
-        if all_examples:
-            return pl.DataFrame(all_examples)
-        return pl.DataFrame(
-            schema={
+        if not all_batches:
+            schema = {
                 "activation": pl.Float64,
-                "ability_input_tokens": pl.List(pl.Int64),
                 "weapon_id": pl.Int64,
             }
-        )
+            if include_abilities:
+                schema["ability_input_tokens"] = pl.List(pl.Int64)
+            return pl.DataFrame(schema=schema)
+
+        df = pl.concat(all_batches, how="vertical")
+
+        # Optional random sample before limit to reduce transfer size
+        if sample_frac is not None and 0 < sample_frac < 1:
+            df = df.sample(fraction=sample_frac, with_replacement=False)
+
+        if limit is not None and limit > 0:
+            df = df.head(limit)
+
+        return df
