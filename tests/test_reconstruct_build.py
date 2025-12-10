@@ -2,6 +2,7 @@ import pytest
 
 from splatnlp.utils.reconstruct.allocator import Allocator
 from splatnlp.utils.reconstruct.beam_search import reconstruct_build
+from splatnlp.utils.reconstruct.classes import AbilityToken
 
 
 def noop_predict(tokens, weapon_id):
@@ -24,12 +25,12 @@ def test_conflicting_initial_context_returns_none():
 
 def test_conflicting_predictions_select_one_head():
     def predict_fn(tokens, weapon_id):
+        # Return one token above greedy threshold (0.5), other below
+        # This ensures greedy closure adds one, then beam search explores
         if "comeback" not in tokens and "last_ditch_effort" not in tokens:
-            return {"comeback": 0.0, "last_ditch_effort": 0.0}
-        if "comeback" in tokens and "last_ditch_effort" not in tokens:
-            return {"last_ditch_effort": 0.0}
-        if "last_ditch_effort" in tokens and "comeback" not in tokens:
-            return {"comeback": 0.0}
+            # Return comeback high enough for greedy, lde below threshold
+            return {"comeback": 0.6, "last_ditch_effort": 0.3}
+        # After adding one, the other stays below threshold
         return {}
 
     allocator = Allocator()
@@ -89,3 +90,28 @@ def test_full_build_not_pruned_when_expansions_are_invalid():
     # Special Charge Up should stay on all mains with 9 subs to hit 57 AP
     assert set(build.mains.values()) == {"special_charge_up"}
     assert build.subs.get("special_charge_up") == 9
+
+
+def test_allocator_prefers_high_ap_over_priority_bias():
+    """
+    When sub slots are exhausted, low-AP abilities should not be promoted to
+    mains even if their priority score is higher than stronger abilities.
+    """
+
+    caps = {
+        "run_speed_up_21": AbilityToken.from_vocab_entry("run_speed_up_21"),
+        "ink_saver_sub_21": AbilityToken.from_vocab_entry("ink_saver_sub_21"),
+        "swim_speed_up_6": AbilityToken.from_vocab_entry("swim_speed_up_6"),
+        "ink_recovery_up_3": AbilityToken.from_vocab_entry(
+            "ink_recovery_up_3"
+        ),
+    }
+    allocator = Allocator()
+
+    # Bias priority toward ink recovery up; AP should still win.
+    priority = {"ink_recovery_up": 100.0}
+    build, _ = allocator.allocate(caps, priority=priority)
+    assert build is not None
+    assert "ink_recovery_up" not in build.mains.values()
+    assert "run_speed_up" in build.mains.values()
+    assert "ink_saver_sub" in build.mains.values()

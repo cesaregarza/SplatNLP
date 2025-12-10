@@ -214,9 +214,9 @@ def compute_overview(
     # computation. Use the full sweep method directly.
     if max_examples is None:
         try:
-        df = ctx.db.get_all_feature_activations_for_pagerank(
-            feature_id, limit=max_examples if max_examples else None
-        )
+            df = ctx.db.get_all_feature_activations_for_pagerank(
+                feature_id, limit=max_examples if max_examples else None
+            )
             logger.info(
                 f"Loaded {len(df) if df is not None else 0} rows via full sweep"
             )

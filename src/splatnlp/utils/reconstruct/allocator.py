@@ -1,6 +1,10 @@
+import json
 import logging
 import math
+import re
+from collections import defaultdict
 from itertools import combinations
+from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from splatnlp.utils.constants import CANONICAL_MAIN_ONLY_ABILITIES
@@ -12,8 +16,10 @@ logger = logging.getLogger(__name__)
 class Allocator:
     """
     Allocates a set of capstone abilities to a Splatoon gear build.
-    The goal is to satisfy all min_ap requirements of the capstones
-    while minimizing the total AP of the resulting build (i.e., "tightest fit").
+    The goal is to satisfy all min_ap requirements of the capstones while
+    preferring solutions that use the fewest sub slots and minimize AP
+    overshoot (actual AP minus required). Priority scores are only used as
+    later tie-breakers, ahead of total AP.
     This version can assign multiple main slots to a single standard ability if
     optimal. Now also returns the penalty score (actual_ap - required_ap for
     each token).
@@ -36,17 +42,7 @@ class Allocator:
         cap_idx: int,
         available_main_slots: tuple[str, ...],
         current_mains_config: dict[str, Optional[str]],
-        best_build_info: list[
-            Optional[
-                tuple[
-                    int,
-                    float,  # priority score
-                    dict[str, Optional[str]],
-                    dict[str, int],
-                    int,
-                ]
-            ]
-        ],
+        best_build_info: list[Optional[dict[str, Any]]],
         capstone_family_to_token: dict[str, AbilityToken],
         priority: dict[str, float],
     ):
@@ -65,7 +61,7 @@ class Allocator:
             List of main slots still available
         current_mains_config : dict[str, Optional[str]]
             Current assignment of abilities to main slots
-        best_build_info : list[Optional[tuple]]
+        best_build_info : list[Optional[dict[str, Any]]]
             Container for the best build found so far
         capstone_family_to_token : dict[str, AbilityToken]
             Mapping from family names to their tokens
@@ -159,26 +155,51 @@ class Allocator:
 
                 # Calculate priority score for main slots
                 priority_score = sum(
-                    priority.get(fam, 0.0)
+                    priority.get(fam, capstone_family_to_token[fam].min_ap)
                     for fam in current_mains_config.values()
                     if fam is not None
                 )
 
-                if (
-                    best_build_info[0] is None
-                    or candidate_build.total_ap < best_build_info[0][0]
-                    or (
-                        candidate_build.total_ap == best_build_info[0][0]
-                        and priority_score > best_build_info[0][1]
-                    )
-                ):
-                    best_build_info[0] = (
-                        candidate_build.total_ap,
-                        priority_score,
-                        dict(current_mains_config),
-                        final_subs_map,
-                        total_penalty,
-                    )
+                candidate_info = {
+                    "subs_used": current_total_sub_slots_used,
+                    "total_penalty": total_penalty,
+                    "priority_score": priority_score,
+                    "total_ap": candidate_build.total_ap,
+                    "mains": dict(current_mains_config),
+                    "subs": final_subs_map,
+                }
+
+                best = best_build_info[0]
+                should_replace = False
+                if best is None:
+                    should_replace = True
+                elif candidate_info["subs_used"] < best["subs_used"]:
+                    should_replace = True
+                elif candidate_info["subs_used"] == best["subs_used"]:
+                    if (
+                        candidate_info["total_penalty"]
+                        < best["total_penalty"]
+                    ):
+                        should_replace = True
+                    elif (
+                        candidate_info["total_penalty"]
+                        == best["total_penalty"]
+                    ):
+                        if (
+                            candidate_info["priority_score"]
+                            > best["priority_score"]
+                        ):
+                            should_replace = True
+                        elif (
+                            candidate_info["priority_score"]
+                            == best["priority_score"]
+                            and candidate_info["total_ap"]
+                            < best["total_ap"]
+                        ):
+                            should_replace = True
+
+                if should_replace:
+                    best_build_info[0] = candidate_info
             except ValueError:
                 pass  # Build validation failed
 
@@ -243,7 +264,8 @@ class Allocator:
         priority : dict[str, float] | None
             Optional mapping from family names to priority scores (higher is
             better). Used to break ties when multiple valid builds have the same
-            total AP.
+            total AP and to bias main-slot assignment toward higher-priority
+            families when sub slots are tight.
 
         Returns
         -------
@@ -261,6 +283,7 @@ class Allocator:
         # For penalty calculation, we need a mapping from family to the "most
         # demanding" token
         capstone_family_to_token: dict[str, AbilityToken] = {}
+        priority = dict(priority or {})
 
         for token in capstones.values():
             if token.main_only:
@@ -282,8 +305,13 @@ class Allocator:
                 ):
                     capstone_family_to_token[token.family] = token
 
-        standard_capstones_list: list[AbilityToken] = list(
-            standard_capstones_dict.values()
+        # Sort standard capstones to prefer higher min_ap and higher priority
+        standard_capstones_list: list[AbilityToken] = sorted(
+            standard_capstones_dict.values(),
+            key=lambda cap: (
+                -cap.min_ap,
+                -priority.get(cap.family, 0.0),
+            ),
         )
 
         # Initial mains configuration with only Nones
@@ -313,21 +341,10 @@ class Allocator:
             s for s, fam in initial_mains_config.items() if fam is None
         ]
 
-        # best_build_info is a list containing one item: the best tuple or None
-        # Structure: [ Optional[
-        # (total_ap, priority_score, mains_dict, subs_dict, penalty_per_token)
-        # ] ]
-        best_build_info_container: list[
-            Optional[
-                tuple[
-                    int,
-                    float,
-                    dict[str, Optional[str]],
-                    dict[str, int],
-                    int,
-                ]
-            ]
-        ] = [None]
+        # best_build_info is a list containing one item: the best candidate
+        # build info or None. Each candidate stores sub usage, penalty, a
+        # priority score for mains, total AP, and the chosen mains/subs maps.
+        best_build_info_container: list[Optional[dict[str, Any]]] = [None]
 
         # Start the recursive process for standard abilities
         self._solve_standard_mains_recursively(
@@ -342,19 +359,21 @@ class Allocator:
 
         # If a best build was found by the recursive solver
         if best_build_info_container[0] is not None:
-            _total_ap, _priority_score, best_mains, best_subs, total_penalty = (
-                best_build_info_container[0]
-            )
+            best_info = best_build_info_container[0]
             try:
                 final_mains_for_build = {
-                    slot: best_mains.get(slot) for slot in Build.GEAR_SLOTS
+                    slot: best_info["mains"].get(slot)
+                    for slot in Build.GEAR_SLOTS
                 }
-                build = Build(mains=final_mains_for_build, subs=best_subs)
-                return build, total_penalty
+                build = Build(
+                    mains=final_mains_for_build, subs=best_info["subs"]
+                )
+                return build, best_info["total_penalty"]
             except ValueError as e:
                 logger.error(
                     "Failed to reconstruct previously validated best build. "
-                    f"Error: {e}. Mains: {best_mains}, Subs: {best_subs}"
+                    f"Error: {e}. Mains: {best_info['mains']}, "
+                    f"Subs: {best_info['subs']}"
                 )
                 return None, None
 
