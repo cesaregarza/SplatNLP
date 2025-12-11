@@ -44,7 +44,7 @@ Invoke this skill when you need to:
 | SRU | sub_resistance_up | Yes |
 | INKR | ink_resistance_up | Yes |
 
-### Main-Only Abilities (Fixed 10 AP)
+### Main-Only Abilities (Fixed 10 AP) — BINARY
 
 | Ability | Gear Slot |
 |---------|-----------|
@@ -60,6 +60,17 @@ Invoke this skill when you need to:
 | drop_roller | shoes |
 | object_shredder | shoes |
 | stealth_jump | shoes |
+
+**⚠️ IMPORTANT FOR EXPERIMENTS:** These abilities are **binary** (present or absent, no scaling). In 1D sweeps, they will always show **delta = 0** because there's no AP variation to test. This does NOT mean they don't affect the feature.
+
+**⚠️ TOKEN FORMAT:** Binary abilities appear as just the ability name (e.g., `comeback`, `stealth_jump`) WITHOUT an AP suffix. They do NOT appear as `comeback_10` or `stealth_jump_10`. The `parse_token()` function returns `(name, None)` for these tokens, not `(name, 10)`.
+
+**To evaluate binary abilities:**
+1. Check their PageRank score (correlation with high activation)
+2. Check presence rate enrichment in high-activation examples (>1.5x = characteristic)
+3. Check mean activation WITH vs WITHOUT the token (delta > 0.03 = meaningful)
+4. Run **manual 2D analysis** at each scaling ability level to see conditional effects
+5. Test combinations of binary abilities together (they may have stronger effects as a group)
 
 ### Standard AP Rungs
 

@@ -7,6 +7,272 @@ description: Orchestrate a systematic research program to investigate and meanin
 
 This skill guides a systematic investigation of SAE features to arrive at meaningful, non-trivial labels. It orchestrates the other mechinterp skills into a coherent research workflow.
 
+## Phase 0: Triage (ALWAYS START HERE)
+
+**Goal:** Quickly filter out weak/auxiliary features that don't warrant deep investigation.
+
+**Time:** 1-2 minutes
+
+Many SAE features have minimal influence on model outputs. Triage identifies these early so you can skip expensive analysis.
+
+### Step 0.1: Check Decoder Weight Percentile
+
+```python
+import torch
+
+sae_path = '/mnt/e/dev_spillover/SplatNLP/sae_runs/run_20250704_191557/sae_model_final.pth'
+sae_checkpoint = torch.load(sae_path, map_location='cpu', weights_only=True)
+decoder_weight = sae_checkpoint['decoder.weight']  # [512, 24576]
+
+# Get this feature's max absolute decoder weight
+feature_decoder = decoder_weight[:, FEATURE_ID]
+max_abs = torch.abs(feature_decoder).max().item()
+
+# Compare to all features
+all_max_abs = torch.abs(decoder_weight).max(dim=0).values
+percentile = (all_max_abs < max_abs).float().mean() * 100
+
+print(f"Feature {FEATURE_ID} decoder weight percentile: {percentile:.1f}%")
+```
+
+| Percentile | Action |
+|------------|--------|
+| < 10% | **Likely weak** - check overview structure |
+| 10-25% | Borderline - overview decides |
+| > 25% | Proceed to Phase 1 (Overview) |
+
+### Step 0.2: Quick Overview Check (if <10%)
+
+If decoder percentile < 10%, run a quick overview:
+
+```bash
+poetry run python -m splatnlp.mechinterp.cli.overview_cli \
+    --feature-id {FEATURE_ID} --model ultra --top-k 10
+```
+
+**Signs of clear structure (proceed to Phase 1):**
+- One family dominates (>40% of breakdown)
+- Strong weapon concentration (>50% one weapon)
+- Clear binary ability pattern
+- Top PageRank token has score > 0.20
+
+**Signs of no structure (label as weak):**
+- Family breakdown is flat (all <15%)
+- Weapons are diverse
+- Top PageRank score < 0.10
+- High sparsity (>99%) with no clear pattern
+
+### Triage Decision
+
+```
+Decoder percentile < 10% AND no clear structure in overview?
+  │
+  Yes → Label as "Weak/Aux Feature {ID}" and STOP
+  │
+  No → Proceed to Phase 1 (Overview)
+```
+
+### Weak Feature Label Format
+
+```json
+{
+  "dashboard_name": "Weak/Aux Feature {ID}",
+  "dashboard_category": "auxiliary",
+  "dashboard_notes": "TRIAGE: Decoder weight {X}th percentile, no clear structure in overview. Skipped deep dive.",
+  "hypothesis_confidence": 0.0,
+  "source": "claude code (triage)"
+}
+```
+
+### When to Override Triage
+
+Even with low decoder weights, proceed if:
+- The feature is part of a cluster you're investigating
+- You have external reason to believe it's important
+- You're doing exhaustive analysis of a subset
+
+---
+
+## ⚠️ Deep Dive Basics
+
+A proper deep dive requires **experiments**, not just reading overview data. The overview shows correlations; experiments reveal causation.
+
+### Minimum Requirements for a Deep Dive
+
+| Step | What to Do | Why |
+|------|------------|-----|
+| 1. Overview | Run overview to see correlations | Generate hypotheses |
+| 2. 1D Sweeps | Test top 3-5 families with 1D sweeps | Find causal drivers (scaling abilities) |
+| 3. Binary Check | For binary abilities (Comeback, Stealth Jump, LDE, Haunt, etc.), check presence rate | Binary abilities show delta=0 in sweeps but may still be characteristic |
+| 4. Bottom Tokens | Check suppressors from overview | What the feature AVOIDS is often more informative |
+| 5. 2D Heatmaps | Test interactions between primary driver and correlated tokens | Verify if correlations are causal or spurious |
+
+### Binary Abilities Need Special Handling
+
+**Binary abilities** (you have them or you don't) show **delta=0 in 1D sweeps** because there's no scaling. This does NOT mean they're unimportant.
+
+| Binary Abilities |
+|------------------|
+| Comeback, Stealth Jump, Last-Ditch Effort, Haunt, Ninja Squid, Respawn Punisher, Object Shredder, Drop Roller, Opening Gambit, Tenacity |
+
+**To evaluate binary abilities:**
+1. Check PageRank score (correlation strength)
+2. Check presence rate: What % of high-activation examples contain it?
+3. Compare mean activation WITH vs WITHOUT the binary token
+4. Run 2D heatmap: `scaling_ability × binary_ability` to see conditional effect
+
+### Binary Ability Analysis Protocol (CRITICAL)
+
+Binary abilities can have **strong conditional effects** that ONLY show up in 2D analysis. Here's the exact methodology:
+
+**Step 1: Check presence rate enrichment**
+```python
+from splatnlp.mechinterp.skill_helpers import load_context
+import polars as pl
+
+ctx = load_context('ultra')
+df = ctx.db.get_all_feature_activations_for_pagerank(FEATURE_ID)
+
+# Find binary token ID
+binary_id = None
+for tok_id, tok_name in ctx.inv_vocab.items():
+    if tok_name == 'comeback':  # or stealth_jump, etc.
+        binary_id = tok_id
+        break
+
+# Calculate enrichment
+threshold = df['activation'].quantile(0.90)  # Top 10%
+high_df = df.filter(pl.col('activation') >= threshold)
+
+with_binary_all = df.filter(pl.col('ability_input_tokens').list.contains(binary_id))
+with_binary_high = high_df.filter(pl.col('ability_input_tokens').list.contains(binary_id))
+
+baseline_rate = len(with_binary_all) / len(df)
+high_rate = len(with_binary_high) / len(high_df)
+enrichment = high_rate / baseline_rate
+
+print(f"Baseline presence: {baseline_rate:.1%}")
+print(f"High-activation presence: {high_rate:.1%}")
+print(f"Enrichment ratio: {enrichment:.2f}x")
+# Enrichment > 1.5x suggests binary ability is characteristic
+```
+
+**Step 2: Check mean activation WITH vs WITHOUT**
+```python
+with_binary = df.filter(pl.col('ability_input_tokens').list.contains(binary_id))
+without_binary = df.filter(~pl.col('ability_input_tokens').list.contains(binary_id))
+
+mean_with = with_binary['activation'].mean()
+mean_without = without_binary['activation'].mean()
+delta = mean_with - mean_without
+
+print(f"Mean WITH: {mean_with:.4f}")
+print(f"Mean WITHOUT: {mean_without:.4f}")
+print(f"Delta: {delta:+.4f}")
+# Delta > 0.03 suggests meaningful effect
+```
+
+**Step 3: Run 2D heatmap (MOST IMPORTANT)**
+
+Binary abilities can have **conditional effects** that vary by the scaling ability level:
+
+```python
+# Manual 2D analysis for binary abilities
+# (The built-in 2D heatmap may not handle binary tokens correctly)
+
+scaling_ids = {3: 48, 6: 49, 12: 50, 21: 53, 29: 80}  # ISM example
+binary_id = 27  # Comeback
+
+print("Scaling | No Binary | With Binary | Delta")
+print("-" * 50)
+
+for level, tok_id in scaling_ids.items():
+    level_df = df.filter(pl.col('ability_input_tokens').list.contains(tok_id))
+
+    with_binary = level_df.filter(pl.col('ability_input_tokens').list.contains(binary_id))
+    without_binary = level_df.filter(~pl.col('ability_input_tokens').list.contains(binary_id))
+
+    mean_with = with_binary['activation'].mean() if len(with_binary) > 0 else 0
+    mean_without = without_binary['activation'].mean() if len(without_binary) > 0 else 0
+    delta = mean_with - mean_without
+
+    print(f"{level:>7} | {mean_without:>9.4f} | {mean_with:>11.4f} | {delta:>+.4f}")
+```
+
+**Example (Feature 13352):**
+```
+ISM × Comeback 2D Analysis:
+ISM | No CB  | With CB | Delta
+  0 | 0.066  | 0.117   | +0.051
+  3 | 0.122  | 0.261   | +0.139
+  6 | 0.147  | 0.352   | +0.205  ← PEAK INTERACTION
+ 12 | 0.094  | 0.163   | +0.069
+ 21 | 0.094  | 0.129   | +0.035
+
+Interpretation: Comeback has STRONG conditional effect at ISM 3-6.
+The +0.205 delta at ISM_6 means Comeback DOUBLES the activation!
+1D sweep showed delta=0 because most examples have ISM=0 (low baseline).
+```
+
+**Step 4: Test combinations of binary abilities together**
+```python
+# Test multiple binary abilities together
+binary_id_1 = 27  # e.g., comeback
+binary_id_2 = 1   # e.g., stealth_jump
+
+both = df.filter(
+    pl.col('ability_input_tokens').list.contains(binary_id_1) &
+    pl.col('ability_input_tokens').list.contains(binary_id_2)
+)
+neither = df.filter(
+    ~pl.col('ability_input_tokens').list.contains(binary_id_1) &
+    ~pl.col('ability_input_tokens').list.contains(binary_id_2)
+)
+
+# Then do 2D analysis at each scaling level
+# Combinations can have stronger effects than individual abilities!
+```
+
+**Key Insight:** Binary abilities may have stronger effects when combined. Always test combinations, not just individual tokens.
+
+### Additional Learnings
+
+1. **Conditional effects can be much stronger than marginal effects**: A feature might show ISM with only 0.069 max_delta in 1D sweeps, but a binary ability combination at moderate ISM could produce +0.335 delta - the interaction effect can be 5x stronger than the marginal effect. 1D sweeps can dramatically underestimate a feature's true behavior.
+
+2. **Depletion is informative**: If a binary ability shows enrichment < 1.0 (e.g., 0.72x), the feature actively *avoids* that ability. This is meaningful for interpretation - it tells you what the feature excludes, not just what it includes.
+
+3. **Manual 2D analysis required for binary tokens**: The `Family2DHeatmapRunner` uses `parse_token()` which expects `family_name_AP` format, but binary abilities appear as just the token name (e.g., `comeback` not `comeback_10`). Use manual 2D analysis code for binary abilities (see protocol above).
+
+4. **"Weak feature" needs decoder weight check**: A feature with weak activation effects (max_delta < 0.03) might still have high influence on outputs. Remember: **net influence = activation strength × decoder weight**. Before labeling as "weak", check the feature's decoder weights to the output tokens it contributes to. A "weak activation" feature with high decoder weights may actually be important.
+
+5. **Watch for error-correction features**: If 1D sweeps show small deltas or effects only in unusual rung combinations, the feature may fire when prerequisites are MISSING (OOD detection). Test "explains-away" behavior by comparing activation when low-level evidence is present vs missing. Example: Does feature fire MORE when SCU_3 is absent from a high-SCU build?
+
+6. **Beware of flanderization in top activations**: The top 100 activations over-emphasize extreme cases. The TRUE concept often lives in the **mid-activation range (25-75th percentile)**. Always compare mid vs top activation regions - if they show different weapon/ability patterns, label the mid-range concept and note the extremes as "super-stimuli".
+
+### What Counts as Evidence
+
+| Evidence Type | Strength | Example |
+|---------------|----------|---------|
+| 1D sweep max_delta > 0.05 | Strong causal | "ISM drives this feature" |
+| 1D sweep max_delta 0.02-0.05 | Weak causal | "ISM has minor effect" |
+| 1D sweep max_delta < 0.02 | Negligible | "ISM doesn't drive this" |
+| Binary delta = 0 | Inconclusive | Need presence rate check |
+| High PageRank + low delta | Spurious correlation | Token co-occurs but doesn't cause |
+| 2D heatmap shows conditional effect | Interaction confirmed | "X matters only when Y is high" |
+| Bottom tokens (suppressors) | Avoidance pattern | "Feature avoids death-perks" |
+| Higher activation when prerequisite MISSING | Error-correction | "Fires on OOD rung combos" |
+| Mid-range (25-75%) differs from top | Flanderization | "Top is super-stimuli; label mid-range" |
+
+### Common Mistakes to Avoid
+
+1. **Presenting overview as findings** - Overview is hypotheses, not conclusions
+2. **Ignoring binary abilities** - Delta=0 doesn't mean unimportant
+3. **Skipping bottom tokens** - Suppressors reveal what feature avoids
+4. **Only running 1D sweeps** - 2D heatmaps needed for interaction effects
+5. **Not checking weapon patterns** - Feature may be weapon-specific, not ability-specific
+6. **Using only top activations** - Top 100 may be "flanderized" extremes; check mid-range (25-75%)
+7. **Missing error-correction features** - Small deltas in weird rung combos may indicate OOD detection
+
 ## Philosophy
 
 A **meaningful label** should capture:
@@ -24,6 +290,12 @@ A **meaningful label** should capture:
 - "Backline Support Kit" (playstyle archetype)
 
 ## Investigation Workflow
+
+### Phase 0: Triage
+
+See [Phase 0: Triage](#phase-0-triage-always-start-here) above. **Always start here.**
+
+If feature passes triage (decoder weight ≥10% OR has clear structure), proceed to Phase 1.
 
 ### Phase 1: Initial Assessment
 
@@ -45,9 +317,11 @@ poetry run python -m splatnlp.mechinterp.cli.overview_cli \
 
 **CRITICAL**: Always check for non-monotonic effects! Higher AP doesn't always mean higher activation.
 
-### Phase 1.5: Activation Region Analysis (CRITICAL)
+### Phase 1.5: Activation Region Analysis (CRITICAL - Anti-Flanderization)
 
-**Don't only examine extreme activations!** High activations may be "super-stimuli" - exaggerated versions of the true concept.
+**Don't only examine extreme activations!** High activations may be "flanderized" - exaggerated, extreme versions of the true concept that over-emphasize niche cases.
+
+**Key insight:** The TRUE concept often lives in the **mid-activation range (25-75th percentile)**, not the top 100 examples. Top activations can mislead you into labeling a niche pattern instead of the general concept.
 
 Run activation region analysis:
 
@@ -248,6 +522,50 @@ For single-family dominated features, always test death-mitigation:
 
 If ALL three show suppression at Y>0, label includes "death-averse"
 
+### Template: Error-Correction Detection
+
+If 1D sweeps show **small deltas** or effects **only in unusual rung combinations**, test for error-correction behavior:
+
+```python
+import polars as pl
+from splatnlp.mechinterp.skill_helpers import load_context
+
+ctx = load_context('ultra')
+df = ctx.db.get_all_feature_activations_for_pagerank(FEATURE_ID)
+
+# Get token IDs for high and low rungs
+# Example: SCU_57 (high) and SCU_3 (low)
+high_rung_id = ctx.vocab['special_charge_up_57']
+low_rung_id = ctx.vocab['special_charge_up_3']
+
+# Compare activation when low rung is present vs missing (among high-rung builds)
+high_with_low = df.filter(
+    pl.col('ability_input_tokens').list.contains(high_rung_id) &
+    pl.col('ability_input_tokens').list.contains(low_rung_id)
+)
+high_without_low = df.filter(
+    pl.col('ability_input_tokens').list.contains(high_rung_id) &
+    ~pl.col('ability_input_tokens').list.contains(low_rung_id)
+)
+
+mean_with = high_with_low['activation'].mean()
+mean_without = high_without_low['activation'].mean()
+
+print(f"High rung WITH low rung present: {mean_with:.4f} (n={len(high_with_low)})")
+print(f"High rung WITHOUT low rung: {mean_without:.4f} (n={len(high_without_low)})")
+print(f"Delta: {mean_without - mean_with:+.4f}")
+
+# If WITHOUT > WITH, feature fires when prerequisite is MISSING = error correction!
+```
+
+**Signs of error-correction:**
+
+| Pattern | Interpretation | Label Style |
+|---------|----------------|-------------|
+| Higher activation when low rung MISSING | "Explains away" missing evidence | "Error-Correction: {FAMILY}" |
+| Only fires on weird rung combos | OOD detector | "OOD Detector: {PATTERN}" |
+| Negative interactions in 2D heatmaps | Within-family interference | "Interference Feature: {FAMILY}" |
+
 **Test for within-family interference (CRITICAL for single-family):**
 ```json
 {
@@ -337,6 +655,136 @@ Propose a label at the appropriate level:
 | Moderate | Interaction | "SCU + Mobility Combo" |
 | Strategic | Build archetype | "Special Spam Slayer Kit" |
 | Tactical | Playstyle | "Aggressive Frontline Build" |
+
+### Phase 6: Deeper Dive (For Thorny Features)
+
+**When to use:** If the standard deep dive (Phases 1-5) didn't produce a clear interpretation:
+- All scaling effects weak (max_delta < 0.03)
+- No clear primary driver
+- Conflicting signals from different experiments
+- Feature seems important (high contribution to outputs) but unclear why
+
+**The Deeper Dive uses the hypothesis/state management system** for systematic exploration:
+
+#### Step 1: Initialize Research State
+
+```python
+from splatnlp.mechinterp.state import ResearchState, Hypothesis
+
+state = ResearchState(feature_id=FEATURE_ID, model_type="ultra")
+
+# Add competing hypotheses based on what you've observed
+state.add_hypothesis(Hypothesis(
+    id="h1",
+    description="Feature encodes weapon-specific pattern for Dapple Nouveau",
+    status="pending"
+))
+state.add_hypothesis(Hypothesis(
+    id="h2",
+    description="Feature encodes binary ability package (Stealth + Comeback)",
+    status="pending"
+))
+state.add_hypothesis(Hypothesis(
+    id="h3",
+    description="Feature has high decoder weights despite weak activation effects",
+    status="pending"
+))
+```
+
+#### Step 2: Check Decoder Weights
+
+For "weak activation" features, check if they have high influence via decoder weights:
+
+```python
+# Load SAE decoder weights
+import torch
+sae_path = '/mnt/e/dev_spillover/SplatNLP/sae_runs/run_20250704_191557/sae_model_final.pth'
+sae_checkpoint = torch.load(sae_path, map_location='cpu', weights_only=True)
+decoder_weight = sae_checkpoint['decoder.weight']  # [512, 24576]
+
+# Get this feature's decoder weights to output space
+feature_decoder = decoder_weight[:, FEATURE_ID]  # [512]
+
+# Check magnitude
+print(f"Decoder weight L2 norm: {torch.norm(feature_decoder):.4f}")
+print(f"Max absolute weight: {torch.abs(feature_decoder).max():.4f}")
+
+# Compare to other features
+all_norms = torch.norm(decoder_weight, dim=0)
+percentile = (all_norms < torch.norm(feature_decoder)).float().mean() * 100
+print(f"Percentile among all features: {percentile:.1f}%")
+```
+
+If decoder weights are high (>75th percentile), the feature may be important despite weak activation effects.
+
+#### Step 3: Test Output Token Connections
+
+Check which output tokens this feature most influences:
+
+```python
+# Get the model's output layer weights
+# Feature activations → pooled repr → output logits
+# Need to trace: SAE_feature → decoder → output_layer
+
+from splatnlp.mechinterp.skill_helpers import load_context
+ctx = load_context('ultra')
+
+# The feature's contribution to each output token
+# This requires tracing through the model architecture
+# (Implementation depends on how outputs are structured)
+```
+
+#### Step 4: Run Targeted Experiments
+
+Based on hypotheses, run specific tests:
+
+```python
+# Log experiments and findings to state
+state.add_evidence(
+    hypothesis_id="h1",
+    experiment_type="weapon_sweep",
+    finding="37% Dapple Nouveau, but also 10% .96 Gal Deco - not single-weapon",
+    supports=False
+)
+
+state.add_evidence(
+    hypothesis_id="h3",
+    experiment_type="decoder_weight_check",
+    finding="Decoder L2 norm: 0.89 (92nd percentile) - HIGH despite weak activation",
+    supports=True
+)
+```
+
+#### Step 5: Synthesize
+
+```python
+# Review all evidence
+state.summarize()
+
+# Update hypothesis statuses
+state.update_hypothesis("h1", status="rejected")
+state.update_hypothesis("h3", status="supported")
+
+# Propose final interpretation
+state.set_conclusion(
+    "Feature has weak activation effects but high decoder weights. "
+    "It acts as a 'fine-tuning' feature that makes small but important "
+    "adjustments to output probabilities."
+)
+```
+
+#### When Deeper Dive is Complete
+
+The state object provides an audit trail of:
+- What hypotheses were considered
+- What experiments were run
+- What evidence was found
+- Why the final interpretation was chosen
+
+This is useful for:
+- Revisiting the feature later
+- Explaining the interpretation to others
+- Identifying if new evidence should change the interpretation
 
 ## Decision Trees
 

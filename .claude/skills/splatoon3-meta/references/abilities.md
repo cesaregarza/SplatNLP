@@ -279,7 +279,10 @@
 **Weapon breakpoints**:
 - **Shooters (Splattershot, .52)**: 6 AP (0.2) = "Golden Ratio"
 - **Blasters**: 10-13 AP = ground accuracy while jumping
-- **Not needed**: Sharp Marker, H3, Bottle Geyser (no jump spread); Chargers; Dualies (slide-focused)
+- **L-3 Nozzlenose**: Benefits from IA (burst-fire shooter with jump spread)
+- **Not needed**: Sharp Marker, H-3, Bottle Geyser (no jump spread); Chargers; Dualies (slide-focused)
+
+**Common misconception**: L-3 Nozzlenose is a burst-fire SHOOTER, not a blaster. It benefits from IA like other shooters.
 
 **Labels**: `mobility`, `rng_mitigation`, `jump_shot_accuracy`, `duel_reliability`
 

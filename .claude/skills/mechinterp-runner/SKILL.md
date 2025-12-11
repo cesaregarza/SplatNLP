@@ -246,6 +246,36 @@ splatoon3-meta lookup:
 Conclusion: Feature encodes "Ink Storm spam builds" not "Octobrush Nouveau builds"
 ```
 
+## Known Limitations
+
+### Binary Tokens in family_2d_heatmap
+
+**LIMITATION**: The `family_2d_heatmap` experiment type does NOT correctly handle binary abilities (comeback, stealth_jump, haunt, etc.).
+
+The runner uses `parse_token()` which expects tokens in `family_name_AP` format (e.g., `swim_speed_up_21`), but binary abilities appear as just the token name without an AP suffix (e.g., `comeback` not `comeback_10`).
+
+**Workaround**: Use manual 2D analysis code for binary abilities. See the Binary Ability Analysis Protocol in **mechinterp-investigator**.
+
+### Future Enhancement: Stable Tokens
+
+A useful enhancement would be adding "stable tokens" to sweep experiments - tokens that are held constant across all conditions in the sweep. This would allow testing questions like:
+
+- "How does SCU affect activation *when Comeback is present*?"
+- "How does ISM scale *on Stamper builds*?"
+
+Proposed spec format:
+```json
+{
+  "type": "family_1d_sweep",
+  "variables": {
+    "family": "special_charge_up",
+    "stable_tokens": ["comeback", "stealth_jump"]  // Hold these constant
+  }
+}
+```
+
+This is not currently implemented.
+
 ## See Also
 
 - **mechinterp-next-step-planner**: Generate experiment specs

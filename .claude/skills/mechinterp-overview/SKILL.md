@@ -7,6 +7,23 @@ description: Quick "first look" overview of SAE features - top tokens, activatio
 
 Get a comprehensive first-look overview of an SAE feature before deep investigation. This skill provides a fast summary of key characteristics to help you decide what hypotheses to test.
 
+## ⚠️ CRITICAL: Overview is NOT Findings
+
+**The overview shows CORRELATIONS, not CAUSATION.** It is a starting point for generating hypotheses, NOT a source of conclusions.
+
+| Overview Shows | What It Actually Means |
+|----------------|------------------------|
+| Top tokens (PageRank) | Tokens that CO-OCCUR with high activation (correlation) |
+| Family breakdown | Which ability families appear in high-activation examples |
+| Top weapons | Weapons present in high-activation examples |
+
+**You CANNOT conclude from overview alone:**
+- That a token "drives" or "causes" activation
+- That the feature "detects" a specific ability
+- That correlations are meaningful vs spurious
+
+**To make conclusions, you MUST run experiments** (see mechinterp-investigator for deep dive basics).
+
 ## Purpose
 
 The overview skill:
@@ -24,6 +41,8 @@ Use this skill when:
 2. You want a quick summary before running experiments
 3. Deciding which feature to label next
 4. Checking if a feature has already been labeled
+
+**DO NOT use overview results as final findings.** Always follow up with experiments.
 
 ## Output Information
 
@@ -247,6 +266,8 @@ Use these standard bins to analyze feature behavior across the activation spectr
 7. **Check suppressors**: Always examine bottom tokens! If death-mitigation abilities (QR, SS, CB) are suppressed, the feature encodes "death-averse" builds. See **mechinterp-ability-semantics** for semantic groupings.
 
 8. **Enhancers + Suppressors together**: The combination tells the full story. A feature with SCU enhanced AND death-perks suppressed isn't just "SCU detector" - it's "death-averse special builds".
+
+9. **"Weak activation" ≠ "unimportant feature"**: If all scaling effects are weak (max_delta < 0.03), don't immediately label as "weak feature". Check the feature's **decoder weights** to output tokens. Net influence = activation × decoder weight. A feature with low activation effects but high decoder weights may still strongly influence predictions.
 
 ## ⚠️ WARNING: Correlation ≠ Causation
 

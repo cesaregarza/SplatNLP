@@ -55,7 +55,7 @@ Complete mapping of weapon IDs to names, kits (sub + special), and classes.
 | 2070 | Snipewriter 5H | Sprinkler | Tacticooler |
 | 2071 | Snipewriter 5B | Splash Wall | Ink Storm |
 
-### Dualies
+### Dualies (Maneuver)
 
 | ID | Name | Sub | Special |
 |:---|:-----|:----|:--------|
@@ -87,6 +87,63 @@ Complete mapping of weapon IDs to names, kits (sub + special), and classes.
 | 1040 | Big Swig Roller | Splash Wall | Ink Vac |
 | 1041 | Big Swig Roller Express | Angle Shooter | Ink Storm |
 
+### Splatanas (Saber)
+
+| ID | Name | Sub | Special |
+|:---|:-----|:----|:--------|
+| 8000 | Splatana Stamper | Burst Bomb | Zipcaster |
+| 8001 | Splatana Stamper Nouveau | Toxic Mist | Crab Tank |
+| 8010 | Splatana Wiper | Torpedo | Ultra Stamp |
+| 8011 | Splatana Wiper Deco | Squid Beakon | Tenta Missiles |
+| 8020 | Mint Decavitator | Suction Bomb | Big Bubbler |
+| 8021 | Charcoal Decavitator | Splash Wall | Inkjet |
+
+### Brellas (Shelter)
+
+| ID | Name | Sub | Special |
+|:---|:-----|:----|:--------|
+| 6000 | Splat Brella | Sprinkler | Triple Inkstrike |
+| 6001 | Sorella Brella | Autobomb | Inkjet |
+| 6010 | Tenta Brella | Squid Beakon | Ink Vac |
+| 6011 | Tenta Sorella Brella | Ink Mine | Trizooka |
+| 6020 | Undercover Brella | Ink Mine | Reefslider |
+| 6021 | Undercover Sorella Brella | Torpedo | Splattercolor Screen |
+| 6030 | Recycled Brella 24 Mk I | Angle Shooter | Big Bubbler |
+| 6031 | Recycled Brella 24 Mk II | Toxic Mist | Triple Splashdown |
+
+### Shooters
+
+| ID | Name | Sub | Special |
+|:---|:-----|:----|:--------|
+| 0 | Sploosh-o-matic | Curling Bomb | Ultra Stamp |
+| 1 | Neo Sploosh-o-matic | Squid Beakon | Killer Wail 5.1 |
+| 10 | Splattershot Jr. | Splat Bomb | Big Bubbler |
+| 11 | Custom Splattershot Jr. | Torpedo | Wave Breaker |
+| 20 | Splash-o-matic | Burst Bomb | Crab Tank |
+| 21 | Neo Splash-o-matic | Suction Bomb | Triple Inkstrike |
+| 30 | Aerospray MG | Fizzy Bomb | Reefslider |
+| 31 | Aerospray RG | Sprinkler | Booyah Bomb |
+| 40 | Splattershot | Suction Bomb | Trizooka |
+| 41 | Tentatek Splattershot | Splat Bomb | Triple Inkstrike |
+| 50 | .52 Gal | Splash Wall | Killer Wail 5.1 |
+| 51 | .52 Gal Deco | Curling Bomb | Splattercolor Screen |
+| 60 | N-ZAP '85 | Suction Bomb | Tacticooler |
+| 61 | N-ZAP '89 | Autobomb | Super Chump |
+| 70 | Splattershot Pro | Angle Shooter | Crab Tank |
+| 71 | Forge Splattershot Pro | Suction Bomb | Booyah Bomb |
+| 80 | .96 Gal | Sprinkler | Ink Vac |
+| 81 | .96 Gal Deco | Splash Wall | Kraken Royale |
+| 90 | Jet Squelcher | Angle Shooter | Ink Vac |
+| 91 | Custom Jet Squelcher | Toxic Mist | Ink Storm |
+| 100 | Splattershot Nova | Point Sensor | Killer Wail 5.1 |
+| 101 | Annaki Splattershot Nova | Ink Mine | Inkjet |
+| 300 | L-3 Nozzlenose | Curling Bomb | Crab Tank |
+| 301 | L-3 Nozzlenose D | Burst Bomb | Ultra Stamp |
+| 310 | H-3 Nozzlenose | Point Sensor | Tacticooler |
+| 311 | H-3 Nozzlenose D | Splash Wall | Big Bubbler |
+| 400 | Squeezer | Splash Wall | Trizooka |
+| 401 | Foil Squeezer | Autobomb | Splattercolor Screen |
+
 ### Sloshers
 
 | ID | Name | Sub | Special |
@@ -104,28 +161,7 @@ Complete mapping of weapon IDs to names, kits (sub + special), and classes.
 | 3050 | Dread Wringer | Suction Bomb | Reefslider |
 | 3051 | Dread Wringer D | Squid Beakon | Wave Breaker |
 
-### Shooters (Common)
-
-| ID | Name | Sub | Special |
-|:---|:-----|:----|:--------|
-| 0 | Sploosh-o-matic | Curling Bomb | Ultra Stamp |
-| 1 | Neo Sploosh-o-matic | Squid Beakon | Killer Wail 5.1 |
-| 10 | Splattershot Jr. | Splat Bomb | Big Bubbler |
-| 11 | Custom Splattershot Jr. | Torpedo | Wave Breaker |
-| 40 | Splattershot | Suction Bomb | Trizooka |
-| 41 | Tentatek Splattershot | Splat Bomb | Triple Inkstrike |
-| 50 | .52 Gal | Splash Wall | Killer Wail 5.1 |
-| 51 | .52 Gal Deco | Curling Bomb | Splattercolor Screen |
-| 60 | N-ZAP '85 | Suction Bomb | Tacticooler |
-| 61 | N-ZAP '89 | Autobomb | Super Chump |
-| 70 | Splattershot Pro | Angle Shooter | Crab Tank |
-| 71 | Forge Splattershot Pro | Suction Bomb | Booyah Bomb |
-| 80 | .96 Gal | Sprinkler | Ink Vac |
-| 81 | .96 Gal Deco | Splash Wall | Kraken Royale |
-| 90 | Jet Squelcher | Angle Shooter | Ink Vac |
-| 91 | Custom Jet Squelcher | Toxic Mist | Ink Storm |
-
-### Splatlings
+### Splatlings (Spinner)
 
 | ID | Name | Sub | Special |
 |:---|:-----|:----|:--------|
@@ -142,19 +178,6 @@ Complete mapping of weapon IDs to names, kits (sub + special), and classes.
 | 4050 | Heavy Edit Splatling | Curling Bomb | Tacticooler |
 | 4051 | Heavy Edit Splatling Nouveau | Splat Bomb | Crab Tank |
 
-### Brellas
-
-| ID | Name | Sub | Special |
-|:---|:-----|:----|:--------|
-| 6000 | Splat Brella | Sprinkler | Triple Inkstrike |
-| 6001 | Sorella Brella | Autobomb | Inkjet |
-| 6010 | Tenta Brella | Squid Beakon | Ink Vac |
-| 6011 | Tenta Sorella Brella | Ink Mine | Trizooka |
-| 6020 | Undercover Brella | Ink Mine | Reefslider |
-| 6021 | Undercover Sorella Brella | Torpedo | Splattercolor Screen |
-| 6030 | Recycled Brella 24 Mk I | Angle Shooter | Big Bubbler |
-| 6031 | Recycled Brella 24 Mk II | Toxic Mist | Triple Splashdown |
-
 ### Stringers
 
 | ID | Name | Sub | Special |
@@ -165,17 +188,6 @@ Complete mapping of weapon IDs to names, kits (sub + special), and classes.
 | 7021 | REEF-LUX 450 Deco | Splash Wall | Reefslider |
 | 7030 | Wellstring V | Autobomb | Ultra Stamp |
 | 7031 | Custom Wellstring V | Point Sensor | Wave Breaker |
-
-### Splatanas
-
-| ID | Name | Sub | Special |
-|:---|:-----|:----|:--------|
-| 8000 | Splatana Stamper | Burst Bomb | Zipcaster |
-| 8001 | Splatana Stamper Nouveau | Toxic Mist | Crab Tank |
-| 8010 | Splatana Wiper | Torpedo | Ultra Stamp |
-| 8011 | Splatana Wiper Deco | Squid Beakon | Tenta Missiles |
-| 8020 | Mint Decavitator | Suction Bomb | Big Bubbler |
-| 8021 | Charcoal Decavitator | Splash Wall | Inkjet |
 
 ## Special-Dependent Weapons
 
@@ -192,6 +204,7 @@ Weapons where the special is a primary win condition (benefit heavily from SCU):
 | Sloshing Machine | Booyah Bomb | Team-charging win condition |
 | Bloblobber | Ink Storm | Sustained zone pressure |
 | Rapid Blaster | Triple Inkstrike | Map control special |
+| REEF-LUX 450 | Tenta Missiles | Missile spam builds |
 
 ## Weapon Class → Ability Synergies
 
@@ -203,6 +216,17 @@ Weapons where the special is a primary win condition (benefit heavily from SCU):
 | Splatlings | RSU 2.0+, InkRes, InkRec | Strafe-fighting mobility |
 | Rollers | Ninja Squid, SSU 1.0+, Stealth Jump | Ambush predators |
 | Dualies | Intensify Action, SSU, Stealth Jump | Dodge-roll focused |
+
+## Internal Class Names
+
+Game uses internal class names that differ from display names:
+
+| Internal | Display |
+|:---------|:--------|
+| Maneuver | Dualies |
+| Saber | Splatanas |
+| Shelter | Brellas |
+| Spinner | Splatlings |
 
 ## Programmatic Access
 
