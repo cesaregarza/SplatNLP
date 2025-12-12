@@ -272,6 +272,35 @@ neither = df.filter(
 5. **Not checking weapon patterns** - Feature may be weapon-specific, not ability-specific
 6. **Using only top activations** - Top 100 may be "flanderized" extremes; check mid-range (25-75%)
 7. **Missing error-correction features** - Small deltas in weird rung combos may indicate OOD detection
+8. **Confusing data sparsity with suppression** - Zero examples at a condition ≠ "suppression to 0" (see below)
+9. **Shallow validation** - Just checking if numbers "look right" without running enrichment analysis
+10. **Semantic contradictions in labels** - e.g., "Zombie" (embraces death) + "high SSU" (avoids death) is contradictory
+11. **Reporting weapon percentages from top-100** - Use top 20-30% instead; top-100 can be 5-10x off (e.g., 78% vs 10%)
+12. **Not checking meta archetypes** - Weapons may cluster by playstyle, not kit; use splatoon3-meta skill
+13. **Assuming kit-based patterns** - Check if weapons share sub/special BEFORE assuming it's kit-related
+14. **Ignoring flanderization crossover** - Note where a "super-stimulus" weapon overtakes the general pattern (usually top 5%)
+
+### ⚠️ CRITICAL: Data Sparsity vs Suppression
+
+**This is a common and dangerous mistake.** When you see "activation = 0" or "no effect" at some condition, ask: **Is this suppression or data sparsity?**
+
+**Example of the mistake (Feature 1819):**
+```
+Original claim: "QR is HARD SUPPRESSOR - SSU_57+QR_any=0.000"
+Reality: There were ZERO examples with SSU_57 + any QR in the dataset!
+         The "0.000" was missing data, not suppression.
+```
+
+**How to detect data sparsity:**
+```python
+# ALWAYS check sample sizes when claiming suppression!
+at_high_ssu = df.filter(pl.col('ability_input_tokens').list.contains(ssu_57_id))
+with_qr = at_high_ssu.filter(pl.col('ability_input_tokens').list.set_intersection(qr_ids).list.len() > 0)
+
+print(f"Examples at SSU_57 with QR: {len(with_qr)}")  # If 0, this is SPARSITY not suppression!
+```
+
+**Rule:** Never claim "suppression" unless you have ≥20 examples in the suppressed condition. Report sample sizes with all claims.
 
 ## Philosophy
 
@@ -384,6 +413,142 @@ Label the general concept, note the super-stimuli pattern.
 | Special abilities suppressed | Feature encodes non-special playstyle |
 
 **Example**: If SCU is enhanced but `quick_respawn`, `special_saver`, and `comeback` are ALL suppressed, the feature doesn't just detect "SCU" - it detects "death-averse SCU builds" (players who stack SCU but don't plan to die).
+
+### Phase 1.6: Weapon Distribution Analysis (CRITICAL - Anti-Flanderization)
+
+**NEVER report weapon percentages from top-100 samples.** Top-100 is severely flanderized and can give wildly misleading weapon distributions.
+
+**Example (Feature 14096 - Real Case):**
+```
+Top 100:     Dark Tetra 78%, Stamper 20%  ← WRONG, flanderized
+Top 10%:     Stamper 35%, Dark Tetra 21%  ← Better but still skewed
+Top 30%:     Stamper 23%, Dark Tetra 10%  ← TRUE CONCEPT
+Full dataset: Stamper 9%, Dark Tetra 3.5% ← Includes noise/floor
+```
+
+**Use top 20-30% for weapon characterization:**
+
+```python
+import polars as pl
+import numpy as np
+from collections import Counter
+from splatnlp.mechinterp.skill_helpers import load_context
+
+ctx = load_context('ultra')
+df = ctx.db.get_all_feature_activations_for_pagerank(FEATURE_ID)
+
+# Get percentile thresholds
+acts = df['activation'].to_numpy()
+thresholds = {p: np.percentile(acts, p) for p in [0, 50, 70, 80, 90, 95, 99]}
+
+# Analyze by region
+regions = [
+    ("Bottom 50% (noise)", 0, 50),
+    ("50-70% (weak)", 50, 70),
+    ("Top 30% (TRUE CONCEPT)", 70, 100),
+    ("Top 10%", 90, 100),
+    ("Top 1% (flanderized)", 99, 100),
+]
+
+print("Region | Top Weapons")
+print("-" * 60)
+
+for name, p_low, p_high in regions:
+    t_low, t_high = thresholds[p_low], thresholds.get(p_high, float('inf'))
+    if p_high == 100:
+        region_df = df.filter(pl.col('activation') >= t_low)
+    else:
+        region_df = df.filter((pl.col('activation') >= t_low) & (pl.col('activation') < t_high))
+
+    if len(region_df) == 0:
+        continue
+
+    weapon_counts = region_df.group_by('weapon_id').agg(
+        pl.col('activation').count().alias('n')
+    ).sort('n', descending=True)
+
+    top3 = []
+    for row in weapon_counts.head(3).iter_rows(named=True):
+        wname = ctx.id_to_weapon_display_name(row['weapon_id'])
+        pct = row['n'] / len(region_df) * 100
+        top3.append(f"{wname[:12]}({pct:.0f}%)")
+
+    print(f"{name:<25} | {', '.join(top3)}")
+```
+
+**Interpretation Guide:**
+
+| Pattern | Meaning |
+|---------|---------|
+| Same weapons in top-30% and top-1% | Continuous feature, no flanderization |
+| Different weapons in top-30% vs top-1% | **Flanderization detected** - label top-30% concept |
+| One weapon jumps from 10% to 70%+ | That weapon is "super-stimulus" for the feature |
+| Weapons consistent 50%→30%→10%→1% | Stable feature, safe to use any region |
+
+**Rule: Report weapon percentages from top 20-30%, note if top-1% differs significantly.**
+
+### Phase 1.7: Meta-Informed Weapon Analysis (USE AFTER WEAPON SWEEP)
+
+After identifying top weapons, **always check if they match a known meta archetype** using the `splatoon3-meta` skill.
+
+**Step 1: Look up weapon kits**
+
+Check `references/weapons.md` for each top weapon's sub and special:
+
+```python
+# Top weapons from Feature 14096 (top 30%):
+kits = {
+    "Splatana Stamper": ("Burst Bomb", "Zipcaster"),
+    "Dark Tetra Dualies": ("Autobomb", "Reefslider"),
+    "Glooga Dualies": ("Splash Wall", "Booyah Bomb"),
+    "Dapple Dualies Nouveau": ("Torpedo", "Reefslider"),
+    "Splatana Wiper": ("Torpedo", "Ultra Stamp"),
+}
+
+# Check for shared subs/specials
+from collections import Counter
+subs = Counter(k[0] for k in kits.values())
+specials = Counter(k[1] for k in kits.values())
+
+# If one sub/special dominates → kit-based feature
+# If diverse → playstyle-based feature
+```
+
+**Step 2: Check archetype reference**
+
+Read `references/archetypes.md` to see if weapons match a known archetype:
+
+| Archetype | Key Weapons | Signature Abilities |
+|-----------|-------------|---------------------|
+| Zombie Slayer | Tetra Dualies, Splatana Wiper | QR + Comeback + Stealth Jump |
+| Stealth Slayer | Carbon Roller, Inkbrush | Ninja Squid + SSU + Stealth Jump |
+| Anchor/Backline | E-liter, Hydra Splatling | Respawn Punisher + Object Shredder |
+| Support/Beacon | Squid Beakon weapons | Sub Power Up + ISS + Comeback |
+
+**Step 3: Classification decision**
+
+```
+Kit Analysis Result:
+├─ Shared sub weapon? → Feature may encode SUB PLAYSTYLE
+├─ Shared special? → Feature may encode SPECIAL FARMING
+├─ No kit pattern + archetype match? → PLAYSTYLE FEATURE (label as archetype)
+└─ No kit pattern + no archetype? → WEAPON CLASS feature (check if all dualies, all shooters, etc.)
+```
+
+**Example (Feature 14096):**
+```
+Top 30% weapons: Stamper, Dark Tetra, Glooga, Dapple, Wiper
+Kit analysis: Diverse subs (Burst, Auto, Splash Wall, Torpedo), diverse specials
+Archetype check: Dark Tetra + Splatana Wiper = "Zombie Slayer" archetype!
+Conclusion: PLAYSTYLE feature encoding Zombie Slayer (death-accepting aggressive)
+Label: "Zombie Slayer QR (Splatana/Dualies)" - tactical category
+```
+
+**When to invoke splatoon3-meta skill:**
+- After weapon_sweep shows concentrated weapon pattern
+- When top weapons seem unrelated by kit but share a playstyle
+- To validate that ability patterns match expected meta builds
+- To identify if weapons share archetype despite different kits
 
 ### Phase 2: Hypothesis Generation
 
@@ -891,3 +1056,4 @@ poetry run python -m splatnlp.mechinterp.cli.labeler_cli label \
 - **mechinterp-labeler**: Save labels
 - **mechinterp-glossary-and-constraints**: Domain reference
 - **mechinterp-ability-semantics**: Ability semantic groupings (check AFTER hypotheses)
+- **splatoon3-meta**: Weapon archetypes, kit lookups, meta knowledge (USE for weapon pattern interpretation)
