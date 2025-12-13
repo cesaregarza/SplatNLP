@@ -2,7 +2,6 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-from splatnlp.embeddings.load import load_vocab_json
 from splatnlp.preprocessing.transform.mappings import generate_maps
 
 SPECIAL = {
@@ -68,6 +67,8 @@ def _build_weapon_maps(vocab_dir: Path):
                 identifiers to weapon names.
     """
     _, id_to_name, id_to_url = generate_maps()
+    from splatnlp.embeddings.load import load_vocab_json
+
     weapon_vocab = load_vocab_json(vocab_dir)
     name_to_id = {v: int(k) for k, v in id_to_name.items()}
     name_to_internal = {

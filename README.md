@@ -18,7 +18,13 @@ The model is approximately **83 million parameters** in size and is available in
 Both variants are referenced under `saved_models/` for offline inspection when
 you have local model artifacts available (see the quickstart below).
 
-**Sparse Autoencoder (SAE):** The SAE is trained on the activations of the primary model to provide a sparse, monosemantic representation of the gear sets. This allows for interpretability and feature analysis of the model's predictions (see the `monosemantic_sae` module). It includes a `SetCompletionHook` that can be used to hook into the primary model and modify the activations during inference for model steering. This is based on Anthropic's work: [Towards Monosemanticity](https://transformer-circuits.pub/2023/monosemantic-features/index.html)
+**Sparse Autoencoder (SAE):** The SAE is trained on the activations of the
+primary model to provide a sparse, monosemantic representation of the gear
+sets. This allows for interpretability and feature analysis of the model's
+predictions (see the `monosemantic_sae` module). It includes a
+`SetCompletionHook` that can run the SAE inline during inference and expose
+feature activations for analysis. This is based on Anthropic's work:
+[Towards Monosemanticity](https://transformer-circuits.pub/2023/monosemantic-features/index.html)
 
 ---
 

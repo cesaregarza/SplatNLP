@@ -12,7 +12,8 @@ code lives, and what you can run quickly.
 - **Constraint-aware reconstruction** (greedy closure + beam search + exact
   allocator) that turns token-space probabilities into legal build-space gear.
 - **Mechanistic interpretability tooling**: a Sparse Autoencoder (SAE) trained
-  on a 512D pooled activation, plus hooks to read/edit features during inference.
+  on a 512D pooled activation, plus hooks to read feature activations during
+  inference.
 
 ## Canonical Writeup (Blog)
 
