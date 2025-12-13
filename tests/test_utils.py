@@ -58,17 +58,19 @@ def test_build_predict_abilities_hook():
 
 def test_reconstruct_build_basic():
     def predict_fn(tokens, weapon_id):
+        # Use probabilities above threshold (0.5) for tokens to be added
         if "comeback" not in tokens:
-            return {"comeback": 0.0}
+            return {"comeback": 0.6}
         elif "swim_speed_up_3" not in tokens:
-            return {"swim_speed_up_3": 0.0}
+            return {"swim_speed_up_3": 0.6}
         return {}
 
     allocator = Allocator()
-    build = reconstruct_build(
+    builds = reconstruct_build(
         predict_fn, "weapon", [], allocator, beam_size=2, max_steps=2
     )
 
-    assert build is not None
+    assert builds is not None
+    build = builds[0]
     assert build.mains["head"] == "comeback"
     assert build.subs.get("swim_speed_up") == 1

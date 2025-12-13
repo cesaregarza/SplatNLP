@@ -3,7 +3,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-from dash import Input, Output, State, callback, dcc, html
+import polars as pl
+from dash import Input, Output, State, callback, dcc, html, no_update
 
 # App context will be monkey-patched by the run script
 # DASHBOARD_CONTEXT = None
@@ -36,14 +37,21 @@ correlations_component = html.Div(
         Output("token-logit-correlations-display", "children"),
         Output("correlations-error-message", "children"),
     ],
-    [Input("feature-dropdown", "value")],
+    [
+        Input("feature-dropdown", "value"),
+        Input("active-tab-store", "data"),
+    ],
 )
-def update_correlations_display(selected_feature_id):
+def update_correlations_display(selected_feature_id, active_tab):
     import logging
 
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
     logger = logging.getLogger(__name__)
+
+    # Lazy loading: skip if tab is not active
+    if active_tab != "tab-logits":
+        return no_update, no_update, no_update
 
     if selected_feature_id is None:
         return [], [], "Select an SAE feature to view correlations."
@@ -70,30 +78,92 @@ def update_correlations_display(selected_feature_id):
     try:
         # Get activations for the selected feature
         selected_activations = db.get_feature_activations(selected_feature_id)
-        if selected_activations.is_empty():
-            return (
-                [],
-                [],
-                f"No activation data found for feature {selected_feature_id}",
-            )
 
-        # Calculate correlations with other features
+        # Check if it's Polars or Pandas and handle empty case
+        if isinstance(selected_activations, pl.DataFrame):
+            if selected_activations.is_empty():
+                return (
+                    [],
+                    [],
+                    f"No activation data found for feature {selected_feature_id}",
+                )
+        else:  # pandas
+            if selected_activations.empty:
+                return (
+                    [],
+                    [],
+                    f"No activation data found for feature {selected_feature_id}",
+                )
+
+        # For sparse features, correlation is often not meaningful
+        # since features rarely activate on the same examples
+        # Skip correlation calculation for efficient database
         correlations = []
-        for other_feature_id in DASHBOARD_CONTEXT.feature_ids:
-            if other_feature_id == selected_feature_id:
-                continue
 
-            other_activations = db.get_feature_activations(other_feature_id)
-            if other_activations.is_empty():
-                continue
+        # Only compute correlations for small feature sets or non-efficient databases
+        if db.__class__.__name__ != "EfficientFSDatabase":
+            # Original correlation logic for FSDatabase
+            for other_feature_id in DASHBOARD_CONTEXT.feature_ids:
+                if other_feature_id == selected_feature_id:
+                    continue
 
-            # Calculate correlation between activations
-            correlation = selected_activations["activation"].corr(
-                other_activations["activation"]
-            )
-            correlations.append(
-                {"feature_id": other_feature_id, "correlation": correlation}
-            )
+                other_activations = db.get_feature_activations(other_feature_id)
+
+                # Check for empty
+                if isinstance(other_activations, pl.DataFrame):
+                    if other_activations.is_empty():
+                        continue
+                else:
+                    if other_activations.empty:
+                        continue
+
+                # Calculate correlation between activations
+                if isinstance(selected_activations, pl.DataFrame):
+                    # Polars correlation - need to join on common examples
+                    # Join on index to get common examples
+                    joined = selected_activations.select(
+                        ["index", "activation"]
+                    ).join(
+                        other_activations.select(["index", "activation"]),
+                        on="index",
+                        how="inner",
+                        suffix="_other",
+                    )
+
+                    if (
+                        len(joined) < 3
+                    ):  # Need at least 3 points for meaningful correlation
+                        continue
+
+                    # Calculate correlation on common examples
+                    selected_acts = joined["activation"].to_numpy()
+                    other_acts = joined["activation_other"].to_numpy()
+
+                    # Check for zero variance
+                    if np.std(selected_acts) == 0 or np.std(other_acts) == 0:
+                        continue
+
+                    correlation = np.corrcoef(selected_acts, other_acts)[0, 1]
+                else:
+                    # Pandas correlation - join on index
+                    joined = pd.merge(
+                        selected_activations[["index", "activation"]],
+                        other_activations[["index", "activation"]],
+                        on="index",
+                        how="inner",
+                        suffixes=("", "_other"),
+                    )
+
+                    if len(joined) < 3:
+                        continue
+
+                    correlation = joined["activation"].corr(
+                        joined["activation_other"]
+                    )
+
+                correlations.append(
+                    {"feature_id": other_feature_id, "correlation": correlation}
+                )
 
         # Sort by absolute correlation and take top 5
         correlations.sort(key=lambda x: abs(x["correlation"]), reverse=True)
@@ -122,6 +192,21 @@ def update_correlations_display(selected_feature_id):
 
         # Since ability_tags is an array, we need to expand it to calculate correlations
         try:
+            if not isinstance(selected_activations, pd.DataFrame) or (
+                "ability_tags" not in selected_activations.columns
+            ):
+                token_logit_influences_display_children.append(
+                    html.P(
+                        "Ability tag correlations unavailable for this backend.",
+                        className="ms-3",
+                    )
+                )
+                return (
+                    sae_corr_display_children,
+                    token_logit_influences_display_children,
+                    "",
+                )
+
             # Create a dictionary to store mean activations per ability tag
             tag_activations = {}
 

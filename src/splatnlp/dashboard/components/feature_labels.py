@@ -7,7 +7,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, dcc, html
 
@@ -43,15 +42,22 @@ class FeatureLabel:
 class FeatureLabelsManager:
     """Enhanced feature labeling with categories and metadata."""
 
-    def __init__(self, storage_path: Optional[Path] = None):
+    def __init__(
+        
+        self, storage_path: Optional[Path] = None, model_type: str = "full"
+    ):
         """Initialize the feature labels manager.
 
         Args:
             storage_path: Path to store feature labels JSON.
-                         Defaults to dashboard directory.
+                         Defaults to dashboard directory with model-specific file.
+            model_type: Type of model ("full" or "ultra")
         """
+        self.model_type = model_type
         if storage_path is None:
-            storage_path = Path(__file__).parent.parent / "feature_labels.json"
+            # Use model-specific label file
+            filename = f"feature_labels_{model_type}.json"
+            storage_path = Path(__file__).parent.parent / filename
         self.storage_path = storage_path
         self.feature_labels = self._load_labels()
 
@@ -60,33 +66,25 @@ class FeatureLabelsManager:
 
     def _load_labels(self) -> Dict[int, FeatureLabel]:
         """Load feature labels from storage."""
-        if self.storage_path.exists():
-            try:
-                with open(self.storage_path, "r") as f:
-                    data = json.load(f)
-                    # Convert string keys to int and dict to FeatureLabel
-                    return {
-                        int(k): FeatureLabel.from_dict(v)
-                        for k, v in data.items()
-                    }
-            except Exception:
-                return {}
-        return {}
+        if not self.storage_path.exists():
+            return {}
+        with open(self.storage_path, "r") as f:
+            data = json.load(f)
+        return {
+            int(k): FeatureLabel.from_dict(v) for k, v in data.items()
+        }
 
     def _migrate_from_names_if_needed(self):
         """Migrate from old feature_names.json if it exists."""
         old_path = self.storage_path.parent / "feature_names.json"
         if old_path.exists() and not self.feature_labels:
-            try:
-                with open(old_path, "r") as f:
-                    old_data = json.load(f)
-                    for k, name in old_data.items():
-                        self.feature_labels[int(k)] = FeatureLabel(
-                            name=name, timestamp=datetime.now().isoformat()
-                        )
-                    self.save_labels()
-            except Exception:
-                pass
+            with open(old_path, "r") as f:
+                old_data = json.load(f)
+            for k, name in old_data.items():
+                self.feature_labels[int(k)] = FeatureLabel(
+                    name=name, timestamp=datetime.now().isoformat()
+                )
+            self.save_labels()
 
     def save_labels(self) -> None:
         """Save feature labels to storage."""

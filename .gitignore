@@ -34,15 +34,24 @@ env/
 # Jupyter Notebook
 .ipynb_checkpoints
 *.ipynb
+!notebooks/*.ipynb
+!notebooks/*.md
 
 # Data and Models
 data/
+data
 models/
 saved_models/
+saved_models
 outputs/
+outputs
 sae_outputs/
 sae_grid_search_outputs/
 test_data/
+test_data
+dashboard_outputs/
+bench/
+decomp_models/
 *.db
 *.csv
 *.json
@@ -75,3 +84,6 @@ results.csv
 .codesearch/
 !scripts/*.sh
 sae_runs
+
+# Claude-specific documentation
+CLAUDE.md
