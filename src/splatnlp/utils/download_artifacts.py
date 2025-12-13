@@ -35,6 +35,11 @@ ULTRA_SAE_ARTIFACTS: tuple[ArtifactSpec, ...] = (
     ArtifactSpec("sae_model_ultra.pth"),
 )
 
+ULTRA_LABELS_ARTIFACTS: tuple[ArtifactSpec, ...] = (
+    ArtifactSpec("feature_labels_ultra.json", required=False),
+    ArtifactSpec("consolidated_ultra.json", required=False),
+)
+
 OPTIONAL_DATA_ARTIFACTS: tuple[ArtifactSpec, ...] = (
     ArtifactSpec("tokenized_data.csv", required=False),
 )
@@ -62,6 +67,9 @@ def _iter_selected_artifacts(args: argparse.Namespace) -> Iterable[ArtifactSpec]
 
     if args.include_ultra_sae:
         selected.extend(ULTRA_SAE_ARTIFACTS)
+
+    if args.include_ultra_labels or args.include_ultra_sae:
+        selected.extend(ULTRA_LABELS_ARTIFACTS)
 
     if args.include_tokenized_data:
         selected.extend(OPTIONAL_DATA_ARTIFACTS)
@@ -202,6 +210,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Also download tokenized_data.csv (optional).",
     )
     parser.add_argument(
+        "--include-ultra-labels",
+        action="store_true",
+        help=(
+            "Also download Ultra feature labels if available "
+            "(feature_labels_ultra.json / consolidated_ultra.json)."
+        ),
+    )
+    parser.add_argument(
         "--files",
         nargs="+",
         help="Download only these filenames (overrides other selections).",
@@ -252,4 +268,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
