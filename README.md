@@ -27,6 +27,7 @@ you have local model artifacts available (see the quickstart below).
 If you’re reviewing this repo, start with:
 
 - `docs/START_HERE.md`
+- `notebooks/colab_demo.ipynb` (Colab-friendly demo)
 
 ---
 
@@ -80,26 +81,42 @@ SplatNLP/
 ## Quickstart (local CPU demo)
 
 This demo expects a local copy of pretrained artifacts under
-`saved_models/dataset_v0_2` (model checkpoint + `vocab.json` +
+`saved_models/dataset_v2` (model checkpoint + `vocab.json` +
 `weapon_vocab.json` + `model_params.json`). Those large artifacts are not
-tracked in git; see `docs/START_HERE.md` for how to run the repo without them
-(tests), or how to point the demo at your local artifacts.
+tracked in git. You can download them from the configured artifact host via:
+
+`poetry run python -m splatnlp.utils.download_artifacts --dataset-dir dataset_v2`
+
+You can also override the host/path using `DO_SPACES_ML_ENDPOINT` and
+`DO_SPACES_ML_DIR`.
 
 1. Install dependencies (dev extras include formatting/testing):\
    `poetry install --with dev`
-2. Run a one-off inference:
+2. (Optional) Download artifacts if you don’t already have them:
+
+   ```bash
+   poetry run python -m splatnlp.utils.download_artifacts \
+     --base-url https://splat-nlp.nyc3.cdn.digitaloceanspaces.com \
+     --dataset-dir dataset_v2
+   ```
+
+   To also download Ultra + Ultra SAE artifacts, add `--include-ultra-sae`.
+
+3. Run a one-off inference:
 
    ```bash
    poetry run python - <<'PY'
-   import orjson, torch
+   import json, torch
    from pathlib import Path
    from splatnlp.model.models import SetCompletionModel
    from splatnlp.serve.tokenize import tokenize_build
 
-   base = Path("saved_models/dataset_v0_2")
-   params = orjson.loads(base.joinpath("model_params.json").read_bytes())
-   vocab = orjson.loads(base.joinpath("vocab.json").read_bytes())
-   weapon_vocab = orjson.loads(base.joinpath("weapon_vocab.json").read_bytes())
+   base = Path("saved_models/dataset_v2")
+   if not base.exists():
+       base = Path("saved_models/dataset_v0_2")
+   params = json.loads(base.joinpath("model_params.json").read_text())
+   vocab = json.loads(base.joinpath("vocab.json").read_text())
+   weapon_vocab = json.loads(base.joinpath("weapon_vocab.json").read_text())
 
    model = SetCompletionModel(**params)
    model.load_state_dict(torch.load(base / "model.pth", map_location="cpu"))
@@ -125,7 +142,7 @@ tracked in git; see `docs/START_HERE.md` for how to run the repo without them
    PY
    ```
 
-3. (Optional) Run the test suite:\
+4. (Optional) Run the test suite:\
    `poetry run pytest -q`
 
 ## Setup
