@@ -1,11 +1,17 @@
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
 
 import pandas as pd
-from gensim.models import Doc2Vec
-from gensim.models.doc2vec import TaggedDocument
 from tqdm import tqdm
 
+from splatnlp.embeddings._optional import require_doc2vec_and_tagged_document
+
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:  # pragma: no cover
+    from gensim.models import Doc2Vec
 
 
 def train_doc2vec_embeddings(
@@ -17,7 +23,7 @@ def train_doc2vec_embeddings(
     epochs: int = 10,
     dm: int = 1,  # PV-DM often works well
     workers: int = 4,
-) -> Doc2Vec:
+) -> "Doc2Vec":
     """Train a Doc2Vec model on tokenized ability and weapon data.
 
     Uses integer ability tokens (converted to strings) as words and
@@ -56,6 +62,7 @@ def train_doc2vec_embeddings(
         # Attempt conversion or raise error
 
     logger.info("Creating tagged documents from token lists...")
+    doc2vec_cls, tagged_document_cls = require_doc2vec_and_tagged_document()
     tagged_data = []
     for index, row in tqdm(
         df.iterrows(), total=len(df), desc="Processing rows"
@@ -82,7 +89,9 @@ def train_doc2vec_embeddings(
         # Cast to int just in case it was loaded as float/object
         tag = [int(weapon_id_int)]
 
-        tagged_data.append(TaggedDocument(words=ability_tokens_str, tags=tag))
+        tagged_data.append(
+            tagged_document_cls(words=ability_tokens_str, tags=tag)
+        )
 
     logger.info(f"Created {len(tagged_data)} tagged documents.")
     if not tagged_data:
@@ -92,7 +101,7 @@ def train_doc2vec_embeddings(
 
     logger.info("Training Doc2Vec model...")
     # Note: Consider adjusting hyperparameters like window size, vector_size based on the new token format
-    model = Doc2Vec(
+    model = doc2vec_cls(
         documents=tagged_data,
         vector_size=vector_size,
         window=window,

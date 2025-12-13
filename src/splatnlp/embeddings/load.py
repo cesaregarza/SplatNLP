@@ -1,10 +1,17 @@
+from __future__ import annotations
+
 import json
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import orjson  # Use orjson if available for faster parsing
 import pandas as pd
-from gensim.models import Doc2Vec
+
+from splatnlp.embeddings._optional import require_doc2vec
+
+if TYPE_CHECKING:  # pragma: no cover
+    from gensim.models import Doc2Vec
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +108,7 @@ def load_vocab_json(path: str | Path) -> dict:
             return json.load(f)
 
 
-def load_doc2vec_model(path: str | Path) -> Doc2Vec:
+def load_doc2vec_model(path: str | Path) -> "Doc2Vec":
     """Load a Doc2Vec model from a file.
 
     Args:
@@ -117,4 +124,5 @@ def load_doc2vec_model(path: str | Path) -> Doc2Vec:
         )
 
     logger.info("Loading Doc2Vec model from %s", model_path)
-    return Doc2Vec.load(str(model_path))  # Ensure path is string
+    doc2vec_cls = require_doc2vec()
+    return doc2vec_cls.load(str(model_path))  # Ensure path is string

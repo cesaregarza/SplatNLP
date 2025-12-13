@@ -9,7 +9,6 @@ import numpy as np
 import orjson
 import pandas as pd
 import torch
-from gensim.models import Doc2Vec
 
 from splatnlp.embeddings.clustering import cluster_vectors
 from splatnlp.embeddings.dimensionality_reduction import (

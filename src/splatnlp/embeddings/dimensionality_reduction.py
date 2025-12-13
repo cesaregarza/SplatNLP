@@ -1,15 +1,19 @@
+from __future__ import annotations
+
 import logging
-from typing import List
+from typing import TYPE_CHECKING, List
 
 import numpy as np
-from gensim.models import Doc2Vec
 from sklearn.manifold import TSNE
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:  # pragma: no cover
+    from gensim.models import Doc2Vec
+
 
 def reduce_doc2vec_dimensions_by_tag(
-    model: Doc2Vec,
+    model: "Doc2Vec",
     tags_to_reduce: List[int] | None = None,  # Expect integer tags (weapon IDs)
     *,
     n_components: int = 2,

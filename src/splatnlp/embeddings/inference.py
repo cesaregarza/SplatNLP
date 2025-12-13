@@ -1,15 +1,20 @@
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
-from gensim.models import Doc2Vec
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:  # pragma: no cover
+    from gensim.models import Doc2Vec
+
 
 def infer_doc2vec_vectors(
-    model: Doc2Vec,
+    model: "Doc2Vec",
     token_lists: pd.Series | list[list[int]],
 ) -> np.ndarray:
     """Infer Doc2Vec vectors for lists of integer ability tokens.
