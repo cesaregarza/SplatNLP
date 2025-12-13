@@ -15,17 +15,32 @@ The model is approximately **83 million parameters** in size and is available in
 - **Full:** Trained on a single H100 GPU for 62 hours, using 5 subset variants per data point (each subset created via randomized masking). This variant is extensively explored and includes a fully-trained monosemantic sparse autoencoder (SAE) with numerous labeled neurons for interpretability.
 - **Ultra:** Trained on four B200 GPUs for 35 hours, utilizing 20 subset variants per data point. Currently undergoing exploration; its monosemantic SAE is actively being trained.
 
-Both variants are represented in `saved_models/` for offline inspection (see the quickstart below).
+Both variants are referenced under `saved_models/` for offline inspection when
+you have local model artifacts available (see the quickstart below).
 
 **Sparse Autoencoder (SAE):** The SAE is trained on the activations of the primary model to provide a sparse, monosemantic representation of the gear sets. This allows for interpretability and feature analysis of the model's predictions (see the `monosemantic_sae` module). It includes a `SetCompletionHook` that can be used to hook into the primary model and modify the activations during inference for model steering. This is based on Anthropic's work: [Towards Monosemanticity](https://transformer-circuits.pub/2023/monosemantic-features/index.html)
 
 ---
 
-**Blog Post Deep Dive**
+**Start Here (Reviewer Guide)**
 
-For a comprehensive deep-dive into the problem definition, the novel model architecture (`SplatGPT`), methodology, data processing techniques, results and insights, please read the accompanying blog post:
+If you’re reviewing this repo, start with:
+
+- `docs/START_HERE.md`
+
+---
+
+**Blog Series (Canonical)**
+
+For a comprehensive deep-dive into the problem definition, the novel model
+architecture (`SplatGPT`), methodology, data processing techniques, results and
+insights, please read the canonical posts on `cegarza.com`:
 
 [SplatGPT: Set-Based Deep Learning for Splatoon 3 Gear Completion](https://cegarza.com/introducing-splatgpt/)
+
+Note: the `docs/splatgpt-blog-part-*.txt` / `docs/splatgpt-blog-part-*-draft.md`
+files are LLM-friendly extracts/drafts for tooling; they are not the canonical
+published posts.
 
 ---
 ## Key Features
@@ -62,9 +77,13 @@ SplatNLP/
 ├── pyproject.toml                  # Project dependencies and configuration
 └── README.md                       # Project overview
 ```
-## Quickstart (local CPU demo, no downloads)
+## Quickstart (local CPU demo)
 
-This uses the included 83M param checkpoint and vocabs in `saved_models/dataset_v0_2`.
+This demo expects a local copy of pretrained artifacts under
+`saved_models/dataset_v0_2` (model checkpoint + `vocab.json` +
+`weapon_vocab.json` + `model_params.json`). Those large artifacts are not
+tracked in git; see `docs/START_HERE.md` for how to run the repo without them
+(tests), or how to point the demo at your local artifacts.
 
 1. Install dependencies (dev extras include formatting/testing):\
    `poetry install --with dev`
@@ -106,7 +125,7 @@ This uses the included 83M param checkpoint and vocabs in `saved_models/dataset_
    PY
    ```
 
-3. (Optional) Run the test suite (uses the small fixtures under `test_data/`):\
+3. (Optional) Run the test suite:\
    `poetry run pytest -q`
 
 ## Setup
