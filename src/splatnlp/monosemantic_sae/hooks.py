@@ -15,8 +15,14 @@ class SetCompletionHook:
     forward-PRE hook that intercepts the 512-d masked-mean vector, runs it
     through the SAE logic *matching its forward pass* (center -> encoder ->
     ReLU -> normalize decoder -> decode -> add bias), optionally edits ONE
-    hidden unit (POST-ReLU), and feeds the reconstructed 512-d vector
-    onward to model.output_layer.
+    hidden unit (POST-ReLU), and optionally feeds the reconstructed 512-d
+    vector onward to model.output_layer.
+
+    By default (``no_change=True``), the hook computes and stores SAE
+    activations/reconstructions but leaves the model's forward pass unchanged
+    (useful for mech-interp tracing without perturbing predictions). When
+    ``no_change=False``, the reconstructed vector is passed onward (and can be
+    edited via ``update_neuron``).
     """
 
     def __init__(
@@ -38,9 +44,9 @@ class SetCompletionHook:
                 specified neuron. Defaults to None.
             bypass (bool, optional): If True, bypasses reconstruction and passes
                 input unchanged regardless of `no_change`. Defaults to False.
-            no_change (bool, optional): If True, performs reconstruction without
-                modifying neuron values. Ignored if `bypass` is True. Defaults
-                to False.
+            no_change (bool, optional): If True, computes SAE activations (and a
+                reconstruction) but passes the original input onward unchanged.
+                Ignored if `bypass` is True. Defaults to False.
         """
         self.sae = sae_model
         self.idx = neuron_number
@@ -74,7 +80,7 @@ class SetCompletionHook:
 
     def __call__(
         self, module: nn.Module, inputs: tuple[torch.Tensor, ...]
-    ) -> tuple[torch.Tensor, ...]:
+    ) -> tuple[torch.Tensor, ...] | None:
         """Processes the input tensor through the Sparse Autoencoder
         reconstruction pipeline.
 
@@ -84,14 +90,16 @@ class SetCompletionHook:
                 tensor (masked-mean vector).
 
         Returns:
-            tuple[torch.Tensor]: Tuple containing the reconstructed (and
-                optionally neuron-edited) tensor.
+            Optional[tuple[torch.Tensor]]: When modifying the forward pass,
+                returns a 1-tuple containing the reconstructed (and optionally
+                neuron-edited) tensor. When `bypass` or `no_change` is True,
+                returns None to leave the model inputs unchanged.
         """
         logger.debug("[Hook %s]", self.mode_str)
         self.original_value = None
         if self.bypass:
             logger.debug("[Hook BYPASS]")
-            return
+            return None
 
         x = inputs[0]
         self.last_in = x.detach().clone()
@@ -99,6 +107,10 @@ class SetCompletionHook:
         h_pre, h_post = self.sae.encode(x)
         self.last_h_pre = h_pre.detach().clone()
         self.last_h_post = h_post.detach().clone()
+
+        if self.no_change:
+            self.last_x_recon = None
+            return None
 
         h_final = h_post
         if (
@@ -160,9 +172,9 @@ class SetCompletionHook:
         Args:
             bypass (bool | None, optional): If True, bypasses reconstruction
                 entirely. Overrides `no_change`. Defaults to None.
-            no_change (bool | None, optional): If True, reconstruction occurs
-                without neuron modification. Ignored if `bypass` is True.
-                Defaults to None.
+            no_change (bool | None, optional): If True, SAE activations are
+                computed and stored but the model inputs are left unchanged.
+                Ignored if `bypass` is True. Defaults to None.
         """
         if bypass is not None:
             self.bypass = bypass

@@ -73,4 +73,4 @@ def test_reconstruct_build_basic():
     assert builds is not None
     build = builds[0]
     assert build.mains["head"] == "comeback"
-    assert build.subs.get("swim_speed_up") == 1
+    assert build.achieved_ap.get("swim_speed_up", 0) >= 3

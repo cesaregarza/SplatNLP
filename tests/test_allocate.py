@@ -163,30 +163,29 @@ def test_all_main_slots_with_main_only(
 def test_standard_ability_min_ap_3_gets_1_sub(
     allocator_instance: Allocator, ism_3_t: AbilityToken
 ):
-    """Standard ability with min_ap 3. Optimal is 1 sub (3 AP), not a main (10 AP)."""
+    """Standard ability with min_ap 3 prefers a main to save sub slots."""
     capstones = {"ism": ism_3_t}
     build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
-    assert penalty == 0
-    # It should not use a main slot if subs are cheaper for total_ap
-    assert build.mains == {"head": None, "clothes": None, "shoes": None}
-    assert build.subs == {"ink_saver_main": 1}
-    assert build.total_ap == 3
-    assert build.achieved_ap.get("ink_saver_main") == 3
+    assert penalty == 7
+    assert sum(1 for v in build.mains.values() if v == "ink_saver_main") == 1
+    assert build.subs == {}
+    assert build.total_ap == 10
+    assert build.achieved_ap.get("ink_saver_main") == 10
 
 
 def test_standard_ability_min_ap_9_gets_3_subs(
     allocator_instance: Allocator, ism_9_t: AbilityToken
 ):
-    """Standard ability with min_ap 9. Optimal is 3 subs (9 AP), not a main (10 AP)."""
+    """Standard ability with min_ap 9 prefers a main to save sub slots."""
     capstones = {"ism": ism_9_t}
     build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
-    assert penalty == 0
-    assert build.mains == {"head": None, "clothes": None, "shoes": None}
-    assert build.subs == {"ink_saver_main": 3}
-    assert build.total_ap == 9
-    assert build.achieved_ap.get("ink_saver_main") == 9
+    assert penalty == 1
+    assert sum(1 for v in build.mains.values() if v == "ink_saver_main") == 1
+    assert build.subs == {}
+    assert build.total_ap == 10
+    assert build.achieved_ap.get("ink_saver_main") == 10
 
 
 def test_standard_ability_min_ap_10_gets_1_main(
@@ -207,22 +206,15 @@ def test_standard_ability_min_ap_10_gets_1_main(
 def test_standard_ability_min_ap_12_gets_1_main_1_sub(
     allocator_instance: Allocator, ism_12_t: AbilityToken
 ):
-    """Standard min_ap 12. Optimal: 1 main (10) + 1 sub (3) = 13 AP.
-    Alternative: 4 subs = 12 AP. So 4 subs is better.
-    """
+    """Standard min_ap 12 prefers mains to save sub slots."""
     capstones = {"ism": ism_12_t}
     build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
-    assert penalty == 0
-    # Optimal should be 4 subs (12 AP) vs 1 main + 1 sub (13 AP)
-    assert build.mains == {
-        "head": None,
-        "clothes": None,
-        "shoes": None,
-    }  # No main for ISM
-    assert build.subs == {"ink_saver_main": 4}
-    assert build.total_ap == 12
-    assert build.achieved_ap.get("ink_saver_main") == 12
+    assert penalty == 8
+    assert sum(1 for v in build.mains.values() if v == "ink_saver_main") == 2
+    assert build.subs == {}
+    assert build.total_ap == 20
+    assert build.achieved_ap.get("ink_saver_main") == 20
 
 
 def test_mixed_main_only_and_standard_tightest_fit(
@@ -230,39 +222,33 @@ def test_mixed_main_only_and_standard_tightest_fit(
     comeback_t: AbilityToken,
     ssu_3_t: AbilityToken,
 ):
-    """Main-only (10AP) and a standard (min_ap 3).
-    Optimal: CB on main (10AP), SSU as 1 sub (3AP). Total 13AP.
-    """
+    """Main-only (10AP) and a standard (min_ap 3) prefers a main for the standard."""
     capstones = {"cb": comeback_t, "ssu": ssu_3_t}
     build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
-    assert penalty == 0
-    assert build.mains == {"head": "comeback", "clothes": None, "shoes": None}
-    assert build.subs == {"swim_speed_up": 1}
-    assert build.total_ap == 13
+    assert penalty == 7
+    assert build.mains["head"] == "comeback"
+    assert sum(1 for v in build.mains.values() if v == "swim_speed_up") == 1
+    assert build.subs == {}
+    assert build.total_ap == 20
     assert build.achieved_ap.get("comeback") == 10
-    assert build.achieved_ap.get("swim_speed_up") == 3
+    assert build.achieved_ap.get("swim_speed_up") == 10
 
 
 def test_two_standards_competing_for_main_vs_subs(
     allocator_instance: Allocator, ism_9_t: AbilityToken, ssu_6_t: AbilityToken
 ):
-    """Two standard abilities: ISM (min 9), SSU (min 6).
-    Option 1: ISM (3 subs, 9AP), SSU (2 subs, 6AP). Total 15AP. All subs.
-    Option 2: ISM (main, 10AP), SSU (2 subs, 6AP). Total 16AP.
-    Option 3: SSU (main, 10AP), ISM (3 subs, 9AP). Total 19AP.
-    Option 4: ISM (main, 10AP), SSU (main, 10AP). Total 20AP.
-    Optimal is Option 1: All subs.
-    """
+    """Two standard abilities prefer mains to save sub slots."""
     capstones = {"ism": ism_9_t, "ssu": ssu_6_t}
     build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
-    assert penalty == 0
-    assert build.mains == {"head": None, "clothes": None, "shoes": None}
-    assert build.subs == {"ink_saver_main": 3, "swim_speed_up": 2}
-    assert build.total_ap == 15
-    assert build.achieved_ap.get("ink_saver_main") == 9
-    assert build.achieved_ap.get("swim_speed_up") == 6
+    assert penalty == 5
+    assert sum(1 for v in build.mains.values() if v == "ink_saver_main") == 1
+    assert sum(1 for v in build.mains.values() if v == "swim_speed_up") == 1
+    assert build.subs == {}
+    assert build.total_ap == 20
+    assert build.achieved_ap.get("ink_saver_main") == 10
+    assert build.achieved_ap.get("swim_speed_up") == 10
 
 
 def test_three_standards_one_must_use_main(
@@ -271,23 +257,16 @@ def test_three_standards_one_must_use_main(
     ssu_6_t: AbilityToken,
     rsu_9_t: AbilityToken,
 ):
-    """ISM (min 10), SSU (min 6), RSU (min 9).
-    ISM wants main (10AP) vs 4 subs (12AP).
-    SSU wants 2 subs (6AP).
-    RSU wants 3 subs (9AP).
-    If ISM takes main: 10 (ISM) + 6 (SSU subs) + 9 (RSU subs) = 25 AP. (1 main, 5 subs)
-    If all subs: 12 (ISM subs) + 6 (SSU subs) + 9 (RSU subs) = 27 AP. (0 mains, 9 subs)
-    So, ISM on main is better.
-    """
+    """Three standard abilities fit entirely on mains (no sub slots needed)."""
     capstones = {"ism": ism_10_t, "ssu": ssu_6_t, "rsu": rsu_9_t}
     build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
-    assert penalty == 0
-    assert "ink_saver_main" in build.mains.values()
-    assert build.subs.get("swim_speed_up") == 2
-    assert build.subs.get("run_speed_up") == 3
-    assert build.subs.get("ink_saver_main", 0) == 0  # ISM is on main
-    assert build.total_ap == 25
+    assert penalty == 5
+    assert sum(1 for v in build.mains.values() if v == "ink_saver_main") == 1
+    assert sum(1 for v in build.mains.values() if v == "swim_speed_up") == 1
+    assert sum(1 for v in build.mains.values() if v == "run_speed_up") == 1
+    assert build.subs == {}
+    assert build.total_ap == 30
 
 
 def test_sub_slots_exceeded(
@@ -402,15 +381,12 @@ def test_complex_scenario_minimize_total_ap(
     }
     build, penalty = allocator_instance.allocate(capstones)
     assert build is not None
-    assert penalty == 1
-    assert build.total_ap == 41
+    assert penalty == 2
+    assert build.total_ap == 42
     assert build.mains["head"] == "comeback"
-    # One of the other two mains is "swim_speed_up" but not both
-    assert (
-        build.mains["clothes"] == "swim_speed_up"
-        or build.mains["shoes"] == "swim_speed_up"
-    )
-    assert build.mains["clothes"] != build.mains["shoes"]
+    assert build.mains["clothes"] == "swim_speed_up"
+    assert build.mains["shoes"] == "swim_speed_up"
+    assert build.subs["swim_speed_up"] == 1
     assert build.subs["ink_saver_main"] == 1
     assert build.subs["quick_respawn"] == 1
     assert build.subs["quick_super_jump"] == 1

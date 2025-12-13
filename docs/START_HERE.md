@@ -51,6 +51,8 @@ path on CPU:
    - `poetry run python -m splatnlp.utils.download_artifacts --dataset-dir dataset_v2`
    - (Optional) include Ultra + Ultra SAE:
      `poetry run python -m splatnlp.utils.download_artifacts --dataset-dir dataset_v2 --include-ultra-sae`
+   - (Optional) include Ultra feature labels (if hosted):
+     `poetry run python -m splatnlp.utils.download_artifacts --dataset-dir dataset_v2 --include-ultra-labels`
 2. Run the local inference demo in `README.md` (loads from
    `saved_models/dataset_v2`).
 3. Run the beam-search + SAE trace recipe from `AGENTS.md` (writes JSON output

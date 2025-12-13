@@ -106,7 +106,9 @@ You can also override the host/path using `DO_SPACES_ML_ENDPOINT` and
      --dataset-dir dataset_v2
    ```
 
-   To also download Ultra + Ultra SAE artifacts, add `--include-ultra-sae`.
+   To also download Ultra + Ultra SAE artifacts (and optional Ultra feature
+   labels, if hosted), add `--include-ultra-sae`. To fetch labels only, add
+   `--include-ultra-labels`.
 
 3. Run a one-off inference:
 

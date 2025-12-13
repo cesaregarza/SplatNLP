@@ -1,6 +1,7 @@
 import pytest
 
 from splatnlp.utils.constants import NULL
+from splatnlp.utils.reconstruct.allocator import Allocator
 from splatnlp.utils.reconstruct.beam_search import greedy_closure
 
 
@@ -14,8 +15,13 @@ def simple_predict(tokens, weapon_id):
 
 
 def test_greedy_closure_tracing_steps():
-    caps, step, traces = greedy_closure(
-        simple_predict, "w", {}, record_traces=True, start_step=0
+    caps, step, traces, _, _ = greedy_closure(
+        simple_predict,
+        "w",
+        {},
+        Allocator(),
+        record_traces=True,
+        start_step=0,
     )
     assert set(caps.keys()) == {"ink_saver_main_3", "run_speed_up_6"}
     assert step == 2
@@ -26,4 +32,3 @@ def test_greedy_closure_tracing_steps():
         "ink_saver_main_3",
         "run_speed_up_6",
     }
-
