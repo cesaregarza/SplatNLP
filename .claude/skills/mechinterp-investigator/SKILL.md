@@ -270,7 +270,7 @@ neither = df.filter(
 3. **Skipping bottom tokens** - Suppressors reveal what feature avoids
 4. **Only running 1D sweeps** - 2D heatmaps needed for interaction effects
 5. **Not checking weapon patterns** - Feature may be weapon-specific, not ability-specific
-6. **Using only top activations** - Top 100 may be "flanderized" extremes; check mid-range (25-75%)
+6. **Using only top activations** - Top activations (90%+ of max) may be "flanderized" extremes; check core region (25-75% of max)
 7. **Missing error-correction features** - Small deltas in weird rung combos may indicate OOD detection
 8. **Confusing data sparsity with suppression** - Zero examples at a condition ≠ "suppression to 0" (see below)
 9. **Shallow validation** - Just checking if numbers "look right" without running enrichment analysis
@@ -278,7 +278,7 @@ neither = df.filter(
 11. **Reporting weapon percentages from top-100** - Use top 20-30% instead; top-100 can be 5-10x off (e.g., 78% vs 10%)
 12. **Not checking meta archetypes** - Weapons may cluster by playstyle, not kit; use splatoon3-meta skill
 13. **Assuming kit-based patterns** - Check if weapons share sub/special BEFORE assuming it's kit-related
-14. **Ignoring flanderization crossover** - Note where a "super-stimulus" weapon overtakes the general pattern (usually top 5%)
+14. **Ignoring flanderization crossover** - Note where a "super-stimulus" weapon overtakes the general pattern (usually 90%+ of max activation)
 
 ### ⚠️ CRITICAL: Data Sparsity vs Suppression
 
@@ -350,7 +350,9 @@ poetry run python -m splatnlp.mechinterp.cli.overview_cli \
 
 **Don't only examine extreme activations!** High activations may be "flanderized" - exaggerated, extreme versions of the true concept that over-emphasize niche cases.
 
-**Key insight:** The TRUE concept often lives in the **mid-activation range (25-75th percentile)**, not the top 100 examples. Top activations can mislead you into labeling a niche pattern instead of the general concept.
+**Key insight:** The TRUE concept often lives in the **core region (25-75% of effective max)**, not the top examples. Top activations (90%+ of effective max) can mislead you into labeling a niche pattern instead of the general concept.
+
+**Why "effective max"?** Activation distributions are heavy-tailed. Using `effective_max = 99.5th percentile of nonzero activations` prevents single outliers from making the core region nearly empty.
 
 Run activation region analysis:
 
@@ -365,14 +367,21 @@ df = ctx.db.get_all_feature_activations_for_pagerank({FEATURE_ID})
 acts = df['activation'].to_numpy()
 weapons = df['weapon_id'].to_list()
 
-# Define activation regions
+# Use EFFECTIVE MAX (99.5th percentile) to handle heavy-tailed distributions
+# This prevents single outliers from making the core region nearly empty
+nonzero_acts = acts[acts > 0]
+effective_max = np.percentile(nonzero_acts, 99.5)
+true_max = acts.max()
+print(f"True max: {true_max:.4f}, Effective max (99.5%ile): {effective_max:.4f}")
+
+# Define activation regions as % of EFFECTIVE max
 regions = [
-    ('Floor (≤0.01)', lambda a: a <= 0.01),
-    ('Low (0.01-0.05)', lambda a: 0.01 < a <= 0.05),
-    ('Mild (0.05-0.10)', lambda a: 0.05 < a <= 0.10),
-    ('Moderate (0.10-0.20)', lambda a: 0.10 < a <= 0.20),
-    ('High (0.20-0.35)', lambda a: 0.20 < a <= 0.35),
-    ('Very High (>0.35)', lambda a: a > 0.35),
+    ('Floor (≤1%)', lambda a: a <= 0.01 * effective_max),
+    ('Low (1-10%)', lambda a: 0.01 * effective_max < a <= 0.10 * effective_max),
+    ('Below Core (10-25%)', lambda a: 0.10 * effective_max < a <= 0.25 * effective_max),
+    ('Core (25-75%) - TRUE CONCEPT', lambda a: 0.25 * effective_max < a <= 0.75 * effective_max),
+    ('High (75-90%)', lambda a: 0.75 * effective_max < a <= 0.90 * effective_max),
+    ('Flanderization Zone (90%+)', lambda a: a > 0.90 * effective_max),
 ]
 
 for region_name, filter_fn in regions:
@@ -389,17 +398,17 @@ for region_name, filter_fn in regions:
 | Pattern | Interpretation |
 |---------|----------------|
 | Same weapons in ALL regions | General concept (continuous feature) |
-| Different weapons in moderate vs high | Super-stimuli detected |
-| Diverse weapons in moderate, concentrated in high | True concept is in moderate region |
-| Niche weapons only in high | High activations are "flanderized" extremes |
+| Different weapons in core vs 90%+ | Super-stimuli detected |
+| Diverse weapons in core, concentrated in 90%+ | True concept is in core region |
+| Niche weapons only in 90%+ | High activations are "flanderized" extremes |
 
 **Example (Feature 9971):**
 ```
-Moderate (0.10-0.20): Splattershot (115), Wellstring (65), Sploosh (57)...
-Very High (>0.35): Bloblobber (44), Glooga Deco (39), Range Blaster (28)
+Core (25-75%): Splattershot (115), Wellstring (65), Sploosh (57)...
+Flanderization (90%+): Bloblobber (44), Glooga Deco (39), Range Blaster (28)
 
-Interpretation: Low-moderate shows GENERAL offensive investment.
-Very high shows EXTREME SCU on special-dependent weapons (super-stimuli).
+Interpretation: Core region shows GENERAL offensive investment.
+Flanderization zone shows EXTREME SCU on special-dependent weapons (super-stimuli).
 Label the general concept, note the super-stimuli pattern.
 ```
 
@@ -487,6 +496,50 @@ for name, p_low, p_high in regions:
 
 **Rule: Report weapon percentages from top 20-30%, note if top-1% differs significantly.**
 
+### Phase 1.6.5: Ability Flanderization Check (CRITICAL)
+
+**The same flanderization that applies to weapons applies to abilities.** A binary ability with high tail enrichment but low core coverage is a **super-stimulus**, not the core concept.
+
+**The Rule:** If a "dominant" driver has **<30% core coverage**, it's a **tail marker**, not the headline concept.
+
+**Use the core coverage experiment:**
+
+```bash
+cd /root/dev/SplatNLP
+
+# Direct subcommand (recommended)
+poetry run python -m splatnlp.mechinterp.cli.runner_cli coverage \
+    --feature-id {FEATURE_ID} --model ultra \
+    --tokens respawn_punisher,comeback,stealth_jump \
+    --threshold 0.30
+```
+
+**Output tables:**
+- `token_coverage`: Shows core_coverage_pct, tail_enrichment, is_tail_marker for each token
+- `weapon_coverage`: Shows core vs tail weapon distributions (catches weapon flanderization)
+
+**Coverage Interpretation:**
+
+| Core Coverage | Interpretation | Label Implication |
+|---------------|----------------|-------------------|
+| >50% | **Primary driver** | Safe to headline |
+| 30-50% | **Significant but not universal** | Mention in notes, not headline |
+| <30% | **Tail marker / super-stimulus** | NOT the headline concept |
+
+**Example (Feature 13934):**
+```
+respawn_punisher: 8.57x tail enrichment, BUT only 12% core coverage
+→ RP is a super-stimulus, NOT the core concept
+→ Wrong label: "RP Backline Anchor"
+→ Right approach: Split core by RP presence to reveal hidden modes
+```
+
+**When you find a super-stimulus (<30% coverage):**
+1. Split the core by presence/absence of the super-stimulus
+2. Analyze both modes separately
+3. Look for what they have in COMMON (the true concept)
+4. Label the commonality, note the super-stimulus as a tail marker
+
 ### Phase 1.7: Meta-Informed Weapon Analysis (USE AFTER WEAPON SWEEP)
 
 After identifying top weapons, **always check if they match a known meta archetype** using the `splatoon3-meta` skill.
@@ -550,6 +603,35 @@ Label: "Zombie Slayer QR (Splatana/Dualies)" - tactical category
 - To validate that ability patterns match expected meta builds
 - To identify if weapons share archetype despite different kits
 
+### Phase 1.8: Weapon Range/Role Classification (REQUIRED for Labels)
+
+Before proposing any label, you MUST classify the feature's weapons by range and role. This prevents incorrect role assumptions (e.g., calling Jr./Rapid Blasters "anchors" when they're midrange).
+
+**Step 1: Extract properties for top 5-10 core weapons from weapon-vibes.md**
+
+| Property | Values | Label Implication |
+|----------|--------|-------------------|
+| RANGE | CLOSE, MID, LONG, SNIPER | Determines qualifier |
+| LANE | FRONT, MID, BACK, FLEX | Confirms positioning |
+| JOB | SLAYER, SUPPORT, ANCHOR, SKIRMISH, ASSASSIN | Determines role word |
+| NS_FIT | CORE, GOOD, MEH, BAD, NO | Stealth vs visible |
+| DEATH_TOL | HIGH, MED, LOW | Trading vs survival |
+
+**Step 2: Find the common pattern**
+
+If most weapons share:
+- LONG/SNIPER + BACK + ANCHOR → use "Anchor" or "Backline" qualifier
+- MID/LONG + MID + SKIRMISH/SUPPORT → use "Midrange" qualifier
+- CLOSE/MID + FRONT + SLAYER → use "Slayer" or "Frontline" qualifier
+- NO/BAD NS_FIT + LOW DEATH_TOL → "Visible" or "Positional" concept (not stealth, not trading)
+
+**Step 3: Record in notes**
+
+Always include weapon classification in dashboard_notes:
+```
+WEAPON ROLE: Midrange (MID-LONG range, SKIRMISH/SUPPORT jobs, NO/BAD NS fit, LOW death tolerance)
+```
+
 ### Phase 2: Hypothesis Generation
 
 Based on Phase 1, generate hypotheses about what the feature might encode:
@@ -564,6 +646,50 @@ Based on Phase 1, generate hypotheses about what the feature might encode:
 - H1: Synergy detector (families work together)
 - H2: Build archetype (strategic loadout pattern)
 - H3: Playstyle indicator (aggressive, defensive, support)
+- H4: Shared NEED (different builds solving the same tactical problem)
+
+### Build NEED Framework (For Multi-Modal/Diffuse Features)
+
+**When a feature activates on seemingly different build types, ask: "What NEED do these builds share?"**
+
+Features can encode solutions to problems, not just correlations. Different builds may trigger the same feature because they're different answers to the same question.
+
+**Step 1: Identify the tactical constraint these builds solve**
+
+| Question | Example |
+|----------|---------|
+| What gameplay problem do these builds address? | "How to handle death for low-death-tolerance weapons" |
+| What enemy behavior are they countering? | "Dealing with aggressive flankers" |
+| What win condition are they enabling? | "Special pressure" or "Map control" |
+
+**Step 2: Check weapon properties (use splatoon3-meta)**
+
+Compare enriched weapons on these axes from `weapon-vibes.md`:
+- **Ink feel**: STARVING / HUNGRY / AVERAGE / EFFICIENT / PAINTER
+- **Range**: MELEE / CLOSE / MID / LONG / SNIPER
+- **Ninja Squid affinity**: CORE / GOOD / MEH / BAD / NO
+- **Death tolerance**: HIGH / MED / LOW
+- **Role**: SLAYER / SUPPORT / ANCHOR / SKIRMISH / ASSASSIN
+
+If all enriched weapons share properties (e.g., all HUNGRY ink + NO ninja squid + LOW death tolerance), the feature may encode a need specific to that weapon class.
+
+**Step 3: Reframe the modes as "answers to the same question"**
+
+**Example (Feature 13934):**
+```
+Mode A (12%): RP anchor builds (E-liter) - "I won't die, make their deaths hurt"
+Mode B (88%): Zombie utility builds (DS) - "I will die sometimes, optimize respawns"
+
+Shared NEED: "Death management for non-stealth, low-death-tolerance, midrange+ weapons"
+Both modes are VALID ANSWERS to the same tactical question.
+```
+
+**Step 4: Label the NEED, not the modes**
+
+Instead of: "Mixed: Zombie + RP Anchor" (describes the modes)
+Label as: "Balanced Utility Axis (Non-Stealth Midline+)" (describes the need)
+
+**Key Insight:** The model learned that these seemingly different builds share a common requirement. The feature encodes that requirement, and the modes are just different implementations.
 
 **For weapon-specific features:**
 - H1: Weapon class pattern (all shooters, all chargers, etc.)
@@ -636,6 +762,38 @@ SCU × QR 2D heatmap:
 | Flat across Y at each X | Y has **no conditional effect** (spurious) |
 | Non-monotonic in X at some Y | **Interference** pattern |
 
+### Heatmap Cell Validity Check
+
+**Before drawing conclusions from heatmap cells, check the cell metadata:**
+
+Each cell in heatmap output includes:
+- `n`: Number of valid samples in this cell
+- `std`: Standard deviation of activations
+- `stderr`: Standard error (std / sqrt(n)) - **new field**
+
+| n (samples) | Interpretation |
+|-------------|----------------|
+| null/0 | Impossible combination (constraint violation) - **don't interpret** |
+| 1-4 | Very weak evidence - note uncertainty in conclusions |
+| 5-20 | Moderate evidence - interpret with caution |
+| 20+ | Strong evidence - interpret confidently |
+
+**High stderr (>0.1)** indicates high variance - the mean may not be reliable.
+
+**Anti-patterns to avoid:**
+- Drawing conclusions from cells with n < 5
+- Claiming "peak at X=57, Y=29" when that cell has n=2
+- Ignoring null cells (they represent impossible ability combinations)
+
+**Example interpretation:**
+```
+Cell (ISM=51, IRU=29): mean=0.35, n=3, stderr=0.08
+→ "ISM=51 with IRU=29 shows high activation, but n=3 means this could be noise"
+
+Cell (ISM=51, IRU=0): mean=0.35, n=45, stderr=0.02
+→ "ISM=51 without IRU shows reliable high activation (n=45)"
+```
+
 ### When to Use 2D vs 1D
 
 | Scenario | Use 1D | Use 2D |
@@ -650,39 +808,20 @@ SCU × QR 2D heatmap:
 
 For single-family dominated features, always test death-mitigation:
 
-```json
-// Test 1: Primary × Quick Respawn
-{
-  "type": "family_2d_heatmap",
-  "variables": {
-    "family_x": "{PRIMARY}",
-    "family_y": "quick_respawn",
-    "rungs_x": [0, 6, 15, 29, 41, 57],
-    "rungs_y": [0, 6, 12, 21, 29]
-  }
-}
+```bash
+# Test 1: Primary × Quick Respawn
+poetry run python -m splatnlp.mechinterp.cli.runner_cli heatmap \
+    --feature-id {ID} --family-x {PRIMARY} --family-y quick_respawn \
+    --rungs-x 0,6,15,29,41,57 --rungs-y 0,6,12,21,29
 
-// Test 2: Primary × Special Saver
-{
-  "type": "family_2d_heatmap",
-  "variables": {
-    "family_x": "{PRIMARY}",
-    "family_y": "special_saver",
-    "rungs_x": [0, 6, 15, 29, 41, 57],
-    "rungs_y": [0, 3, 6, 12, 21]
-  }
-}
+# Test 2: Primary × Special Saver
+poetry run python -m splatnlp.mechinterp.cli.runner_cli heatmap \
+    --feature-id {ID} --family-x {PRIMARY} --family-y special_saver \
+    --rungs-x 0,6,15,29,41,57 --rungs-y 0,3,6,12,21
 
-// Test 3: Primary × Comeback (exclusive)
-{
-  "type": "family_2d_heatmap",
-  "variables": {
-    "family_x": "{PRIMARY}",
-    "family_y": "comeback",
-    "rungs_x": [0, 6, 15, 29, 41, 57],
-    "rungs_y": [0, 10]
-  }
-}
+# Test 3: Primary × Comeback (binary ability - use binary subcommand for this)
+poetry run python -m splatnlp.mechinterp.cli.runner_cli binary \
+    --feature-id {ID} --model ultra
 ```
 
 If ALL three show suppression at Y>0, label includes "death-averse"
@@ -732,37 +871,22 @@ print(f"Delta: {mean_without - mean_with:+.4f}")
 | Negative interactions in 2D heatmaps | Within-family interference | "Interference Feature: {FAMILY}" |
 
 **Test for within-family interference (CRITICAL for single-family):**
-```json
-{
-  "type": "within_family_interference",
-  "feature_id": {FEATURE_ID},
-  "model_type": "{MODEL}",
-  "variables": {"family": "{FAMILY}"},
-  "description": "Test for error correction within {FAMILY}"
-}
+```bash
+poetry run python -m splatnlp.mechinterp.cli.runner_cli family-sweep \
+    --feature-id {FEATURE_ID} --family {FAMILY} --model {MODEL}
+# Check for non-monotonic response patterns in the output
 ```
 
 **Test for interactions (2D heatmap):**
-```json
-{
-  "type": "family_2d_heatmap",
-  "feature_id": {FEATURE_ID},
-  "model_type": "{MODEL}",
-  "variables": {
-    "family_x": "{FAMILY_A}",
-    "family_y": "{FAMILY_B}"
-  }
-}
+```bash
+poetry run python -m splatnlp.mechinterp.cli.runner_cli heatmap \
+    --feature-id {FEATURE_ID} --family-x {FAMILY_A} --family-y {FAMILY_B} --model {MODEL}
 ```
 
 **Test for weapon specificity:**
-```json
-{
-  "type": "weapon_sweep",
-  "feature_id": {FEATURE_ID},
-  "model_type": "{MODEL}",
-  "variables": {"min_examples": 10, "top_k_weapons": 20}
-}
+```bash
+poetry run python -m splatnlp.mechinterp.cli.runner_cli weapon-sweep \
+    --feature-id {FEATURE_ID} --model {MODEL} --top-k 20 --min-examples 10
 ```
 
 **CHECKPOINT: After weapon_sweep, check for dominant weapon pattern:**
@@ -770,13 +894,9 @@ print(f"Delta: {mean_without - mean_with:+.4f}")
 If weapon_sweep diagnostics show "DOMINANT WEAPON" warning (one weapon has >2x delta of second):
 
 1. **Run kit_sweep** to analyze by sub weapon and special weapon:
-```json
-{
-  "type": "kit_sweep",
-  "feature_id": {FEATURE_ID},
-  "model_type": "{MODEL}",
-  "variables": {"min_examples": 10, "top_k": 10, "analyze_combinations": true}
-}
+```bash
+poetry run python -m splatnlp.mechinterp.cli.runner_cli kit-sweep \
+    --feature-id {FEATURE_ID} --model {MODEL} --top-k 10 --analyze-combinations
 ```
 
 2. **Use splatoon3-meta skill** to look up the dominant weapon's kit:
@@ -820,6 +940,88 @@ Propose a label at the appropriate level:
 | Moderate | Interaction | "SCU + Mobility Combo" |
 | Strategic | Build archetype | "Special Spam Slayer Kit" |
 | Tactical | Playstyle | "Aggressive Frontline Build" |
+
+### Label Specificity by Category
+
+**The label's specificity should match its concept level:**
+
+| Category | Specificity | Style | Examples |
+|----------|-------------|-------|----------|
+| **mechanical** | Terse | Token-focused, technical | "SCU Threshold 29+", "ISM Stacker" |
+| **tactical** | Mid-level | Ability combos, weapon synergies | "Zombie Slayer Dualies", "Beacon Support Kit" |
+| **strategic** | High-concept | Playstyle, gameplay philosophy | "Positional Survival - Midrange", "Aggressive Reentry" |
+
+**Why this matters:**
+- Mechanical features encode low-level patterns → label should be precise and technical
+- Tactical features encode build strategies → label should name the strategy
+- Strategic features encode gameplay philosophies → label should capture the "why"
+
+**Examples by level:**
+
+```
+Feature encodes "SCU above 29 AP threshold"
+→ Category: mechanical
+→ Label: "SCU Threshold 29+" (terse, specific)
+
+Feature encodes "QR + Comeback + Stealth Jump on dualies"
+→ Category: tactical
+→ Label: "Zombie Slayer Dualies" (names the combo + weapon)
+
+Feature encodes "survive through positioning, not stealth or trading"
+→ Category: strategic
+→ Label: "Positional Survival - Midrange" (high-concept + role)
+```
+
+### Strategic Label Quality Checklist
+
+Before finalizing a label, verify:
+
+1. **Concept over tokens**: Does the label describe a GAMEPLAY CONCEPT, not just list abilities?
+   - BAD: "SSU + ISM + SRU Kit", "Swim Efficiency Kit"
+   - GOOD: "Positional Survival", "Aggressive Reentry"
+
+2. **Positive framing**: Does the label describe what the feature IS, not just what it avoids?
+   - BAD: "Death-Averse Efficiency", "Anti-Stealth Build"
+   - GOOD: "Positional Survival", "Visible Zone Control"
+
+3. **The "why" test**: Can you answer "why would a player build this?"
+   - If answer is "to have SSU and ISM" → label is too mechanical
+   - If answer is "to survive through positioning at midrange" → label captures concept
+
+4. **Range/role qualifier**: Have you verified weapon range (Phase 1.8) and added appropriate qualifier?
+   - Backline (SNIPER/LONG + ANCHOR) → "- Anchor" or "- Backline"
+   - Midrange (MID/LONG + SUPPORT/SKIRMISH) → "- Midrange"
+   - Frontline (CLOSE/MID + SLAYER) → "- Slayer" or "- Frontline"
+
+### Strategic Label Format
+
+**Prefer: "[Concept] - [Qualifier]"**
+
+| Concept Examples | What it captures |
+|------------------|------------------|
+| Positional Survival | Stay alive through positioning, not stealth/trading |
+| Aggressive Reentry | Pressure through fast respawn (zombie) |
+| Stealth Approach | Win through concealment (NS builds) |
+| Special Pressure | Win through special uptime |
+| Lane Persistence | Hold lanes through sustain |
+
+| Qualifier Examples | When to use |
+|--------------------|-------------|
+| Midrange | MID-range weapons, SKIRMISH/SUPPORT jobs |
+| Anchor | LONG/SNIPER range, ANCHOR job, chargers/splatlings |
+| Slayer | CLOSE/MID range, SLAYER job, aggressive weapons |
+| Support | SUPPORT job, team utility focus |
+| (Weapon Class) | When specific to dualies, blasters, etc. |
+
+### Label Anti-Patterns to Avoid
+
+| Anti-Pattern | Example | Why It's Bad | Better Label |
+|--------------|---------|--------------|--------------|
+| Token listing | "SSU + ISM Kit" | Describes tokens, not purpose | "Positional Survival" |
+| Negation-only | "Death-Averse" | Describes avoidance, not identity | "Positional Survival" |
+| Wrong role | "Anchor" for Jr./Rapid | Anchor implies backline chargers | "- Midrange" |
+| Too generic | "Utility Build" | Could mean anything | "Positional Survival - Midrange" |
+| Flanderized | Based on top 100 only | Captures tail, not core concept | Check core region first |
 
 ### Phase 6: Deeper Dive (For Thorny Features)
 
@@ -882,22 +1084,117 @@ print(f"Percentile among all features: {percentile:.1f}%")
 
 If decoder weights are high (>75th percentile), the feature may be important despite weak activation effects.
 
-#### Step 3: Test Output Token Connections
+#### Step 3: Decoder Output Analysis (CRITICAL for Diffuse Features)
 
-Check which output tokens this feature most influences:
+**When activation analysis doesn't yield a clean interpretation, analyze what the feature RECOMMENDS.**
 
-```python
-# Get the model's output layer weights
-# Feature activations → pooled repr → output logits
-# Need to trace: SAE_feature → decoder → output_layer
+This technique asks: "What does this feature push the model to predict?" rather than "What activates this feature?"
 
-from splatnlp.mechinterp.skill_helpers import load_context
-ctx = load_context('ultra')
+**Use the decoder CLI:**
 
-# The feature's contribution to each output token
-# This requires tracing through the model architecture
-# (Implementation depends on how outputs are structured)
+```bash
+cd /root/dev/SplatNLP
+
+# Quick output influence check
+poetry run python -m splatnlp.mechinterp.cli.decoder_cli output-influence \
+    --feature-id {FEATURE_ID} \
+    --model ultra \
+    --top-k 15
+
+# Check decoder weight importance
+poetry run python -m splatnlp.mechinterp.cli.decoder_cli weight-percentile \
+    --feature-id {FEATURE_ID} \
+    --model ultra
 ```
+
+See **mechinterp-decoder** skill for full documentation.
+
+**Interpretation Guide:**
+
+| Output Pattern | Interpretation |
+|----------------|----------------|
+| Promotes low-AP tokens (_3, _6) | "Recommend light investment" |
+| Promotes high-AP tokens (_51, _57) | "Recommend heavy stacking" |
+| Suppresses high-AP tokens | "Anti-stacking / balanced build" |
+| Promotes death-mitigation (QR, CB, SS) | "Recommend zombie/respawn optimization" |
+| Suppresses death-mitigation | "Death-averse / stay alive" |
+
+**Example (Feature 13934):**
+```
+PROMOTES: respawn_punisher (+0.23), comeback (+0.16), QSJ_6 (+0.15), IA_3 (+0.14), ISM_6 (+0.13)
+SUPPRESSES: RSU_57 (-0.30), QR_57 (-0.25), RSU_51 (-0.24)
+
+Interpretation: Feature recommends "balanced utility spread with low-AP investments"
+               and DISCOURAGES heavy stacking of any single ability.
+```
+
+**When to use decoder output analysis:**
+- Activation analysis shows multi-modal or diffuse patterns
+- No single signature covers >50% of core
+- Feature seems "confused" between different build types
+- You want to understand the feature's PURPOSE, not just what triggers it
+
+**Key Insight:** A feature can activate on seemingly different builds because they share the same NEED. The output analysis reveals what the feature is recommending, which may unify apparently contradictory activation patterns.
+
+### Decoder Output Semantic Grouping (CRITICAL for Labels)
+
+After running decoder output analysis, group promoted/suppressed tokens by MEANING, not just family:
+
+| Semantic Group | Token Families | Gameplay Meaning |
+|----------------|----------------|------------------|
+| **Mobility** | SSU, RSU | How you reposition |
+| **Survival** | BRU, IRU, RES, QR, SS, RP | How you stay alive |
+| **Efficiency** | ISM, ISS, IRU | How you sustain pressure |
+| **Lethality** | IA, MPU, BPU (bomb damage) | How you get kills |
+| **Special-Focus** | SCU, SS, SPU, Tenacity | How you use specials |
+| **Stealth** | NS, (high SSU) | How you approach unseen |
+| **Death-Trading** | QR, CB, SJ, SS | How you weaponize respawn |
+
+**Abbreviation Key:**
+- SSU = Swim Speed Up, RSU = Run Speed Up
+- BRU = Bomb (Sub) Resistance Up, RES = Ink Resistance Up
+- IRU = Ink Recovery Up, ISM = Ink Saver Main, ISS = Ink Saver Sub
+- BPU = Bomb (Sub) Power Up, SPU = Special Power Up
+- SCU = Special Charge Up, SS = Special Saver
+- QR = Quick Respawn, CB = Comeback, SJ = Stealth Jump
+- IA = Intensify Action, MPU = Main Power Up, NS = Ninja Squid, RP = Respawn Punisher
+
+**Then ask:** "What COMBINATION of groups defines this feature?"
+
+| Promoted Groups | Suppressed Groups | Strategic Concept |
+|-----------------|-------------------|-------------------|
+| Mobility + Survival + Efficiency | Death-Trading, Stealth | **Positional Survival** |
+| Death-Trading + Mobility | Survival | **Zombie/Aggressive Reentry** |
+| Stealth + Mobility | - | **Stealth Approach** |
+| Special-Focus + Efficiency | Mobility | **Special Farming** |
+| Lethality + Mobility | Efficiency | **Aggressive Slayer** |
+
+**This semantic grouping directly informs the strategic label.**
+
+### Post-Decoder Sweep Rule
+
+**After decoder output analysis, verify the top promoted/suppressed families with causal 1D sweeps.**
+
+The decoder tells you what the feature RECOMMENDS, but not whether it's causally driven by those tokens. To validate:
+
+1. **Identify top 2 promoted families** from decoder output (highest positive contributions)
+2. **Identify top 2 suppressed families** from decoder output (most negative contributions)
+3. **Run 1D sweeps** for any not yet tested in Phase 2
+
+| Decoder Shows | Test With | Expected If Valid |
+|---------------|-----------|-------------------|
+| BRU highly promoted | `family_1d_sweep` BRU | Positive delta with BRU levels |
+| RSU suppressed | `family_1d_sweep` RSU | Negative delta or flat |
+
+**Example:** Feature 10938 decoder showed BRU heavily promoted (+0.126, +0.120, +0.108 for different rungs), but initial sweeps only tested SSU/ISM. Should have run:
+```bash
+# Missing sweep that would validate decoder findings
+poetry run python -m splatnlp.mechinterp.cli.runner_cli run-spec \
+    --spec '{"type": "family_1d_sweep", "variables": {"family": "bomb_resistance_up"}}' \
+    --feature-id 10938 --model ultra
+```
+
+**Anti-pattern:** Trusting decoder output without causal validation. Decoder weights show correlation to output tokens, not causal effect of input tokens.
 
 #### Step 4: Run Targeted Experiments
 
@@ -1022,20 +1319,37 @@ complex error-correction behavior. Always check for interference!
 ## Commands Summary
 
 ```bash
-# Phase 1: Overview
+# Phase 1: Overview (with extended analyses)
 poetry run python -m splatnlp.mechinterp.cli.overview_cli \
     --feature-id {ID} --model ultra --top-k 20
 
-# Phase 3a: 1D sweep for dominant family
-poetry run python -m splatnlp.mechinterp.cli.planner_cli \
-    --feature-id {ID} --hypothesis "Responds to {FAMILY}" --model ultra
+# Phase 1 with extended analyses (enrichment, regions, binary, kit)
+poetry run python -m splatnlp.mechinterp.cli.overview_cli \
+    --feature-id {ID} --model ultra --all
 
-# Phase 3b: 2D sweep for interactions
-# (manually create spec with family_2d_heatmap type)
+# Phase 3a: 1D sweep for dominant family (direct subcommand)
+poetry run python -m splatnlp.mechinterp.cli.runner_cli family-sweep \
+    --feature-id {ID} --family {FAMILY} --model ultra
 
-# Phase 3c: Weapon sweep
-poetry run python -m splatnlp.mechinterp.cli.planner_cli \
-    --feature-id {ID} --hypothesis "Weapon-specific" --model ultra
+# Phase 3b: 2D heatmap for interactions (direct subcommand)
+poetry run python -m splatnlp.mechinterp.cli.runner_cli heatmap \
+    --feature-id {ID} --family-x {FAMILY_A} --family-y {FAMILY_B} --model ultra
+
+# Phase 3c: Weapon sweep (direct subcommand)
+poetry run python -m splatnlp.mechinterp.cli.runner_cli weapon-sweep \
+    --feature-id {ID} --model ultra --top-k 20
+
+# Phase 3d: Kit sweep (if dominant weapon detected)
+poetry run python -m splatnlp.mechinterp.cli.runner_cli kit-sweep \
+    --feature-id {ID} --model ultra --analyze-combinations
+
+# Phase 3e: Binary ability analysis
+poetry run python -m splatnlp.mechinterp.cli.runner_cli binary \
+    --feature-id {ID} --model ultra
+
+# Phase 3f: Core coverage analysis
+poetry run python -m splatnlp.mechinterp.cli.runner_cli coverage \
+    --feature-id {ID} --tokens {TOKEN1},{TOKEN2}
 
 # Phase 5: Set label
 poetry run python -m splatnlp.mechinterp.cli.labeler_cli label \
@@ -1051,7 +1365,8 @@ poetry run python -m splatnlp.mechinterp.cli.labeler_cli label \
 ## See Also
 
 - **mechinterp-overview**: Initial feature assessment (now includes bottom tokens)
-- **mechinterp-runner**: Execute experiments
+- **mechinterp-runner**: Execute experiments (includes `core_coverage_analysis` and `decoder_output_analysis`)
+- **mechinterp-decoder**: Decoder weight analysis - what features recommend (USE for diffuse/heterogeneous features)
 - **mechinterp-next-step-planner**: Generate experiment specs
 - **mechinterp-labeler**: Save labels
 - **mechinterp-glossary-and-constraints**: Domain reference

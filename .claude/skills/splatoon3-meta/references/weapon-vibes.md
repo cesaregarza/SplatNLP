@@ -134,7 +134,7 @@ Key reconciliations from Sendou.ink build data:
 | Dapple Dualies | Knife-fight dualies—roll in, delete, or explode. | FEEL=AVERAGE; ISM=LOW | FEEL=FREE; RSU=LOW | FEEL=OKAY; IA=LOW | MELEE | AMBUSH | CORE | LANE=FRONT; JOB=ASSASSIN | HIGH | |
 | Splat Dualies | All-round rolls—works everywhere if you manage commits. | FEEL=AVERAGE; ISM=LOW | FEEL=MOBILE; RSU=LOW | FEEL=OKAY; IA=LOW | MID | FLEX | MEH | LANE=FLEX; JOB=SKIRMISH | MED | |
 | Glooga Dualies | High-commit turret rolls—roll = "fight to the end." | FEEL=HUNGRY; ISM=MED | FEEL=STIFF; RSU=MED | FEEL=STABLE; IA=LOW | MID | POKE | BAD | LANE=MID; JOB=SLAYER | MED | Strong post-roll mode. |
-| Dualie Squelchers | Slide skirmisher—pokes safely and refuses hard commits. | FEEL=AVERAGE; ISM=LOW | FEEL=MOBILE; RSU=LOW | FEEL=STABLE; IA=LOW | LONG | POKE | NO | LANE=MID; JOB=SKIRMISH | LOW | Post-roll mobility identity. |
+| Dualie Squelchers | Slide skirmisher—pokes safely and refuses hard commits. | FEEL=HUNGRY; ISM=MED | FEEL=MOBILE; RSU=LOW | FEEL=STABLE; IA=LOW | LONG | POKE | NO | LANE=MID; JOB=SKIRMISH | LOW | Post-roll mobility identity. Ink-hungry due to constant poke/slide pressure. |
 | Tetra Dualies | Chaos engager—creates openings by being hard to pin down. | FEEL=HUNGRY; ISM=MED | FEEL=FREE; RSU=LOW | FEEL=OKAY; IA=LOW | MID | FLANK | GOOD | LANE=FRONT; JOB=SKIRMISH | HIGH | 4-roll pressure loop. |
 | Douser Dualies | Long-range "soft backliner" with limited escape. | FEEL=HUNGRY; ISM=MED | FEEL=STIFF; RSU=MED | FEEL=STABLE; IA=LOW | LONG | POKE | NO | LANE=BACK; JOB=SUPPORT | LOW | 1-roll pacing. |
 

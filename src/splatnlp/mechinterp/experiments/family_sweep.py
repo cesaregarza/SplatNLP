@@ -5,6 +5,7 @@ affect feature activation across different AP rungs.
 """
 
 import logging
+import math
 import statistics
 from collections import defaultdict
 from typing import Any, Union
@@ -47,11 +48,13 @@ def _df_to_records(df: pl.DataFrame, ctx: MechInterpContext) -> list[dict]:
         tokens = [ctx.inv_vocab.get(tid, "") for tid in token_ids]
         tokens = [t for t in tokens if t and not t.startswith("<")]
 
-        records.append({
-            "activation": activation,
-            "tokens": tokens,
-            "weapon_id": weapon_id,
-        })
+        records.append(
+            {
+                "activation": activation,
+                "tokens": tokens,
+                "weapon_id": weapon_id,
+            }
+        )
     return records
 
 
@@ -132,13 +135,20 @@ class Family1DSweepRunner(ExperimentRunner):
             )
 
         if include_absent:
+            n_absent = len(absent_acts)
+            stderr_absent = (
+                round(baseline_std / math.sqrt(n_absent), 4)
+                if n_absent > 1
+                else None
+            )
             rung_stats.append(
                 {
                     "rung": 0,
                     "label": "absent",
                     "mean_activation": round(baseline_mean, 4),
                     "std": round(baseline_std, 4),
-                    "n": len(absent_acts),
+                    "stderr": stderr_absent,
+                    "n": n_absent,
                     "delta_from_baseline": 0.0,
                 }
             )
@@ -150,7 +160,11 @@ class Family1DSweepRunner(ExperimentRunner):
                 continue
 
             mean_act = statistics.mean(acts)
-            std_act = statistics.stdev(acts) if len(acts) > 1 else 0
+            n_acts = len(acts)
+            std_act = statistics.stdev(acts) if n_acts > 1 else 0
+            stderr_act = (
+                round(std_act / math.sqrt(n_acts), 4) if n_acts > 1 else None
+            )
             delta = mean_act - baseline_mean
 
             rung_stats.append(
@@ -159,13 +173,14 @@ class Family1DSweepRunner(ExperimentRunner):
                     "label": f"{family_info.short_code}_{rung}",
                     "mean_activation": round(mean_act, 4),
                     "std": round(std_act, 4),
-                    "n": len(acts),
+                    "stderr": stderr_act,
+                    "n": n_acts,
                     "delta_from_baseline": round(delta, 4),
                 }
             )
 
-            if len(acts) > 0:
-                all_deltas.extend([mean_act - baseline_mean] * len(acts))
+            if n_acts > 0:
+                all_deltas.extend([mean_act - baseline_mean] * n_acts)
 
         # Populate result
         result.add_table(
@@ -176,6 +191,7 @@ class Family1DSweepRunner(ExperimentRunner):
                 "label",
                 "mean_activation",
                 "std",
+                "stderr",
                 "n",
                 "delta_from_baseline",
             ],
@@ -264,6 +280,10 @@ class Family1DSweepRunner(ExperimentRunner):
         """
         groups: dict[int | str, list[float]] = defaultdict(list)
 
+        # Check if this is a binary (main-only) ability
+        family_info = TOKEN_FAMILIES.get(family)
+        is_binary = family_info.is_main_only if family_info else False
+
         for row in data:
             activation = row.get("activation", 0)
             tokens = row.get("tokens", [])
@@ -276,9 +296,14 @@ class Family1DSweepRunner(ExperimentRunner):
             found_rung = None
             for token in tokens:
                 token_family, ap = parse_token(token)
-                if token_family == family and ap in rungs:
-                    found_rung = ap
-                    break
+                if token_family == family:
+                    # Binary abilities have ap=None but we treat as rung 10
+                    if is_binary:
+                        found_rung = 10
+                        break
+                    elif ap in rungs:
+                        found_rung = ap
+                        break
 
             if found_rung is not None:
                 groups[found_rung].append(activation)
@@ -361,6 +386,10 @@ class Family2DHeatmapRunner(ExperimentRunner):
         # Build 2D grid
         grid: dict[tuple[int, int], list[float]] = defaultdict(list)
 
+        # Check if families are binary (main-only abilities)
+        family_x_is_binary = family_x_info.is_main_only
+        family_y_is_binary = family_y_info.is_main_only
+
         for row in data:
             activation = row.get("activation", 0)
             tokens = row.get("tokens", [])
@@ -372,10 +401,18 @@ class Family2DHeatmapRunner(ExperimentRunner):
             rung_x, rung_y = 0, 0  # 0 = absent
             for token in tokens:
                 token_family, ap = parse_token(token)
-                if token_family == family_x and ap is not None:
-                    rung_x = ap
-                elif token_family == family_y and ap is not None:
-                    rung_y = ap
+                if token_family == family_x:
+                    # For binary abilities, ap is None but they're present
+                    # Use MAIN_ONLY_AP (10) for binary abilities
+                    if family_x_is_binary:
+                        rung_x = 10  # Binary ability is present
+                    elif ap is not None:
+                        rung_x = ap
+                elif token_family == family_y:
+                    if family_y_is_binary:
+                        rung_y = 10  # Binary ability is present
+                    elif ap is not None:
+                        rung_y = ap
 
             grid[(rung_x, rung_y)].append(activation)
 
@@ -385,15 +422,18 @@ class Family2DHeatmapRunner(ExperimentRunner):
             if not acts:
                 continue
             mean_act = statistics.mean(acts)
+            n = len(acts)
+            std = statistics.stdev(acts) if n > 1 else 0
+            # Standard error = std / sqrt(n), only valid for n > 1
+            stderr = round(std / math.sqrt(n), 4) if n > 1 else None
             heatmap_rows.append(
                 {
                     f"{family_x_info.short_code}_rung": rx,
                     f"{family_y_info.short_code}_rung": ry,
                     "mean_activation": round(mean_act, 4),
-                    "std": round(
-                        statistics.stdev(acts) if len(acts) > 1 else 0, 4
-                    ),
-                    "n": len(acts),
+                    "std": round(std, 4),
+                    "stderr": stderr,
+                    "n": n,
                 }
             )
 

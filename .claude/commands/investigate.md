@@ -1,37 +1,100 @@
-Use the mechinterp-investigator skill to: $ARGUMENTS
+Investigate SAE features: $ARGUMENTS
 
-## Investigation Standards
+## Execution Strategy
 
-**DO NOT do shallow sweeps.** Every investigation must include:
+### Single Feature
+Use the **mechinterp-investigator** skill directly to investigate the feature.
 
-1. **Enrichment Analysis** - Calculate presence rate in top 10% activations vs baseline
-   - Use binary presence for non-scaling abilities (CB, SJ, Haunt, etc.)
-   - A 2x+ enrichment is meaningful; <1.5x is weak signal
+### Multiple Features
+Spawn **parallel subagents** using the Task tool, one per feature:
 
-2. **Sample Size Checks** - Before claiming suppression:
-   - Verify ≥20 examples exist in the "suppressed" condition
-   - Zero examples = data sparsity, NOT suppression
-   - Report sample sizes with all claims
+```
+For each feature ID in the request:
+  Task(
+    subagent_type="general-purpose",
+    prompt="Use the mechinterp-investigator skill to investigate feature {ID} with the ultra model. Follow the full protocol in .claude/skills/mechinterp-investigator/SKILL.md.",
+    run_in_background=true
+  )
+```
 
-3. **Semantic Consistency** - Labels must not contradict:
-   - "Zombie" (embraces death mechanics) conflicts with high SSU (avoids death)
-   - "Death-Averse" conflicts with high CB/SJ enrichment
-   - Check that claimed suppressors are actually suppressed, not just sparse
+Wait for all subagents to complete, then consolidate findings.
 
-4. **Decoder Weight Check** - Assess feature strength:
-   - >30th percentile = meaningful feature
-   - <10th percentile = likely noise, consider NULL label
+## CLI Tools (No JSON Required)
 
-5. **Weapon Distribution** - Don't trust top-100 sample alone:
-   - Check full activation distribution across weapons
-   - A weapon at 14% in top-100 may be dominant or may be noise
+Subagents should use the direct subcommand interface:
 
-## Label Updates
+```bash
+# Overview with extended analyses
+poetry run python -m splatnlp.mechinterp.cli.overview_cli \
+    --feature-id {ID} --model ultra --all
 
-If issues are found, update `/mnt/e/mechinterp_runs/labels/consolidated_ultra.json` with corrected labels.
+# 1D family sweep
+poetry run python -m splatnlp.mechinterp.cli.runner_cli family-sweep \
+    --feature-id {ID} --family {FAMILY} --model ultra
 
-## Examples of valid commands:
-- `/investigate feature 1819`
-- `/investigate features 1819, 552, and 14964`
-- `/investigate read docs/stamper_null_feature_hits.md and validate the labels`
-- `/investigate the features related to Stealth Jump that we discussed earlier`
+# 2D heatmap
+poetry run python -m splatnlp.mechinterp.cli.runner_cli heatmap \
+    --feature-id {ID} --family-x {X} --family-y {Y} --model ultra
+
+# Binary ability analysis
+poetry run python -m splatnlp.mechinterp.cli.runner_cli binary \
+    --feature-id {ID} --model ultra
+
+# Weapon/kit sweeps
+poetry run python -m splatnlp.mechinterp.cli.runner_cli weapon-sweep \
+    --feature-id {ID} --model ultra --top-k 20
+
+poetry run python -m splatnlp.mechinterp.cli.runner_cli kit-sweep \
+    --feature-id {ID} --model ultra --analyze-combinations
+
+# Decoder output
+poetry run python -m splatnlp.mechinterp.cli.decoder_cli output-influence \
+    --feature-id {ID} --model ultra --top-k 15
+```
+
+## Required Protocol Per Feature
+
+| Phase | Test | CLI Command |
+|-------|------|-------------|
+| 0 | Decoder triage | `decoder_cli weight-percentile` |
+| 1 | Overview + extended | `overview_cli --all` |
+| 2 | 1D sweeps | `runner_cli family-sweep` (top 3-5 families) |
+| 2 | Binary enrichment | `runner_cli binary` |
+| 3 | 2D heatmaps | `runner_cli heatmap` (required for interactions) |
+| 4 | Decoder output | `decoder_cli output-influence` |
+| 5 | Weapon vibes | Read `splatoon3-meta/references/weapon-vibes.md` |
+
+## Output Format
+
+Each subagent should produce:
+```
+## Feature XXXXX
+
+**Label:** [proposed label]
+**Category:** mechanical | tactical | strategic
+**Confidence:** 0.0-1.0
+
+### Evidence
+- 1D sweeps: [family]: [delta] (causal/not causal)
+- Binary enrichment: [ability]: [X.XXx] (enriched/depleted/normal)
+- 2D interactions: [X × Y]: [finding]
+- Decoder promotes: [tokens]
+- Decoder suppresses: [tokens]
+
+### Weapon Profile
+- Core (25-75%): [weapons with %]
+- Flanderization (90%+): [if different]
+- Role: [from weapon-vibes]
+
+### Label Justification
+[Why this label captures the concept]
+```
+
+## Label Storage
+
+After consolidating results, update `/mnt/e/mechinterp_runs/labels/consolidated_ultra.json`.
+
+## Examples
+- `/investigate feature 6235` - Single feature investigation
+- `/investigate features 1819, 552, 14964` - Parallel subagent investigation
+- `/investigate validate labels in docs/stamper_null_feature_hits.md`

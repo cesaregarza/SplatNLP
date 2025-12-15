@@ -38,6 +38,11 @@ class ExperimentType(str, Enum):
 
     # Token influence analysis
     TOKEN_INFLUENCE_SWEEP = "token_influence_sweep"
+    BINARY_PRESENCE_EFFECT = "binary_presence_effect"
+
+    # Coverage and decoder analysis
+    CORE_COVERAGE_ANALYSIS = "core_coverage_analysis"
+    DECODER_OUTPUT_ANALYSIS = "decoder_output_analysis"
 
 
 class DatasetSlice(BaseModel):
@@ -315,6 +320,83 @@ class TokenInfluenceVariables(BaseModel):
     )
 
 
+class CoreCoverageVariables(BaseModel):
+    """Variables for core coverage analysis.
+
+    Checks if tokens are tail markers vs primary drivers by computing
+    coverage in the core region (25-75% of effective max).
+    """
+
+    tokens_to_check: list[str] | None = Field(
+        default=None,
+        description="Specific tokens to check (None = use top PageRank tokens)",
+    )
+    top_k: int = Field(
+        default=10,
+        ge=1,
+        description="Number of top PageRank tokens to check if tokens_to_check is None",
+    )
+    coverage_threshold: float = Field(
+        default=0.30,
+        gt=0.0,
+        le=1.0,
+        description="Below this coverage = tail marker (default 30%)",
+    )
+    include_weapons: bool = Field(
+        default=True,
+        description="Also compute weapon coverage (detect weapon flanderization)",
+    )
+    core_lower_pct: float = Field(
+        default=0.25,
+        ge=0.0,
+        le=0.5,
+        description="Lower bound of core region as fraction of effective max",
+    )
+    core_upper_pct: float = Field(
+        default=0.75,
+        ge=0.5,
+        le=1.0,
+        description="Upper bound of core region as fraction of effective max",
+    )
+    effective_max_percentile: float = Field(
+        default=0.995,
+        gt=0.9,
+        le=1.0,
+        description="Percentile of nonzero activations to use as effective max",
+    )
+
+
+class DecoderOutputVariables(BaseModel):
+    """Variables for decoder output analysis.
+
+    Analyzes what tokens a feature PROMOTES/SUPPRESSES via the path:
+    feature_decoder_vector → output_layer_weights → token logits
+    """
+
+    top_k_promoted: int = Field(
+        default=15,
+        ge=1,
+        description="Number of top promoted tokens to return",
+    )
+    top_k_suppressed: int = Field(
+        default=15,
+        ge=1,
+        description="Number of top suppressed tokens to return",
+    )
+    group_by_family: bool = Field(
+        default=True,
+        description="Aggregate results by ability family",
+    )
+    include_ap_level: bool = Field(
+        default=True,
+        description="Include AP level patterns (_3, _6, _57 etc.) in analysis",
+    )
+    exclude_special_tokens: bool = Field(
+        default=True,
+        description="Exclude <PAD>, <MASK>, <UNK> from results",
+    )
+
+
 class ExperimentSpec(BaseModel):
     """Complete specification for an experiment.
 
@@ -394,6 +476,8 @@ class ExperimentSpec(BaseModel):
             ExperimentType.WEAPON_GROUP_ANALYSIS: WeaponGroupVariables,
             ExperimentType.KIT_SWEEP: KitSweepVariables,
             ExperimentType.TOKEN_INFLUENCE_SWEEP: TokenInfluenceVariables,
+            ExperimentType.CORE_COVERAGE_ANALYSIS: CoreCoverageVariables,
+            ExperimentType.DECODER_OUTPUT_ANALYSIS: DecoderOutputVariables,
         }
         model_class = type_map.get(self.type)
         if model_class:

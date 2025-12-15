@@ -621,3 +621,498 @@ def _compute_token_influences(
     influences.sort(key=lambda x: x.high_rate_ratio)
 
     return influences
+
+
+# =============================================================================
+# Extended Analysis Functions (for overview_cli --enrichment, --regions, etc.)
+# =============================================================================
+
+
+@dataclass
+class TokenEnrichment:
+    """Token enrichment statistics for high vs low activation."""
+
+    token: str
+    family: str
+    ap_level: int | None
+    baseline_rate: float  # Rate in all examples
+    high_rate: float  # Rate in high-activation examples
+    enrichment_ratio: float  # high_rate / baseline_rate
+    is_enhancer: bool  # enrichment_ratio > 1.2
+    is_suppressor: bool  # enrichment_ratio < 0.8
+    n_total: int
+    n_high_with_token: int
+
+
+@dataclass
+class RegionBreakdown:
+    """Activation region statistics."""
+
+    region_name: str
+    pct_range: tuple[float, float]  # (low, high) as % of effective max
+    n_examples: int
+    pct_of_total: float
+    top_weapons: list[tuple[str, int, float]]  # (weapon_name, count, pct)
+    top_families: list[tuple[str, float]]  # (family_name, frequency)
+
+
+@dataclass
+class BinaryEnrichment:
+    """Binary ability enrichment statistics."""
+
+    ability: str
+    baseline_presence: float  # Rate in all examples
+    high_presence: float  # Rate in high-activation examples
+    enrichment: float  # high_presence / baseline_presence
+    mean_with: float
+    mean_without: float
+    delta: float
+    n_with: int
+    n_without: int
+
+
+@dataclass
+class KitBreakdown:
+    """Sub/special weapon breakdown for a region."""
+
+    region: str
+    n_examples: int
+    subs: list[tuple[str, int, float]]  # (sub_name, count, pct)
+    specials: list[tuple[str, int, float]]  # (special_name, count, pct)
+
+
+# Binary abilities (main-only, no AP scaling)
+BINARY_ABILITIES = [
+    "comeback",
+    "stealth_jump",
+    "last_ditch_effort",
+    "ninja_squid",
+    "respawn_punisher",
+    "object_shredder",
+    "drop_roller",
+    "opening_gambit",
+    "tenacity",
+    "haunt",
+]
+
+
+def compute_token_enrichment(
+    feature_id: int,
+    ctx: MechInterpContext,
+    high_percentile: float = 0.90,
+    min_baseline_rate: float = 0.01,
+) -> list[TokenEnrichment]:
+    """Compute enrichment ratios for all tokens.
+
+    Enrichment = (rate in high-activation examples) / (rate in all examples)
+    - Ratio > 1.2 = enhancer (over-represented in high activation)
+    - Ratio < 0.8 = suppressor (under-represented in high activation)
+
+    Args:
+        feature_id: SAE feature ID
+        ctx: MechInterp context
+        high_percentile: Top X% examples count as "high activation" (default: 10%)
+        min_baseline_rate: Minimum baseline rate to include token (default: 1%)
+
+    Returns:
+        List of TokenEnrichment sorted by enrichment_ratio (suppressors first)
+    """
+    import polars as pl
+
+    df = ctx.db.get_all_feature_activations_for_pagerank(feature_id)
+    n_total = len(df)
+    if n_total == 0:
+        return []
+
+    # Get high activation threshold
+    threshold = df["activation"].quantile(high_percentile)
+    high_df = df.filter(pl.col("activation") >= threshold)
+    n_high = len(high_df)
+
+    if n_high == 0:
+        return []
+
+    # Count token presence in all vs high
+    all_tokens: dict[int, int] = defaultdict(int)
+    high_tokens: dict[int, int] = defaultdict(int)
+
+    for row in df.iter_rows(named=True):
+        for tid in row.get("ability_input_tokens", []):
+            if tid not in [0, 1, 2, 3]:  # Skip special tokens
+                all_tokens[tid] += 1
+
+    for row in high_df.iter_rows(named=True):
+        for tid in row.get("ability_input_tokens", []):
+            if tid not in [0, 1, 2, 3]:
+                high_tokens[tid] += 1
+
+    # Compute enrichment
+    enrichments: list[TokenEnrichment] = []
+
+    for tid, all_count in all_tokens.items():
+        baseline_rate = all_count / n_total
+        if baseline_rate < min_baseline_rate:
+            continue
+
+        high_count = high_tokens.get(tid, 0)
+        high_rate = high_count / n_high
+
+        enrichment_ratio = high_rate / baseline_rate if baseline_rate > 0 else 0
+
+        token_name = ctx.inv_vocab.get(tid, f"token_{tid}")
+        family, ap_level = parse_token(token_name)
+
+        enrichments.append(
+            TokenEnrichment(
+                token=token_name,
+                family=family or token_name,
+                ap_level=ap_level,
+                baseline_rate=round(baseline_rate, 4),
+                high_rate=round(high_rate, 4),
+                enrichment_ratio=round(enrichment_ratio, 4),
+                is_enhancer=enrichment_ratio > 1.2,
+                is_suppressor=enrichment_ratio < 0.8,
+                n_total=all_count,
+                n_high_with_token=high_count,
+            )
+        )
+
+    # Sort by enrichment (suppressors first)
+    enrichments.sort(key=lambda x: x.enrichment_ratio)
+
+    return enrichments
+
+
+def compute_region_breakdown(
+    feature_id: int,
+    ctx: MechInterpContext,
+    effective_max_percentile: float = 99.5,
+) -> list[RegionBreakdown]:
+    """Compute activation breakdown by region for anti-flanderization analysis.
+
+    Regions (as % of effective max activation):
+    - Floor: ≤1%
+    - Low: 1-10%
+    - Below Core: 10-25%
+    - Core: 25-75% (TRUE CONCEPT)
+    - High: 75-90%
+    - Flanderization: 90%+ (potential super-stimuli)
+
+    Args:
+        feature_id: SAE feature ID
+        ctx: MechInterp context
+        effective_max_percentile: Percentile for effective max (default: 99.5)
+
+    Returns:
+        List of RegionBreakdown for each region
+    """
+    import numpy as np
+    import polars as pl
+
+    df = ctx.db.get_all_feature_activations_for_pagerank(feature_id)
+    n_total = len(df)
+    if n_total == 0:
+        return []
+
+    acts = df["activation"].to_numpy()
+    weapons = df["weapon_id"].to_list()
+    token_lists = df["ability_input_tokens"].to_list()
+
+    # Compute effective max (99.5th percentile of nonzero)
+    nonzero_acts = acts[acts > 0]
+    if len(nonzero_acts) == 0:
+        return []
+
+    effective_max = np.percentile(nonzero_acts, effective_max_percentile)
+
+    # Define regions
+    regions_def = [
+        ("Floor (≤1%)", 0.0, 0.01),
+        ("Low (1-10%)", 0.01, 0.10),
+        ("Below Core (10-25%)", 0.10, 0.25),
+        ("Core (25-75%)", 0.25, 0.75),
+        ("High (75-90%)", 0.75, 0.90),
+        ("Flanderization (90%+)", 0.90, 1.01),
+    ]
+
+    breakdowns: list[RegionBreakdown] = []
+
+    for region_name, low_pct, high_pct in regions_def:
+        low_thresh = low_pct * effective_max
+        high_thresh = high_pct * effective_max
+
+        # Find indices in this region
+        if high_pct > 1.0:  # Flanderization: >=90%
+            indices = [
+                i for i, a in enumerate(acts) if a > low_thresh
+            ]
+        else:
+            indices = [
+                i
+                for i, a in enumerate(acts)
+                if low_thresh < a <= high_thresh
+            ]
+
+        n_region = len(indices)
+        if n_region == 0:
+            breakdowns.append(
+                RegionBreakdown(
+                    region_name=region_name,
+                    pct_range=(low_pct * 100, high_pct * 100),
+                    n_examples=0,
+                    pct_of_total=0.0,
+                    top_weapons=[],
+                    top_families=[],
+                )
+            )
+            continue
+
+        # Count weapons in region
+        weapon_counts: dict[int, int] = defaultdict(int)
+        family_counts: dict[str, int] = defaultdict(int)
+
+        for idx in indices:
+            weapon_counts[weapons[idx]] += 1
+            for tid in token_lists[idx]:
+                tname = ctx.inv_vocab.get(tid, "")
+                family, _ = parse_token(tname)
+                if family:
+                    family_counts[family] += 1
+
+        # Top 5 weapons
+        top_weapons = []
+        for wid, count in sorted(
+            weapon_counts.items(), key=lambda x: -x[1]
+        )[:5]:
+            wname = ctx.id_to_weapon_display_name(wid)
+            pct = count / n_region * 100
+            top_weapons.append((wname, count, round(pct, 1)))
+
+        # Top 5 families
+        top_families = []
+        total_family = sum(family_counts.values())
+        for fam, count in sorted(
+            family_counts.items(), key=lambda x: -x[1]
+        )[:5]:
+            freq = count / total_family if total_family > 0 else 0
+            top_families.append((fam, round(freq, 3)))
+
+        breakdowns.append(
+            RegionBreakdown(
+                region_name=region_name,
+                pct_range=(low_pct * 100, high_pct * 100),
+                n_examples=n_region,
+                pct_of_total=round(n_region / n_total * 100, 1),
+                top_weapons=top_weapons,
+                top_families=top_families,
+            )
+        )
+
+    return breakdowns
+
+
+def compute_binary_enrichment(
+    feature_id: int,
+    ctx: MechInterpContext,
+    high_percentile: float = 0.90,
+) -> list[BinaryEnrichment]:
+    """Compute enrichment for binary abilities (main-only abilities).
+
+    Binary abilities don't scale with AP, so 1D sweeps show delta=0.
+    This analysis checks presence rate and mean activation instead.
+
+    Args:
+        feature_id: SAE feature ID
+        ctx: MechInterp context
+        high_percentile: Top X% examples count as "high activation"
+
+    Returns:
+        List of BinaryEnrichment sorted by enrichment (most depleted first)
+    """
+    import polars as pl
+
+    df = ctx.db.get_all_feature_activations_for_pagerank(feature_id)
+    n_total = len(df)
+    if n_total == 0:
+        return []
+
+    # Get high activation threshold
+    threshold = df["activation"].quantile(high_percentile)
+    high_df = df.filter(pl.col("activation") >= threshold)
+    n_high = len(high_df)
+
+    if n_high == 0:
+        return []
+
+    enrichments: list[BinaryEnrichment] = []
+
+    for ability in BINARY_ABILITIES:
+        tok_id = ctx.vocab.get(ability)
+        if tok_id is None:
+            continue
+
+        # Count presence
+        with_binary_all = df.filter(
+            pl.col("ability_input_tokens").list.contains(tok_id)
+        )
+        with_binary_high = high_df.filter(
+            pl.col("ability_input_tokens").list.contains(tok_id)
+        )
+
+        n_with_all = len(with_binary_all)
+        n_with_high = len(with_binary_high)
+
+        if n_with_all == 0:
+            continue
+
+        # Compute rates
+        baseline_presence = n_with_all / n_total
+        high_presence = n_with_high / n_high
+        enrichment = (
+            high_presence / baseline_presence if baseline_presence > 0 else 0
+        )
+
+        # Compute mean activation WITH vs WITHOUT
+        without_binary = df.filter(
+            ~pl.col("ability_input_tokens").list.contains(tok_id)
+        )
+
+        mean_with = with_binary_all["activation"].mean()
+        mean_without = without_binary["activation"].mean()
+        delta = mean_with - mean_without
+
+        enrichments.append(
+            BinaryEnrichment(
+                ability=ability,
+                baseline_presence=round(baseline_presence, 4),
+                high_presence=round(high_presence, 4),
+                enrichment=round(enrichment, 2),
+                mean_with=round(mean_with, 4),
+                mean_without=round(mean_without, 4),
+                delta=round(delta, 4),
+                n_with=n_with_all,
+                n_without=len(without_binary),
+            )
+        )
+
+    # Sort by enrichment (most depleted first)
+    enrichments.sort(key=lambda x: x.enrichment)
+
+    return enrichments
+
+
+def compute_kit_breakdown(
+    feature_id: int,
+    ctx: MechInterpContext,
+    region: str = "core",
+) -> KitBreakdown:
+    """Compute sub/special weapon breakdown for a region.
+
+    This reveals what sub weapons are actually being used when a feature
+    like ISS (Ink Saver Sub) is enhanced.
+
+    Args:
+        feature_id: SAE feature ID
+        ctx: MechInterp context
+        region: Which region to analyze ("core", "high", "all")
+
+    Returns:
+        KitBreakdown with sub and special weapon counts
+    """
+    import numpy as np
+
+    from splatnlp.dashboard.utils.converters import (
+        get_translation,
+        get_weapon_properties,
+    )
+
+    df = ctx.db.get_all_feature_activations_for_pagerank(feature_id)
+    n_total = len(df)
+    if n_total == 0:
+        return KitBreakdown(region=region, n_examples=0, subs=[], specials=[])
+
+    acts = df["activation"].to_numpy()
+    weapons = df["weapon_id"].to_list()
+
+    # Filter to region
+    if region == "all":
+        indices = list(range(n_total))
+    else:
+        nonzero_acts = acts[acts > 0]
+        if len(nonzero_acts) == 0:
+            return KitBreakdown(
+                region=region, n_examples=0, subs=[], specials=[]
+            )
+
+        effective_max = np.percentile(nonzero_acts, 99.5)
+
+        if region == "core":
+            indices = [
+                i
+                for i, a in enumerate(acts)
+                if 0.25 * effective_max < a <= 0.75 * effective_max
+            ]
+        elif region == "high":
+            indices = [
+                i for i, a in enumerate(acts) if a > 0.75 * effective_max
+            ]
+        else:
+            indices = list(range(n_total))
+
+    n_region = len(indices)
+    if n_region == 0:
+        return KitBreakdown(region=region, n_examples=0, subs=[], specials=[])
+
+    # Load weapon properties and translations
+    try:
+        props = get_weapon_properties()
+        translation = get_translation()
+        subs_dict = translation.get("USen", {}).get("WeaponName_Sub", {})
+        specials_dict = translation.get("USen", {}).get(
+            "WeaponName_Special", {}
+        )
+    except Exception as e:
+        logger.warning(f"Could not load weapon kit data: {e}")
+        return KitBreakdown(region=region, n_examples=n_region, subs=[], specials=[])
+
+    # Count subs and specials
+    sub_counts: dict[str, int] = defaultdict(int)
+    special_counts: dict[str, int] = defaultdict(int)
+
+    for idx in indices:
+        wid = weapons[idx]
+        # Convert mechinterp weapon token ID to game weapon ID
+        internal_name = ctx.inv_weapon_vocab.get(wid, "")
+        if not internal_name.startswith("weapon_id_"):
+            continue
+        game_id = internal_name.replace("weapon_id_", "")
+
+        weapon_props = props.get(game_id)
+        if not weapon_props:
+            continue
+
+        # Get sub/special display names
+        sub_code = weapon_props.get("sub", "")
+        special_code = weapon_props.get("special", "")
+
+        sub_name = subs_dict.get(sub_code, sub_code)
+        special_name = specials_dict.get(special_code, special_code)
+
+        if sub_name:
+            sub_counts[sub_name] += 1
+        if special_name:
+            special_counts[special_name] += 1
+
+    # Convert to sorted lists
+    subs = [
+        (name, count, round(count / n_region * 100, 1))
+        for name, count in sorted(sub_counts.items(), key=lambda x: -x[1])
+    ]
+    specials = [
+        (name, count, round(count / n_region * 100, 1))
+        for name, count in sorted(special_counts.items(), key=lambda x: -x[1])
+    ]
+
+    return KitBreakdown(
+        region=region, n_examples=n_region, subs=subs[:15], specials=specials[:15]
+    )

@@ -74,6 +74,68 @@ poetry run python -m splatnlp.mechinterp.cli.labeler_cli label \
 - `strategic`: High-level patterns (playstyle, meta concepts)
 - `none`: Uncategorized
 
+## Required Label Fields
+
+Every label in `consolidated_ultra.json` MUST include these fields:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `feature_id` | ✓ | Integer feature ID |
+| `model_type` | ✓ | "ultra" or "full" |
+| `dashboard_name` | ✓ | The label displayed in dashboard |
+| `dashboard_category` | ✓ | mechanical, tactical, strategic, or none |
+| `dashboard_notes` | ✓ | Investigation notes with evidence |
+| `display_name` | ✓ | Same as dashboard_name (for compatibility) |
+| `last_updated` | ✓ | ISO timestamp of last update |
+| `source` | ✓ | Who created it (e.g., "claude code (full investigation)") |
+| `hypothesis_confidence` | ✓ | 0.0-1.0 confidence score (DEPRECATED - use interpretability_confidence) |
+| `importance_percentile` | ✓ | Decoder weight percentile (0-100, objective measure of model importance) |
+| `interpretability_confidence` | ✓ | How confident we are in the interpretation (0.0-1.0, subjective) |
+| `stability_score` | Optional | Split-half stability if validation was run (0.0-1.0) |
+| `research_label` | Optional | Alternative label for research context |
+| `research_state_path` | Optional | Path to research state JSON |
+
+### Separating Importance from Interpretability
+
+These three fields capture distinct dimensions:
+
+| Field | Question Answered | Source |
+|-------|-------------------|--------|
+| `importance_percentile` | "Is this feature important to the model?" | Decoder weight magnitude (objective) |
+| `interpretability_confidence` | "Do we understand what this feature does?" | Investigation quality (subjective) |
+| `stability_score` | "Does this feature behave consistently?" | Split-half validation (objective) |
+
+**Common combinations:**
+
+| Importance | Interpretability | Meaning |
+|------------|------------------|---------|
+| High (>80) | High (>0.8) | Strong, well-understood feature |
+| High (>80) | Low (<0.5) | Important but mysterious - needs more investigation |
+| Low (<20) | High (>0.8) | Understood but weak - may be noise or redundant |
+| Low (<20) | Low (<0.5) | Skip - not worth investigating |
+
+**Rule of thumb**: Don't conflate these. A feature with 9th percentile importance but 0.85 interpretability confidence is "weak but understood" - useful for pattern recognition but not a major model component.
+
+**Example complete label:**
+```json
+{
+  "feature_id": 10938,
+  "model_type": "ultra",
+  "dashboard_name": "Positional Survival - Midrange",
+  "dashboard_category": "strategic",
+  "dashboard_notes": "Survival through positioning, not stealth/trading. Decoder promotes: SSU, BRU (all levels), ISS, IA, IRU. Suppresses: BPU, RSU, QR, SS. Weapons: Midrange with NO/BAD NS fit, LOW death tolerance. NS 0.84x depleted, QR 0.66x suppressed.",
+  "display_name": "Positional Survival - Midrange",
+  "last_updated": "2025-12-14T01:30:00.000000",
+  "source": "claude code (full investigation)",
+  "hypothesis_confidence": 0.85,
+  "importance_percentile": 9.3,
+  "interpretability_confidence": 0.85,
+  "stability_score": null,
+  "research_label": "Positional Survival - Midrange",
+  "research_state_path": "/mnt/e/mechinterp_runs/state/feature_10938_ultra.json"
+}
+```
+
 ## ⚠️ Super-Stimuli Warning
 
 **High activations may be "flanderized" versions of the true concept!**
@@ -85,31 +147,143 @@ When labeling features, don't only examine extreme activations. High activation 
 
 ### How to Detect Super-Stimuli
 
-1. **Examine activation regions** (not just top/bottom):
-   - Floor (≤0.01), Low (0.01-0.05), Mild (0.05-0.10)
-   - Moderate (0.10-0.20), High (0.20-0.35), Very High (>0.35)
+1. **Examine activation regions** (as % of **effective max** = 99.5th percentile):
+   - Floor (≤1%), Low (1-10%), Below Core (10-25%)
+   - Core (25-75%), High (75-90%), Flanderization Zone (90%+)
+   - Use effective max to prevent outliers from distorting region boundaries
 
 2. **Look for weapons that span ALL levels continuously**:
    - If Splattershot appears in every region → feature encodes a general concept
-   - If only niche weapons reach Very High → those are "super-stimuli"
+   - If only niche weapons reach 90%+ → those are "super-stimuli"
 
-3. **Compare low-moderate vs very high**:
-   - Low-moderate: diverse weapons, general builds = TRUE CONCEPT
-   - Very high: concentrated on 3-4 special-dependent weapons = SUPER-STIMULI
+3. **Compare core (25-75%) vs flanderization zone (90%+)**:
+   - Core region: diverse weapons, general builds = TRUE CONCEPT
+   - Flanderization zone: concentrated on 3-4 special-dependent weapons = SUPER-STIMULI
 
 ### Example: Feature 9971
 
 ```
 Initial label (wrong): "Death-Averse SCU Stacker"
-- Only looked at high activations (SCU_57 + special-dependent weapons)
+- Only looked at 90%+ activations (SCU_57 + special-dependent weapons)
 
 Better label: "Offensive Intensity (Death-Averse)"
-- Low-moderate region showed diverse weapons (Splattershot family, Sploosh, Hydra)
+- Core region (25-75%) showed diverse weapons (Splattershot family, Sploosh, Hydra)
 - Feature tracks general offensive investment, not specifically SCU
-- Very high region (Bloblobber, Glooga) are "super-stimuli" not the core concept
+- Flanderization zone (90%+) with Bloblobber, Glooga are "super-stimuli" not the core concept
 ```
 
-**Key insight**: The low-moderate region reveals the TRUE feature concept. High activations show what happens when that concept is pushed to extremes.
+**Key insight**: The core region (25-75% of effective max) reveals the TRUE feature concept. High activations (90%+ of effective max) show what happens when that concept is pushed to flanderized extremes.
+
+### Core Coverage Validation (BEFORE LABELING)
+
+**Before finalizing any label, verify core coverage of the proposed signature.**
+
+A label based on a token/ability that only appears in <30% of core examples is labeling the TAIL, not the concept.
+
+```python
+from splatnlp.mechinterp.skill_helpers import load_context
+import polars as pl
+import numpy as np
+
+ctx = load_context('ultra')
+df = ctx.db.get_all_feature_activations_for_pagerank(FEATURE_ID)
+
+# Define core region
+acts = df['activation'].to_numpy()
+nonzero_acts = acts[acts > 0]
+effective_max = np.percentile(nonzero_acts, 99.5)
+core_df = df.filter(
+    (pl.col('activation') > 0.25 * effective_max) &
+    (pl.col('activation') <= 0.75 * effective_max)
+)
+
+# Check coverage of proposed label driver
+driver_id = ctx.vocab['YOUR_TOKEN_HERE']  # e.g., 'respawn_punisher'
+core_with_driver = core_df.filter(
+    pl.col('ability_input_tokens').list.contains(driver_id)
+)
+
+coverage = len(core_with_driver) / len(core_df) * 100
+print(f"Core coverage: {coverage:.1f}%")
+```
+
+| Core Coverage | Label Guidance |
+|---------------|----------------|
+| >50% | Safe to headline this token/ability |
+| 30-50% | Mention in notes, but not as headline |
+| <30% | **WRONG LABEL** - this is a tail marker, not the concept |
+
+**Red flags that indicate wrong labeling:**
+- Binary ability with >5x tail enrichment but <20% core presence → tail marker
+- Weapon with >40% in top-100 but <15% in core → flanderized
+- Proposed signature covers <30% of core examples → incomplete interpretation
+
+**Example (Feature 13934):**
+```
+Wrong approach: See RP with 8.57x enrichment → label as "RP Backline Anchor"
+Reality: RP only in 12% of core → RP is super-stimulus, not concept
+
+Right approach: Check core coverage FIRST
+→ RP at 12% means it's a tail marker
+→ Split by RP presence to find true concept
+→ Label the commonality across modes
+```
+
+## Label Quality Examples
+
+### Evolution from Mechanical to Strategic
+
+| Investigation Stage | Label | Problem |
+|--------------------|-------|---------|
+| After 1D sweeps | "SSU + ISM + IRU Kit" | Just lists tokens |
+| After binary analysis | "Swim Efficiency Kit (Death-Averse)" | Mechanical + negation |
+| After decoder grouping | "Swim Utility Sustain" | Better but still mechanical |
+| After weapon role check | "Positional Survival - Midrange" | Strategic concept + role |
+
+### Good vs Bad Labels
+
+| Bad Label | Why | Good Label | Why |
+|-----------|-----|------------|-----|
+| "SCU Detector" | Token presence only | "Special Pressure Build" | Gameplay purpose |
+| "Death-Averse Efficiency" | Negation + mechanical | "Positional Survival" | Positive concept |
+| "High SSU Anchor" | Wrong role (Jr. isn't anchor) | "- Midrange" | Correct role |
+| "Zombie + RP Mixed" | Describes modes, not concept | "Utility Axis (Multi-Modal)" | Names the pattern |
+| "ISM Build" | Single token | "Ink Sustain - Backline" | Concept + role |
+
+### The Strategic Label Test
+
+Before saving a label, ask:
+
+1. "Would a competitive Splatoon player recognize this playstyle?"
+   - If no → too mechanical or wrong terminology
+
+2. "Does this explain WHY the model learned this pattern?"
+   - If no → you're describing correlation, not causation
+
+3. "Could I explain this to someone who doesn't know the tokens?"
+   - If no → label is too technical
+
+### Mandatory Label Components
+
+Every strategic/tactical label should have:
+
+1. **Core concept** - The gameplay behavior (e.g., "Positional Survival")
+2. **Role qualifier** - Where/how it's played (e.g., "- Midrange")
+3. **Notes with evidence** - Decoder groups, weapon classification, key enrichments
+
+### Label Specificity by Category
+
+**Match label specificity to concept level:**
+
+| Category | Specificity | Example |
+|----------|-------------|---------|
+| **mechanical** | Terse, technical | "SCU Threshold 29+", "ISM Stacker" |
+| **tactical** | Mid-level, names the combo | "Zombie Slayer Dualies", "Beacon Support Kit" |
+| **strategic** | High-concept, captures the "why" | "Positional Survival - Midrange" |
+
+- Mechanical = low-level pattern → precise, token-focused
+- Tactical = build strategy → names the combo + weapon/class
+- Strategic = gameplay philosophy → high-concept + role qualifier
 
 ### Skip a Feature
 

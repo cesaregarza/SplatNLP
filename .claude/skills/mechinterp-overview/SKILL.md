@@ -57,6 +57,23 @@ Use this skill when:
 | Existing Label | Current label if one exists |
 | ReLU Floor | Warning if feature is mostly zeros (>50%) |
 
+### Sparsity Definition
+
+**Sparsity = % of examples where feature activation is ZERO**
+
+A high sparsity percentage means the feature fires RARELY (is selective):
+
+| Sparsity | Meaning | Interpretation |
+|----------|---------|----------------|
+| 95%+ | Very sparse | Fires on only 5% of examples - very specific pattern |
+| 80-95% | Moderately sparse | Good discriminative feature (fires on 5-20% of examples) |
+| 50-80% | Dense | Fires often (20-50% of examples) - broad pattern |
+| <50% | Very dense | Fires on majority of examples - may be baseline feature |
+
+**Common confusion:** "89% sparsity" means "fires on 11% of examples" NOT "fires often."
+
+Think of it as: **Sparsity = how empty/silent the feature usually is.**
+
 **CRITICAL**: Always check the **Bottom Tokens** section! Tokens that rarely appear in high-activation examples reveal what the feature *avoids*, which is often more informative than what it detects.
 
 ## Usage
@@ -94,6 +111,48 @@ poetry run python -m splatnlp.mechinterp.cli.overview_cli \
     --model ultra \
     --verbose
 ```
+
+### Extended Analyses
+
+Additional analysis flags provide deeper insights:
+
+```bash
+# Token enrichment (enhancers/suppressors)
+poetry run python -m splatnlp.mechinterp.cli.overview_cli \
+    --feature-id 6235 --model ultra --enrichment
+
+# Activation region breakdown (anti-flanderization)
+poetry run python -m splatnlp.mechinterp.cli.overview_cli \
+    --feature-id 6235 --model ultra --regions
+
+# Binary ability enrichment (main-only abilities)
+poetry run python -m splatnlp.mechinterp.cli.overview_cli \
+    --feature-id 6235 --model ultra --binary
+
+# Sub/special weapon breakdown (kit analysis)
+poetry run python -m splatnlp.mechinterp.cli.overview_cli \
+    --feature-id 6235 --model ultra --kit
+
+# All extended analyses at once
+poetry run python -m splatnlp.mechinterp.cli.overview_cli \
+    --feature-id 6235 --model ultra --all
+
+# Customize high-activation threshold (default: 0.90 = top 10%)
+poetry run python -m splatnlp.mechinterp.cli.overview_cli \
+    --feature-id 6235 --model ultra --enrichment --high-percentile 0.95
+```
+
+### Extended Analysis Reference
+
+| Flag | Purpose | Output |
+|------|---------|--------|
+| `--enrichment` | Token enrichment ratios | Suppressors (<0.8x) and enhancers (>1.2x) |
+| `--regions` | Activation regions | Floor/Low/Core/High/Flanderization breakdown |
+| `--binary` | Binary ability presence | Enrichment for main-only abilities (Comeback, Stealth Jump, etc.) |
+| `--kit` | Sub/special breakdown | Which subs/specials appear in core region |
+| `--all` | Enable all above | Combined output |
+| `--kit-region` | Region for kit analysis | `core` (default), `high`, or `all` |
+| `--high-percentile` | Threshold for "high" | Default: 0.90 (top 10%) |
 
 ### Programmatic
 
@@ -220,42 +279,66 @@ class FeatureOverview:
 
 **Don't only examine high activations - they may be "super-stimuli"!**
 
-High activation examples can be exaggerated, "flanderized" versions of the true concept. The moderate activation region (0.10-0.20) often reveals the actual feature meaning better than extremes.
+High activation examples can be exaggerated, "flanderized" versions of the true concept. The core region (25-75% of **effective max**) often reveals the actual feature meaning better than the flanderization zone (90%+ of effective max).
+
+**Why "effective max"?** Activation distributions are heavy-tailed. Use `effective_max = 99.5th percentile of nonzero activations` to prevent single outliers from making your core region nearly empty.
 
 ### Warning Signs of Super-Stimuli
 
 | Pattern | What It Means |
 |---------|---------------|
-| Very high activations only on 3-4 niche weapons | High region = super-stimuli |
-| Moderate region has diverse mainstream weapons | TRUE concept is in moderate |
+| 90%+ activations only on 3-4 niche weapons | Flanderization zone = super-stimuli |
+| Core region (25-75%) has diverse mainstream weapons | TRUE concept is in core region |
 | One weapon spans ALL activation levels continuously | Feature is general, not weapon-specific |
 
 ### Activation Region Bins
 
-Use these standard bins to analyze feature behavior across the activation spectrum:
+Use these standard bins (as % of **effective max** = 99.5th percentile) to analyze feature behavior:
 
-| Region | Range | Typical Interpretation |
-|--------|-------|------------------------|
-| Floor | ≤0.01 | Feature not activated |
-| Low | 0.01-0.05 | Weak signal, early detection |
-| Mild | 0.05-0.10 | Emerging pattern |
-| Moderate | 0.10-0.20 | **TRUE CONCEPT** (examine carefully!) |
-| High | 0.20-0.35 | Strong expression |
-| Very High | >0.35 | Potential super-stimuli |
+| Region | Range (% of effective max) | Typical Interpretation |
+|--------|----------------------------|------------------------|
+| Floor | ≤1% | Feature not activated |
+| Low | 1-10% | Weak signal, early detection |
+| Below Core | 10-25% | Emerging pattern |
+| Core | 25-75% | **TRUE CONCEPT** (examine carefully!) |
+| High | 75-90% | Strong expression |
+| Flanderization Zone | 90%+ | Potential super-stimuli |
 
 ### Example: Feature 9971
 
-**Initial analysis (looking only at high activations):**
+**Initial analysis (looking only at 90%+ activations):**
 - Top weapons: Bloblobber, Glooga Deco, Range Blaster, Octobrush
 - Conclusion: "SCU stacker on special-dependent weapons"
 
-**After region analysis (examining moderate):**
-- Moderate region: Splattershot (115), Wellstring (65), Sploosh (57)
+**After region analysis (examining core 25-75%):**
+- Core region: Splattershot (115), Wellstring (65), Sploosh (57)
 - Splattershot appears in EVERY region (29→125→83→115→61→19)
 - True concept: "General offensive investment (death-averse)"
-- Very high region: "Super-stimuli" version on niche special-dependent weapons
+- Flanderization zone (90%+): "Super-stimuli" version on niche special-dependent weapons
 
-**Key insight**: Label the moderate-region concept, not the extreme version!
+**Key insight**: Label the core-region concept, not the flanderized extreme!
+
+### Coverage Threshold Rule
+
+**When overview shows a dominant token or weapon, CHECK CORE-REGION COVERAGE before treating it as the concept.**
+
+A token can have high enrichment in the tail but be a **tail marker**, not the true concept.
+
+| Metric | Interpretation |
+|--------|----------------|
+| >50% core coverage | **Primary concept** - safe to use in label |
+| 30-50% core coverage | **Significant but not universal** - note in label, don't headline |
+| <30% core coverage | **Tail marker / super-stimulus** - NOT the concept |
+
+**Example (Feature 13934):**
+```
+Overview showed: respawn_punisher with 8.57x tail enrichment
+BUT: RP only present in 12% of core-region examples
+
+⚠️ Flag in overview: "respawn_punisher: high enrichment (8.57x) but <30% core coverage - may be tail marker, not core concept"
+```
+
+**When to flag:** If any token in top-10 has enrichment >3x but core coverage <30%, add a warning note.
 
 6. **Weapon Outlier Detection**: If a single weapon has >2x the examples of the second weapon, this is a **weapon-dominated feature**:
    - Use **splatoon3-meta** skill to look up the weapon's kit (sub + special)

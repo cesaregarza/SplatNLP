@@ -34,12 +34,62 @@ Use this skill after:
 | `conditional_interactions` | How a third token modulates interactions |
 | `split_half` | Validation: correlation across random splits |
 | `shuffle_null` | Validation: null distribution via shuffling |
-| `weapon_sweep` | Test weapon swaps on activation |
-| `kit_sweep` | Analyze activation by sub weapon and special weapon |
+| `weapon_sweep` | ⚠️ CORRELATIONAL: Analyze activation by weapon (observational grouping) |
+| `kit_sweep` | ⚠️ CORRELATIONAL: Analyze activation by sub/special weapon |
 
 ## Usage
 
-### Command Line
+### Subcommand Interface (Recommended)
+
+Run experiments directly without writing JSON spec files:
+
+```bash
+cd /root/dev/SplatNLP
+
+# 1D family sweep
+poetry run python -m splatnlp.mechinterp.cli.runner_cli family-sweep \
+    --feature-id 6235 --family quick_respawn --model ultra
+
+# 2D heatmap
+poetry run python -m splatnlp.mechinterp.cli.runner_cli heatmap \
+    --feature-id 6235 --family-x special_charge_up --family-y quick_respawn
+
+# Weapon sweep (correlational)
+poetry run python -m splatnlp.mechinterp.cli.runner_cli weapon-sweep \
+    --feature-id 6235 --model ultra --top-k 20
+
+# Kit sweep (correlational)
+poetry run python -m splatnlp.mechinterp.cli.runner_cli kit-sweep \
+    --feature-id 6235 --model ultra --analyze-combinations
+
+# Binary ability presence analysis
+poetry run python -m splatnlp.mechinterp.cli.runner_cli binary \
+    --feature-id 6235 --model ultra
+
+# Core coverage analysis
+poetry run python -m splatnlp.mechinterp.cli.runner_cli coverage \
+    --feature-id 6235 --tokens comeback,stealth_jump,respawn_punisher
+
+# Token influence analysis
+poetry run python -m splatnlp.mechinterp.cli.runner_cli token-influence \
+    --feature-id 6235 --model ultra
+```
+
+### Subcommand Reference
+
+| Subcommand | Required Args | Optional Args |
+|------------|---------------|---------------|
+| `family-sweep` | `--feature-id`, `--family` | `--model`, `--rungs` |
+| `heatmap` | `--feature-id`, `--family-x`, `--family-y` | `--model`, `--rungs-x`, `--rungs-y` |
+| `weapon-sweep` | `--feature-id` | `--model`, `--top-k`, `--min-examples` |
+| `kit-sweep` | `--feature-id` | `--model`, `--top-k`, `--analyze-combinations` |
+| `binary` | `--feature-id` | `--model`, `--tokens` |
+| `coverage` | `--feature-id` | `--model`, `--tokens`, `--threshold` |
+| `token-influence` | `--feature-id` | `--model`, `--high-percentile` |
+
+### JSON Spec Mode (Legacy/Advanced)
+
+For complex experiments or batch processing, use JSON spec files:
 
 ```bash
 cd /root/dev/SplatNLP
@@ -61,6 +111,15 @@ poetry run python -m splatnlp.mechinterp.cli.runner_cli \
 # List available experiment types
 poetry run python -m splatnlp.mechinterp.cli.runner_cli --list-types
 ```
+
+### When to Use Subcommands vs JSON Specs
+
+| Use Subcommands When | Use JSON Specs When |
+|---------------------|---------------------|
+| Quick one-off experiments | Batch processing multiple specs |
+| Standard experiment configs | Custom dataset slices needed |
+| Interactive investigation | Need to track experiment provenance |
+| You want to avoid writing JSON | Complex constraint configurations |
 
 ### Programmatic
 
@@ -179,6 +238,15 @@ If an experiment fails:
 - Partial results may still be available in `aggregates`/`tables`
 
 ## Weapon Analysis Workflow: weapon_sweep → kit_sweep
+
+**⚠️ IMPORTANT: Both weapon_sweep and kit_sweep are CORRELATIONAL analyses.**
+
+They show which weapons/kits are *associated* with high activation through observational grouping, NOT through counterfactual intervention. High activation for a weapon may be because:
+- The weapon itself drives the feature
+- Players of that weapon tend to use certain abilities
+- The weapon's kit (sub/special) is the actual driver
+
+Always cross-reference with ability analysis to distinguish weapon effects from ability effects.
 
 When analyzing weapon-specific patterns, follow this workflow:
 

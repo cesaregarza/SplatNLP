@@ -247,6 +247,21 @@ def _import_runners() -> None:
     except ImportError:
         pass
 
+    try:
+        from splatnlp.mechinterp.experiments import binary_presence
+    except ImportError:
+        pass
+
+    try:
+        from splatnlp.mechinterp.experiments import core_coverage
+    except ImportError:
+        pass
+
+    try:
+        from splatnlp.mechinterp.experiments import decoder_output
+    except ImportError:
+        pass
+
 
 def list_available_runners() -> dict[str, list[str]]:
     """List all available experiment runners.
