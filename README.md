@@ -1,6 +1,15 @@
-# SplatNLP: End-to-End ML Pipeline for Splatoon 3 Gear Set Optimization and Analysis
+# SplatNLP — SplatGPT + SAE interpretability for Splatoon 3 gear builds
 
-This repository contains the code for SplatNLP, a project focused on applying machine learning techniques to understand and predict optimal gear loadouts in the complex environment of Nintendo's Splatoon 3.
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cesaregarza/SplatNLP/blob/main/notebooks/colab_demo.ipynb)
+
+This repository contains the code for SplatNLP, an end-to-end ML + mech-interp
+project for predicting and analyzing optimal Splatoon 3 gear loadouts.
+
+**Quick links**
+
+- Reviewer guide: `docs/START_HERE.md`
+- Runnable demo: `notebooks/colab_demo.ipynb`
+- Canonical blog posts: `cegarza.com` (see below)
 
 ## Overview
 
@@ -12,18 +21,21 @@ This project tackles this challenge through an end-to-end machine learning pipel
 
 The model is approximately **83 million parameters** in size and is available in two variants:
 
-- **Full:** Trained on a single H100 GPU for 62 hours, using 5 subset variants per data point (each subset created via randomized masking). This variant is extensively explored and includes a fully-trained monosemantic sparse autoencoder (SAE) with numerous labeled neurons for interpretability.
-- **Ultra:** Trained on four B200 GPUs for 35 hours, utilizing 20 subset variants per data point. Currently undergoing exploration; its monosemantic SAE is actively being trained.
+- **Full:** Trained on a single H100 GPU for 62 hours, using 5 subset variants
+  per data point (each subset created via randomized masking).
+- **Ultra:** Trained on four B200 GPUs for 35 hours, utilizing 20 subset variants
+  per data point. This is the checkpoint used by the Colab demo (along with an
+  Ultra SAE for interpretability/probing).
 
 Both variants are referenced under `saved_models/` for offline inspection when
 you have local model artifacts available (see the quickstart below).
 
 **Sparse Autoencoder (SAE):** The SAE is trained on the activations of the
-primary model to provide a sparse, monosemantic representation of the gear
-sets. This allows for interpretability and feature analysis of the model's
-predictions (see the `monosemantic_sae` module). It includes a
-`SetCompletionHook` that can run the SAE inline during inference and expose
-feature activations for analysis. This is based on Anthropic's work:
+primary model to provide a sparse feature representation for interpretability
+and analysis (see `src/splatnlp/monosemantic_sae/`). The `SetCompletionHook`
+supports a passthrough/probe mode (capture feature activations without changing
+model outputs) and a reconstruction mode (insert the SAE reconstruction, which
+can change discrete beam-search outcomes). This is based on Anthropic's work:
 [Towards Monosemanticity](https://transformer-circuits.pub/2023/monosemantic-features/index.html)
 
 ---
@@ -34,6 +46,7 @@ If you’re reviewing this repo, start with:
 
 - `docs/START_HERE.md`
 - `notebooks/colab_demo.ipynb` (Colab-friendly demo)
+  - https://colab.research.google.com/github/cesaregarza/SplatNLP/blob/main/notebooks/colab_demo.ipynb
 
 ---
 
@@ -47,7 +60,7 @@ insights, please read the canonical posts on `cegarza.com`:
 
 Note: the `docs/splatgpt-blog-part-*.txt` / `docs/splatgpt-blog-part-*-draft.md`
 files are LLM-friendly extracts/drafts for tooling; they are not the canonical
-published posts.
+published/publishable versions.
 
 ---
 ## Key Features
@@ -97,7 +110,9 @@ You can also override the host/path using `DO_SPACES_ML_ENDPOINT` and
 `DO_SPACES_ML_DIR`.
 
 1. Install dependencies (dev extras include formatting/testing):\
-   `poetry install --with dev`
+   `poetry install --with dev`\
+   (For the Doc2Vec/embeddings workflow, also install `gensim` via
+   `poetry install --with dev,embeddings`.)
 2. (Optional) Download artifacts if you don’t already have them:
 
    ```bash
@@ -172,6 +187,8 @@ You can also override the host/path using `DO_SPACES_ML_ENDPOINT` and
     ```bash
     pip install poetry # If you don't have poetry installed
     poetry install --with dev
+    # Optional (Doc2Vec/embeddings):
+    poetry install --with dev,embeddings
     ```
 4.  **(Optional) Set environment variables for serving:**
     The API server (`src/splatnlp/serve/app.py`) loads model artifacts from URLs specified by environment variables. See `src/splatnlp/serve/load_model.py` for details (e.g., `VOCAB_URL`, `MODEL_URL`, `PARAMS_URL`, `WEAPON_VOCAB_URL`, `INFO_URL` or `DO_SPACES_ML_ENDPOINT`/`DO_SPACES_ML_DIR`).

@@ -820,9 +820,7 @@ class EfficientFSDatabase:
 
                 select_cols = [
                     pl.col("activation").cast(pl.Float32),
-                    pl.col("weapon_id_token")
-                    .cast(pl.Int64)
-                    .alias("weapon_id"),
+                    pl.col("weapon_id_token").cast(pl.Int64).alias("weapon_id"),
                 ]
                 if include_abilities:
                     select_cols.append(

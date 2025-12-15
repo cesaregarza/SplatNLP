@@ -93,8 +93,8 @@ logger.info("Importing dashboard components...")
 from splatnlp.dashboard.components import (
     ablation_component,
     activation_hist_component,
-    correlations_component,
     cluster_map_component,
+    correlations_component,
     example_features_component,
     feature_comparison_component,
     feature_influence_component,
@@ -122,7 +122,9 @@ app.layout = dbc.Container(
         dcc.Location(id="url", refresh=False),
         dcc.Store(id="page-load-trigger", storage_type="memory"),
         dcc.Store(id="feature-labels-updated", storage_type="memory", data=0),
-        dcc.Store(id="active-tab-store", storage_type="memory", data="tab-overview"),
+        dcc.Store(
+            id="active-tab-store", storage_type="memory", data="tab-overview"
+        ),
         dbc.Row(
             [
                 dbc.Col(
@@ -424,6 +426,7 @@ def handle_label_actions(
 ):
     """Handle save and delete actions for feature labels."""
     from dash import callback_context
+
     from splatnlp.dashboard.components.feature_labels import FeatureLabel
 
     if update_counter is None:

@@ -1,7 +1,16 @@
 from typing import List, Optional, Tuple
 
 import dash_bootstrap_components as dbc
-from dash import Input, Output, State, callback, callback_context, dcc, html, no_update
+from dash import (
+    Input,
+    Output,
+    State,
+    callback,
+    callback_context,
+    dcc,
+    html,
+    no_update,
+)
 
 # DASHBOARD_CONTEXT will be populated by the main script in app.py
 
@@ -44,7 +53,9 @@ def populate_feature_options(
 
     # Check what triggered this callback
     ctx = callback_context
-    triggered_id = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else None
+    triggered_id = (
+        ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else None
+    )
 
     # If triggered by label update, only refresh options, don't change the value
     labels_only_update = triggered_id == "feature-labels-updated"

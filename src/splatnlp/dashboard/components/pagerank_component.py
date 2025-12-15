@@ -17,30 +17,63 @@ logger = logging.getLogger(__name__)
 
 def _make_chart_row(row_id: str, title: str, description: str) -> dbc.Row:
     """Create a row of 3 charts for a PageRank analysis type."""
-    return html.Div([
-        html.H5(title, className="mb-2 mt-3"),
-        html.P(description, className="text-muted small mb-2"),
-        dbc.Row(
-            [
-                dbc.Col([
-                    html.H6("Raw Tokens", className="mb-1 text-center"),
-                    html.P("Weight = 1", className="text-muted small text-center mb-1"),
-                    dcc.Graph(id=f"pagerank-chart-{row_id}-raw", style={"height": "280px"}),
-                ], md=4),
-                dbc.Col([
-                    html.H6("Weight by AP", className="mb-1 text-center"),
-                    html.P("Weight = AP", className="text-muted small text-center mb-1"),
-                    dcc.Graph(id=f"pagerank-chart-{row_id}-ap", style={"height": "280px"}),
-                ], md=4),
-                dbc.Col([
-                    html.H6("Family Mode", className="mb-1 text-center"),
-                    html.P("Collapsed, max AP", className="text-muted small text-center mb-1"),
-                    dcc.Graph(id=f"pagerank-chart-{row_id}-family", style={"height": "280px"}),
-                ], md=4),
-            ],
-            className="mb-3",
-        ),
-    ])
+    return html.Div(
+        [
+            html.H5(title, className="mb-2 mt-3"),
+            html.P(description, className="text-muted small mb-2"),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            html.H6("Raw Tokens", className="mb-1 text-center"),
+                            html.P(
+                                "Weight = 1",
+                                className="text-muted small text-center mb-1",
+                            ),
+                            dcc.Graph(
+                                id=f"pagerank-chart-{row_id}-raw",
+                                style={"height": "280px"},
+                            ),
+                        ],
+                        md=4,
+                    ),
+                    dbc.Col(
+                        [
+                            html.H6(
+                                "Weight by AP", className="mb-1 text-center"
+                            ),
+                            html.P(
+                                "Weight = AP",
+                                className="text-muted small text-center mb-1",
+                            ),
+                            dcc.Graph(
+                                id=f"pagerank-chart-{row_id}-ap",
+                                style={"height": "280px"},
+                            ),
+                        ],
+                        md=4,
+                    ),
+                    dbc.Col(
+                        [
+                            html.H6(
+                                "Family Mode", className="mb-1 text-center"
+                            ),
+                            html.P(
+                                "Collapsed, max AP",
+                                className="text-muted small text-center mb-1",
+                            ),
+                            dcc.Graph(
+                                id=f"pagerank-chart-{row_id}-family",
+                                style={"height": "280px"},
+                            ),
+                        ],
+                        md=4,
+                    ),
+                ],
+                className="mb-3",
+            ),
+        ]
+    )
 
 
 def _make_grid_tab(tab_id: str, label: str, columns: list) -> dbc.Tab:
@@ -53,7 +86,11 @@ def _make_grid_tab(tab_id: str, label: str, columns: list) -> dbc.Tab:
                 id=f"pagerank-grid-{tab_id.replace('tab-pr-', '')}",
                 rowData=[],
                 columnDefs=columns,
-                defaultColDef={"sortable": True, "resizable": True, "filter": True},
+                defaultColDef={
+                    "sortable": True,
+                    "resizable": True,
+                    "filter": True,
+                },
                 dashGridOptions={"domLayout": "normal"},
                 style={"height": "250px", "width": "100%"},
                 className="mt-2",
@@ -95,35 +132,54 @@ pagerank_component = html.Div(
         # Run button and copy
         dbc.Row(
             [
-                dbc.Col([
-                    dbc.Button(
-                        "Run PageRank (All Modes)",
-                        id="run-pagerank-btn",
-                        color="primary",
-                        size="lg",
-                    ),
-                ], md=3),
-                dbc.Col([
-                    html.Div([
-                        dcc.Clipboard(
-                            target_id="pagerank-markdown-content",
-                            title="Copy to clipboard (Markdown)",
-                            className="btn btn-outline-secondary",
-                            style={"fontSize": "1.2rem"},
+                dbc.Col(
+                    [
+                        dbc.Button(
+                            "Run PageRank (All Modes)",
+                            id="run-pagerank-btn",
+                            color="primary",
+                            size="lg",
                         ),
-                        html.Small("Copy MD", className="d-block text-muted mt-1"),
-                    ], className="text-center"),
-                ], md=2),
-                dbc.Col([
-                    dbc.Checkbox(
-                        id="pagerank-truncate-checkbox",
-                        label="Truncate MD (15 rows)",
-                        value=False,
-                    ),
-                ], md=2, className="d-flex align-items-center"),
-                dbc.Col([
-                    html.Div(id="pagerank-status", className="mb-0"),
-                ], md=7),
+                    ],
+                    md=3,
+                ),
+                dbc.Col(
+                    [
+                        html.Div(
+                            [
+                                dcc.Clipboard(
+                                    target_id="pagerank-markdown-content",
+                                    title="Copy to clipboard (Markdown)",
+                                    className="btn btn-outline-secondary",
+                                    style={"fontSize": "1.2rem"},
+                                ),
+                                html.Small(
+                                    "Copy MD",
+                                    className="d-block text-muted mt-1",
+                                ),
+                            ],
+                            className="text-center",
+                        ),
+                    ],
+                    md=2,
+                ),
+                dbc.Col(
+                    [
+                        dbc.Checkbox(
+                            id="pagerank-truncate-checkbox",
+                            label="Truncate MD (15 rows)",
+                            value=False,
+                        ),
+                    ],
+                    md=2,
+                    className="d-flex align-items-center",
+                ),
+                dbc.Col(
+                    [
+                        html.Div(id="pagerank-status", className="mb-0"),
+                    ],
+                    md=7,
+                ),
             ],
             className="mb-4 p-3 border rounded bg-light align-items-center",
         ),
@@ -135,32 +191,78 @@ pagerank_component = html.Div(
             type="default",
             children=[
                 # Row 1: Ability-only
-                _make_chart_row("ability", "Ability-Only Co-occurrence", "Pure ability token analysis"),
+                _make_chart_row(
+                    "ability",
+                    "Ability-Only Co-occurrence",
+                    "Pure ability token analysis",
+                ),
                 # Row 2: By Weapon
-                _make_chart_row("weapon", "By Weapon", "PageRank on Weapon + Ability compound tokens"),
+                _make_chart_row(
+                    "weapon",
+                    "By Weapon",
+                    "PageRank on Weapon + Ability compound tokens",
+                ),
                 # Row 3: By Sub (rollup)
-                _make_chart_row("sub", "By Sub Weapon (rollup)", "Weapon scores rolled up by sub, normalized by 1/n"),
+                _make_chart_row(
+                    "sub",
+                    "By Sub Weapon (rollup)",
+                    "Weapon scores rolled up by sub, normalized by 1/n",
+                ),
                 # Row 4: By Special (rollup)
-                _make_chart_row("special", "By Special (rollup)", "Weapon scores rolled up by special, normalized by 1/n"),
+                _make_chart_row(
+                    "special",
+                    "By Special (rollup)",
+                    "Weapon scores rolled up by special, normalized by 1/n",
+                ),
                 # Tables with tabs
                 dbc.Tabs(
                     [
                         # Ability tabs
-                        _make_grid_tab("tab-pr-ability-raw", "Ability Raw", ABILITY_COLS),
-                        _make_grid_tab("tab-pr-ability-ap", "Ability AP", ABILITY_COLS),
-                        _make_grid_tab("tab-pr-ability-family", "Ability Family", FAMILY_COLS),
+                        _make_grid_tab(
+                            "tab-pr-ability-raw", "Ability Raw", ABILITY_COLS
+                        ),
+                        _make_grid_tab(
+                            "tab-pr-ability-ap", "Ability AP", ABILITY_COLS
+                        ),
+                        _make_grid_tab(
+                            "tab-pr-ability-family",
+                            "Ability Family",
+                            FAMILY_COLS,
+                        ),
                         # Weapon tabs
-                        _make_grid_tab("tab-pr-weapon-raw", "Weapon Raw", COMPOUND_COLS),
-                        _make_grid_tab("tab-pr-weapon-ap", "Weapon AP", COMPOUND_COLS),
-                        _make_grid_tab("tab-pr-weapon-family", "Weapon Family", COMPOUND_COLS),
+                        _make_grid_tab(
+                            "tab-pr-weapon-raw", "Weapon Raw", COMPOUND_COLS
+                        ),
+                        _make_grid_tab(
+                            "tab-pr-weapon-ap", "Weapon AP", COMPOUND_COLS
+                        ),
+                        _make_grid_tab(
+                            "tab-pr-weapon-family",
+                            "Weapon Family",
+                            COMPOUND_COLS,
+                        ),
                         # Sub tabs
-                        _make_grid_tab("tab-pr-sub-raw", "Sub Raw", COMPOUND_COLS),
-                        _make_grid_tab("tab-pr-sub-ap", "Sub AP", COMPOUND_COLS),
-                        _make_grid_tab("tab-pr-sub-family", "Sub Family", COMPOUND_COLS),
+                        _make_grid_tab(
+                            "tab-pr-sub-raw", "Sub Raw", COMPOUND_COLS
+                        ),
+                        _make_grid_tab(
+                            "tab-pr-sub-ap", "Sub AP", COMPOUND_COLS
+                        ),
+                        _make_grid_tab(
+                            "tab-pr-sub-family", "Sub Family", COMPOUND_COLS
+                        ),
                         # Special tabs
-                        _make_grid_tab("tab-pr-special-raw", "Special Raw", COMPOUND_COLS),
-                        _make_grid_tab("tab-pr-special-ap", "Special AP", COMPOUND_COLS),
-                        _make_grid_tab("tab-pr-special-family", "Special Family", COMPOUND_COLS),
+                        _make_grid_tab(
+                            "tab-pr-special-raw", "Special Raw", COMPOUND_COLS
+                        ),
+                        _make_grid_tab(
+                            "tab-pr-special-ap", "Special AP", COMPOUND_COLS
+                        ),
+                        _make_grid_tab(
+                            "tab-pr-special-family",
+                            "Special Family",
+                            COMPOUND_COLS,
+                        ),
                     ],
                     id="pagerank-tabs",
                     active_tab="tab-pr-ability-raw",
@@ -183,6 +285,7 @@ def get_family_type(family_name: str) -> str:
 def get_compound_token_type(token: str) -> str:
     """Determine the type of a compound token."""
     import re
+
     for main_only in MAIN_ONLY_ABILITIES:
         if f"_{main_only}" in token or token.endswith(main_only):
             return "Main Only"
@@ -191,7 +294,9 @@ def get_compound_token_type(token: str) -> str:
     return "Compound"
 
 
-def parse_compound_token(token: str, category_to_name: dict = None) -> tuple[str, str]:
+def parse_compound_token(
+    token: str, category_to_name: dict = None
+) -> tuple[str, str]:
     """Parse a compound token into (category_name, ability_name).
 
     Tokens are in format: CategoryName_ability_name_XX
@@ -207,14 +312,19 @@ def parse_compound_token(token: str, category_to_name: dict = None) -> tuple[str
 
     for category_name in category_to_name.values():
         # Clean category name for matching (same as when building tokens)
-        cleaned = category_name.replace(" ", "_").replace("-", "_").replace(".", "").replace("'", "")
+        cleaned = (
+            category_name.replace(" ", "_")
+            .replace("-", "_")
+            .replace(".", "")
+            .replace("'", "")
+        )
         if token.startswith(cleaned + "_"):
             if len(cleaned) > best_length:
                 best_match = category_name
                 best_length = len(cleaned)
 
     if best_match:
-        ability_part = token[best_length + 1:]
+        ability_part = token[best_length + 1 :]
         return best_match, ability_part
 
     return "", token
@@ -258,22 +368,26 @@ def format_pagerank_markdown(
 
         for mode_label, top_tokens in section_results:
             if is_compound and cat_mapping:
-                lines.extend([
-                    f"### {mode_label}",
-                    "",
-                    "| Rank | Category | Ability | Score |",
-                    "|------|----------|---------|-------|",
-                ])
+                lines.extend(
+                    [
+                        f"### {mode_label}",
+                        "",
+                        "| Rank | Category | Ability | Score |",
+                        "|------|----------|---------|-------|",
+                    ]
+                )
                 for i, (token, _, score) in enumerate(top_tokens[:n_rows], 1):
                     cat, ability = parse_compound_token(token, cat_mapping)
                     lines.append(f"| {i} | {cat} | {ability} | {score:.6f} |")
             else:
-                lines.extend([
-                    f"### {mode_label}",
-                    "",
-                    "| Rank | Token | Score |",
-                    "|------|-------|-------|",
-                ])
+                lines.extend(
+                    [
+                        f"### {mode_label}",
+                        "",
+                        "| Rank | Token | Score |",
+                        "|------|-------|-------|",
+                    ]
+                )
                 for i, (token, _, score) in enumerate(top_tokens[:n_rows], 1):
                     lines.append(f"| {i} | {token} | {score:.6f} |")
             lines.append("")
@@ -285,7 +399,9 @@ def create_bar_chart(top_tokens: list, title: str, color: str) -> go.Figure:
     """Create a bar chart for PageRank results."""
     if not top_tokens:
         fig = go.Figure()
-        fig.update_layout(title="No data", xaxis={"visible": False}, yaxis={"visible": False})
+        fig.update_layout(
+            title="No data", xaxis={"visible": False}, yaxis={"visible": False}
+        )
         return fig
 
     # Truncate long labels
@@ -331,7 +447,12 @@ def build_weapon_compound_analysis(
             continue
 
         # Clean weapon name for token
-        weapon_prefix = weapon_name.replace(" ", "_").replace("-", "_").replace(".", "").replace("'", "")
+        weapon_prefix = (
+            weapon_name.replace(" ", "_")
+            .replace("-", "_")
+            .replace(".", "")
+            .replace("'", "")
+        )
 
         for ability_id in row["ability_input_tokens"]:
             ability_name = inv_vocab.get(ability_id, f"ability_{ability_id}")
@@ -340,7 +461,9 @@ def build_weapon_compound_analysis(
                 compound_token_set.add(compound_token)
 
     # Build vocab
-    compound_vocab = {token: idx for idx, token in enumerate(sorted(compound_token_set))}
+    compound_vocab = {
+        token: idx for idx, token in enumerate(sorted(compound_token_set))
+    }
     compound_inv_vocab = {idx: token for token, idx in compound_vocab.items()}
 
     # Second pass: build examples (no normalization for weapons - each is unique)
@@ -351,7 +474,12 @@ def build_weapon_compound_analysis(
         if not weapon_name:
             continue
 
-        weapon_prefix = weapon_name.replace(" ", "_").replace("-", "_").replace(".", "").replace("'", "")
+        weapon_prefix = (
+            weapon_name.replace(" ", "_")
+            .replace("-", "_")
+            .replace(".", "")
+            .replace("'", "")
+        )
 
         compound_ids = []
         for ability_id in row["ability_input_tokens"]:
@@ -362,11 +490,13 @@ def build_weapon_compound_analysis(
                     compound_ids.append(compound_vocab[compound_token])
 
         if compound_ids:
-            examples_with_compounds.append({
-                "tokens": compound_ids,
-                "activation": row["activation"],
-                "weapon_id": weapon_id,
-            })
+            examples_with_compounds.append(
+                {
+                    "tokens": compound_ids,
+                    "activation": row["activation"],
+                    "weapon_id": weapon_id,
+                }
+            )
 
     return compound_vocab, compound_inv_vocab, examples_with_compounds
 
@@ -389,7 +519,12 @@ def rollup_weapon_scores(
     # Pre-build cleaned weapon name lookup (find longest match)
     cleaned_weapons = []
     for weapon_id, weapon_name in weapon_to_name.items():
-        cleaned = weapon_name.replace(" ", "_").replace("-", "_").replace(".", "").replace("'", "")
+        cleaned = (
+            weapon_name.replace(" ", "_")
+            .replace("-", "_")
+            .replace(".", "")
+            .replace("'", "")
+        )
         cleaned_weapons.append((cleaned, weapon_id, len(cleaned)))
     # Sort by length descending so we match longest prefix first
     cleaned_weapons.sort(key=lambda x: x[2], reverse=True)
@@ -407,7 +542,7 @@ def rollup_weapon_scores(
         for cleaned, weapon_id, _ in cleaned_weapons:
             if weapon_token.startswith(cleaned + "_"):
                 matched_weapon = weapon_id
-                ability_part = weapon_token[len(cleaned) + 1:]
+                ability_part = weapon_token[len(cleaned) + 1 :]
                 break  # Already sorted by length, so first match is longest
 
         if matched_weapon is None or ability_part is None:
@@ -419,7 +554,12 @@ def rollup_weapon_scores(
             continue
 
         # Clean category name
-        cat_prefix = category.replace(" ", "_").replace("-", "_").replace(".", "").replace("'", "")
+        cat_prefix = (
+            category.replace(" ", "_")
+            .replace("-", "_")
+            .replace(".", "")
+            .replace("'", "")
+        )
 
         # Normalize by 1/n weapons in this category
         n_weapons = category_counts.get(category, 1)
@@ -430,7 +570,9 @@ def rollup_weapon_scores(
         category_scores[category_token] += normalized_score
 
     # Sort by score descending
-    sorted_results = sorted(category_scores.items(), key=lambda x: x[1], reverse=True)
+    sorted_results = sorted(
+        category_scores.items(), key=lambda x: x[1], reverse=True
+    )
 
     # Return in same format as PageRank results: (token, idx, score)
     return [(token, 0, score) for token, score in sorted_results[:30]]
@@ -489,7 +631,9 @@ def run_pagerank_analysis(n_clicks, feature_id, active_tab, truncate_mode):
     from splatnlp.dashboard.utils.pagerank import PageRankAnalyzer
 
     empty_fig = go.Figure()
-    empty_fig.update_layout(title="No data", xaxis={"visible": False}, yaxis={"visible": False})
+    empty_fig.update_layout(
+        title="No data", xaxis={"visible": False}, yaxis={"visible": False}
+    )
 
     # 1 status + 12 charts + 12 grids + 2 (error, markdown) = 27 outputs
     empty_result = tuple(
@@ -554,7 +698,9 @@ def run_pagerank_analysis(n_clicks, feature_id, active_tab, truncate_mode):
 
     try:
         logger.info(f"PageRank: Getting activations for feature {feature_id}")
-        examples_df = db.get_all_feature_activations_for_pagerank(feature_id, include_negative=True)
+        examples_df = db.get_all_feature_activations_for_pagerank(
+            feature_id, include_negative=True
+        )
 
         if len(examples_df) == 0:
             return tuple(
@@ -569,28 +715,42 @@ def run_pagerank_analysis(n_clicks, feature_id, active_tab, truncate_mode):
         logger.info(f"PageRank: Building graphs from {n_examples} examples")
 
         modes = ["raw", "ap_weighted", "family"]
-        mode_labels = {"raw": "Raw Tokens", "ap_weighted": "Weight by AP", "family": "Family Mode"}
-        colors = {"raw": "steelblue", "ap_weighted": "forestgreen", "family": "darkorange"}
+        mode_labels = {
+            "raw": "Raw Tokens",
+            "ap_weighted": "Weight by AP",
+            "family": "Family Mode",
+        }
+        colors = {
+            "raw": "steelblue",
+            "ap_weighted": "forestgreen",
+            "family": "darkorange",
+        }
 
         # ========== Ability-only analysis ==========
         ability_results = {}
         for mode in modes:
             analyzer = PageRankAnalyzer(vocab, inv_vocab, mode=mode)
             for row in examples_list:
-                analyzer.add_example(row["ability_input_tokens"], row["activation"])
+                analyzer.add_example(
+                    row["ability_input_tokens"], row["activation"]
+                )
             scores = analyzer.compute_pagerank()
             top_tokens = analyzer.get_top_tokens(scores, top_k=30)
             ability_results[mode] = (mode_labels[mode], top_tokens, analyzer)
 
         # ========== Weapon compound analysis ==========
-        weapon_vocab, weapon_inv_vocab, weapon_examples = build_weapon_compound_analysis(
-            examples_list, inv_vocab, weapon_to_name
+        weapon_vocab, weapon_inv_vocab, weapon_examples = (
+            build_weapon_compound_analysis(
+                examples_list, inv_vocab, weapon_to_name
+            )
         )
 
         weapon_results = {}
         weapon_all_scores = {}  # Store ALL scores for rollup (not just top 30)
         for mode in modes:
-            analyzer = PageRankAnalyzer(weapon_vocab, weapon_inv_vocab, mode=mode)
+            analyzer = PageRankAnalyzer(
+                weapon_vocab, weapon_inv_vocab, mode=mode
+            )
             for row in weapon_examples:
                 analyzer.add_example(row["tokens"], row["activation"])
             scores = analyzer.compute_pagerank()
@@ -605,36 +765,71 @@ def run_pagerank_analysis(n_clicks, feature_id, active_tab, truncate_mode):
         sub_results = {}
         for mode in modes:
             all_weapon_tokens = weapon_all_scores[mode]
-            rolled_up = rollup_weapon_scores(all_weapon_tokens, weapon_to_name, weapon_to_sub, sub_counts)
+            rolled_up = rollup_weapon_scores(
+                all_weapon_tokens, weapon_to_name, weapon_to_sub, sub_counts
+            )
             sub_results[mode] = (mode_labels[mode], rolled_up, None)
 
         # Special rollup (using ALL weapon scores)
         special_results = {}
         for mode in modes:
             all_weapon_tokens = weapon_all_scores[mode]
-            rolled_up = rollup_weapon_scores(all_weapon_tokens, weapon_to_name, weapon_to_special, special_counts)
+            rolled_up = rollup_weapon_scores(
+                all_weapon_tokens,
+                weapon_to_name,
+                weapon_to_special,
+                special_counts,
+            )
             special_results[mode] = (mode_labels[mode], rolled_up, None)
 
         # ========== Build charts ==========
         # Ability charts
-        fig_ability_raw = create_bar_chart(ability_results["raw"][1], "Ability Raw", colors["raw"])
-        fig_ability_ap = create_bar_chart(ability_results["ap_weighted"][1], "Ability AP", colors["ap_weighted"])
-        fig_ability_family = create_bar_chart(ability_results["family"][1], "Ability Family", colors["family"])
+        fig_ability_raw = create_bar_chart(
+            ability_results["raw"][1], "Ability Raw", colors["raw"]
+        )
+        fig_ability_ap = create_bar_chart(
+            ability_results["ap_weighted"][1],
+            "Ability AP",
+            colors["ap_weighted"],
+        )
+        fig_ability_family = create_bar_chart(
+            ability_results["family"][1], "Ability Family", colors["family"]
+        )
 
         # Weapon charts
-        fig_weapon_raw = create_bar_chart(weapon_results["raw"][1], "Weapon Raw", colors["raw"])
-        fig_weapon_ap = create_bar_chart(weapon_results["ap_weighted"][1], "Weapon AP", colors["ap_weighted"])
-        fig_weapon_family = create_bar_chart(weapon_results["family"][1], "Weapon Family", colors["family"])
+        fig_weapon_raw = create_bar_chart(
+            weapon_results["raw"][1], "Weapon Raw", colors["raw"]
+        )
+        fig_weapon_ap = create_bar_chart(
+            weapon_results["ap_weighted"][1], "Weapon AP", colors["ap_weighted"]
+        )
+        fig_weapon_family = create_bar_chart(
+            weapon_results["family"][1], "Weapon Family", colors["family"]
+        )
 
         # Sub charts
-        fig_sub_raw = create_bar_chart(sub_results["raw"][1], "Sub Raw", colors["raw"])
-        fig_sub_ap = create_bar_chart(sub_results["ap_weighted"][1], "Sub AP", colors["ap_weighted"])
-        fig_sub_family = create_bar_chart(sub_results["family"][1], "Sub Family", colors["family"])
+        fig_sub_raw = create_bar_chart(
+            sub_results["raw"][1], "Sub Raw", colors["raw"]
+        )
+        fig_sub_ap = create_bar_chart(
+            sub_results["ap_weighted"][1], "Sub AP", colors["ap_weighted"]
+        )
+        fig_sub_family = create_bar_chart(
+            sub_results["family"][1], "Sub Family", colors["family"]
+        )
 
         # Special charts
-        fig_special_raw = create_bar_chart(special_results["raw"][1], "Special Raw", colors["raw"])
-        fig_special_ap = create_bar_chart(special_results["ap_weighted"][1], "Special AP", colors["ap_weighted"])
-        fig_special_family = create_bar_chart(special_results["family"][1], "Special Family", colors["family"])
+        fig_special_raw = create_bar_chart(
+            special_results["raw"][1], "Special Raw", colors["raw"]
+        )
+        fig_special_ap = create_bar_chart(
+            special_results["ap_weighted"][1],
+            "Special AP",
+            colors["ap_weighted"],
+        )
+        fig_special_family = create_bar_chart(
+            special_results["family"][1], "Special Family", colors["family"]
+        )
 
         # ========== Build grids ==========
         def build_ability_grid(results_tuple):
@@ -642,24 +837,28 @@ def run_pagerank_analysis(n_clicks, feature_id, active_tab, truncate_mode):
             label, top_tokens, analyzer = results_tuple
             for i, (token, token_id, score) in enumerate(top_tokens, 1):
                 ap_value = analyzer._ap_cache.get(token_id, 0)
-                grid.append({
-                    "Rank": i,
-                    "Token": token,
-                    "Score": f"{score:.6f}",
-                    "AP": ap_value if ap_value > 0 else "-",
-                })
+                grid.append(
+                    {
+                        "Rank": i,
+                        "Token": token,
+                        "Score": f"{score:.6f}",
+                        "AP": ap_value if ap_value > 0 else "-",
+                    }
+                )
             return grid
 
         def build_family_grid(results_tuple):
             grid = []
             label, top_tokens, analyzer = results_tuple
             for i, (family, _, score) in enumerate(top_tokens, 1):
-                grid.append({
-                    "Rank": i,
-                    "Family": family,
-                    "Score": f"{score:.6f}",
-                    "Type": get_family_type(family),
-                })
+                grid.append(
+                    {
+                        "Rank": i,
+                        "Family": family,
+                        "Score": f"{score:.6f}",
+                        "Type": get_family_type(family),
+                    }
+                )
             return grid
 
         def build_compound_grid(results_tuple, cat_mapping):
@@ -667,13 +866,15 @@ def run_pagerank_analysis(n_clicks, feature_id, active_tab, truncate_mode):
             label, top_tokens, analyzer = results_tuple
             for i, (token, _, score) in enumerate(top_tokens, 1):
                 cat, ability = parse_compound_token(token, cat_mapping)
-                grid.append({
-                    "Rank": i,
-                    "Category": cat,
-                    "Ability": ability,
-                    "Score": f"{score:.6f}",
-                    "Type": get_compound_token_type(token),
-                })
+                grid.append(
+                    {
+                        "Rank": i,
+                        "Category": cat,
+                        "Ability": ability,
+                        "Score": f"{score:.6f}",
+                        "Type": get_compound_token_type(token),
+                    }
+                )
             return grid
 
         # Ability grids
@@ -687,28 +888,55 @@ def run_pagerank_analysis(n_clicks, feature_id, active_tab, truncate_mode):
         special_name_map = {v: v for v in weapon_to_special.values()}
 
         # Weapon grids
-        grid_weapon_raw = build_compound_grid(weapon_results["raw"], weapon_name_map)
-        grid_weapon_ap = build_compound_grid(weapon_results["ap_weighted"], weapon_name_map)
-        grid_weapon_family = build_compound_grid(weapon_results["family"], weapon_name_map)
+        grid_weapon_raw = build_compound_grid(
+            weapon_results["raw"], weapon_name_map
+        )
+        grid_weapon_ap = build_compound_grid(
+            weapon_results["ap_weighted"], weapon_name_map
+        )
+        grid_weapon_family = build_compound_grid(
+            weapon_results["family"], weapon_name_map
+        )
 
         # Sub grids
         grid_sub_raw = build_compound_grid(sub_results["raw"], sub_name_map)
-        grid_sub_ap = build_compound_grid(sub_results["ap_weighted"], sub_name_map)
-        grid_sub_family = build_compound_grid(sub_results["family"], sub_name_map)
+        grid_sub_ap = build_compound_grid(
+            sub_results["ap_weighted"], sub_name_map
+        )
+        grid_sub_family = build_compound_grid(
+            sub_results["family"], sub_name_map
+        )
 
         # Special grids
-        grid_special_raw = build_compound_grid(special_results["raw"], special_name_map)
-        grid_special_ap = build_compound_grid(special_results["ap_weighted"], special_name_map)
-        grid_special_family = build_compound_grid(special_results["family"], special_name_map)
+        grid_special_raw = build_compound_grid(
+            special_results["raw"], special_name_map
+        )
+        grid_special_ap = build_compound_grid(
+            special_results["ap_weighted"], special_name_map
+        )
+        grid_special_family = build_compound_grid(
+            special_results["family"], special_name_map
+        )
 
-        status = dbc.Alert(f"Processed {n_examples:,} examples across all analyses.", color="success")
+        status = dbc.Alert(
+            f"Processed {n_examples:,} examples across all analyses.",
+            color="success",
+        )
 
         # ========== Markdown export ==========
         markdown_data = {
-            "Ability-Only Analysis": [(mode_labels[m], ability_results[m][1]) for m in modes],
-            "Weapon Analysis": [(mode_labels[m], weapon_results[m][1]) for m in modes],
-            "Sub Weapon Analysis (rollup)": [(mode_labels[m], sub_results[m][1]) for m in modes],
-            "Special Analysis (rollup)": [(mode_labels[m], special_results[m][1]) for m in modes],
+            "Ability-Only Analysis": [
+                (mode_labels[m], ability_results[m][1]) for m in modes
+            ],
+            "Weapon Analysis": [
+                (mode_labels[m], weapon_results[m][1]) for m in modes
+            ],
+            "Sub Weapon Analysis (rollup)": [
+                (mode_labels[m], sub_results[m][1]) for m in modes
+            ],
+            "Special Analysis (rollup)": [
+                (mode_labels[m], special_results[m][1]) for m in modes
+            ],
         }
         category_mappings = {
             "weapon": weapon_name_map,
@@ -716,28 +944,48 @@ def run_pagerank_analysis(n_clicks, feature_id, active_tab, truncate_mode):
             "special": special_name_map,
         }
         markdown = format_pagerank_markdown(
-            feature_id, feature_name, n_examples, markdown_data, category_mappings,
+            feature_id,
+            feature_name,
+            n_examples,
+            markdown_data,
+            category_mappings,
             truncate=bool(truncate_mode),
         )
 
         return (
             status,
             # Ability charts
-            fig_ability_raw, fig_ability_ap, fig_ability_family,
+            fig_ability_raw,
+            fig_ability_ap,
+            fig_ability_family,
             # Weapon charts
-            fig_weapon_raw, fig_weapon_ap, fig_weapon_family,
+            fig_weapon_raw,
+            fig_weapon_ap,
+            fig_weapon_family,
             # Sub charts
-            fig_sub_raw, fig_sub_ap, fig_sub_family,
+            fig_sub_raw,
+            fig_sub_ap,
+            fig_sub_family,
             # Special charts
-            fig_special_raw, fig_special_ap, fig_special_family,
+            fig_special_raw,
+            fig_special_ap,
+            fig_special_family,
             # Ability grids
-            grid_ability_raw, grid_ability_ap, grid_ability_family,
+            grid_ability_raw,
+            grid_ability_ap,
+            grid_ability_family,
             # Weapon grids
-            grid_weapon_raw, grid_weapon_ap, grid_weapon_family,
+            grid_weapon_raw,
+            grid_weapon_ap,
+            grid_weapon_family,
             # Sub grids
-            grid_sub_raw, grid_sub_ap, grid_sub_family,
+            grid_sub_raw,
+            grid_sub_ap,
+            grid_sub_family,
             # Special grids
-            grid_special_raw, grid_special_ap, grid_special_family,
+            grid_special_raw,
+            grid_special_ap,
+            grid_special_family,
             # Error and markdown
             "",
             markdown,

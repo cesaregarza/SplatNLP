@@ -9,7 +9,6 @@ from typing import Iterable
 import requests
 from tqdm import tqdm
 
-
 DEFAULT_BASE_URL = "https://splat-nlp.nyc3.cdn.digitaloceanspaces.com"
 DEFAULT_DATASET_DIR = "dataset_v2"
 
@@ -59,7 +58,9 @@ def _resolve_defaults(args: argparse.Namespace) -> None:
         args.out_dir = str(Path("saved_models") / args.dataset_dir)
 
 
-def _iter_selected_artifacts(args: argparse.Namespace) -> Iterable[ArtifactSpec]:
+def _iter_selected_artifacts(
+    args: argparse.Namespace,
+) -> Iterable[ArtifactSpec]:
     selected: list[ArtifactSpec] = list(CORE_ARTIFACTS)
 
     if args.include_ultra or args.include_ultra_sae:

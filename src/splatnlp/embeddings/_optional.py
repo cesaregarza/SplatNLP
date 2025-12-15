@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-
 if TYPE_CHECKING:  # pragma: no cover
     from gensim.models import Doc2Vec
     from gensim.models.doc2vec import TaggedDocument
@@ -30,4 +29,3 @@ def require_doc2vec_and_tagged_document():
     except ImportError as exc:  # pragma: no cover
         raise ImportError(_MISSING_GENSIM_MSG) from exc
     return Doc2Vec, TaggedDocument
-

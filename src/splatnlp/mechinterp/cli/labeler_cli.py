@@ -239,7 +239,9 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     # next command
-    next_parser = subparsers.add_parser("next", help="Get next feature to label")
+    next_parser = subparsers.add_parser(
+        "next", help="Get next feature to label"
+    )
     next_parser.add_argument(
         "--model",
         type=str,
@@ -256,19 +258,22 @@ def main():
     # label command
     label_parser = subparsers.add_parser("label", help="Set a feature label")
     label_parser.add_argument(
-        "--feature-id", "-f",
+        "--feature-id",
+        "-f",
         type=int,
         required=True,
         help="Feature ID to label",
     )
     label_parser.add_argument(
-        "--name", "-n",
+        "--name",
+        "-n",
         type=str,
         required=True,
         help="Label name",
     )
     label_parser.add_argument(
-        "--category", "-c",
+        "--category",
+        "-c",
         type=str,
         choices=["none", "mechanical", "tactical", "strategic"],
         default="none",
@@ -280,7 +285,8 @@ def main():
         help="Additional notes",
     )
     label_parser.add_argument(
-        "--source", "-s",
+        "--source",
+        "-s",
         type=str,
         default="dashboard",
         help="Label source (e.g., 'dashboard', 'claude code', 'research')",
@@ -295,12 +301,14 @@ def main():
     # skip command
     skip_parser = subparsers.add_parser("skip", help="Skip a feature")
     skip_parser.add_argument(
-        "--feature-id", "-f",
+        "--feature-id",
+        "-f",
         type=int,
         help="Feature ID to skip (defaults to next in queue)",
     )
     skip_parser.add_argument(
-        "--reason", "-r",
+        "--reason",
+        "-r",
         type=str,
         help="Reason for skipping",
     )
@@ -319,13 +327,15 @@ def main():
         help="Comma-separated feature IDs",
     )
     add_parser.add_argument(
-        "--priority", "-p",
+        "--priority",
+        "-p",
         type=float,
         default=0.5,
         help="Priority (0-1)",
     )
     add_parser.add_argument(
-        "--reason", "-r",
+        "--reason",
+        "-r",
         type=str,
         help="Reason for adding",
     )
@@ -337,15 +347,19 @@ def main():
     )
 
     # similar command
-    similar_parser = subparsers.add_parser("similar", help="Find similar features")
+    similar_parser = subparsers.add_parser(
+        "similar", help="Find similar features"
+    )
     similar_parser.add_argument(
-        "--feature-id", "-f",
+        "--feature-id",
+        "-f",
         type=int,
         required=True,
         help="Seed feature ID",
     )
     similar_parser.add_argument(
-        "--top-k", "-k",
+        "--top-k",
+        "-k",
         type=int,
         default=5,
         help="Number of similar features to show",
@@ -358,7 +372,9 @@ def main():
     )
 
     # status command
-    status_parser = subparsers.add_parser("status", help="Show labeling progress")
+    status_parser = subparsers.add_parser(
+        "status", help="Show labeling progress"
+    )
     status_parser.add_argument(
         "--model",
         type=str,
@@ -367,7 +383,9 @@ def main():
     )
 
     # sync command
-    sync_parser = subparsers.add_parser("sync", help="Sync labels from all sources")
+    sync_parser = subparsers.add_parser(
+        "sync", help="Sync labels from all sources"
+    )
     sync_parser.add_argument(
         "--model",
         type=str,
@@ -378,7 +396,8 @@ def main():
     # export command
     export_parser = subparsers.add_parser("export", help="Export labels to CSV")
     export_parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         type=str,
         default="labels.csv",
         help="Output CSV path",
@@ -391,7 +410,9 @@ def main():
     )
 
     # build-queue command
-    build_parser = subparsers.add_parser("build-queue", help="Build prioritized queue")
+    build_parser = subparsers.add_parser(
+        "build-queue", help="Build prioritized queue"
+    )
     build_parser.add_argument(
         "--method",
         type=str,

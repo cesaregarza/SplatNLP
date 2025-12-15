@@ -1,8 +1,10 @@
 """Client for the activation server.
 
 Provides transparent fallback to direct database access if server is unavailable.
+Uses Arrow IPC format when the server is available.
 """
 
+import io
 import logging
 import os
 from typing import Any
@@ -100,10 +102,11 @@ class ServerBackedDatabase:
         """Get activation data for a feature as a Polars DataFrame.
 
         This is the main method used by experiment runners.
+        Uses Arrow IPC format instead of JSON when the server is available.
         """
         if self._check_server():
             try:
-                # Use longer timeout for large datasets (100k+ rows can be 10+ MB JSON)
+                # Use Arrow IPC format for fast binary transfer
                 with httpx.Client(timeout=120.0) as client:
                     params = {}
                     if limit is not None:
@@ -114,19 +117,26 @@ class ServerBackedDatabase:
                         params["include_abilities"] = "false"
 
                     resp = client.get(
-                        f"{self.server_url}/activations/{feature_id}",
+                        f"{self.server_url}/activations/{feature_id}/arrow",
                         params=params,
                     )
                     resp.raise_for_status()
-                    data = resp.json()
+
+                    # Parse Arrow IPC directly to DataFrame
+                    df = pl.read_ipc(io.BytesIO(resp.content))
+
+                    # Log metadata from headers
+                    n_rows = resp.headers.get("X-Num-Rows", "?")
+                    load_time = resp.headers.get("X-Load-Time-Ms", "?")
+                    cache_hit = resp.headers.get("X-Cache-Hit", "false")
                     logger.debug(
-                        f"Fetched {data['n_rows']} rows from server "
-                        f"in {data['load_time_ms']:.1f}ms"
+                        f"Fetched {n_rows} rows via Arrow IPC "
+                        f"(load={load_time}ms, cache_hit={cache_hit})"
                     )
-                    # Convert back to DataFrame
-                    return pl.DataFrame(data["data"])
+                    return df
+
             except Exception as e:
-                logger.warning(f"Server fetch failed, falling back: {e}")
+                logger.warning(f"Server Arrow fetch failed, falling back: {e}")
                 self._server_available = False
 
         return self._get_fallback_db().get_all_feature_activations_for_pagerank(

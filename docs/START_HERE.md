@@ -3,6 +3,12 @@
 This is a short “reviewer guide” to the repo: what it is, where the important
 code lives, and what you can run quickly.
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cesaregarza/SplatNLP/blob/main/notebooks/colab_demo.ipynb)
+
+If you only do one thing: open the Colab and “Run all”. It downloads pretrained
+artifacts (model + vocabs + Ultra SAE) and walks through token-space inference,
+constraint-aware reconstruction, and SAE feature readouts.
+
 ## What This Repo Demonstrates
 
 - **A set-structured prediction problem** with hard constraints (Splatoon gear
@@ -20,7 +26,7 @@ code lives, and what you can run quickly.
 The canonical, publishable blog posts live on `cegarza.com`:
 
 - Blog home: https://cegarza.com/
-- Series entry: https://cegarza.com/splatgpt-part-1/
+- Series entry: https://cegarza.com/introducing-splatgpt/
 
 Note: the `docs/splatgpt-blog-part-*.txt` / `docs/splatgpt-blog-part-*-draft.md`
 files in this repo are **LLM-friendly extracts/drafts for tooling**, not the

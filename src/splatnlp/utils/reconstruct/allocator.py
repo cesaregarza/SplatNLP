@@ -176,14 +176,10 @@ class Allocator:
                 elif candidate_info["subs_used"] < best["subs_used"]:
                     should_replace = True
                 elif candidate_info["subs_used"] == best["subs_used"]:
-                    if (
-                        candidate_info["total_penalty"]
-                        < best["total_penalty"]
-                    ):
+                    if candidate_info["total_penalty"] < best["total_penalty"]:
                         should_replace = True
                     elif (
-                        candidate_info["total_penalty"]
-                        == best["total_penalty"]
+                        candidate_info["total_penalty"] == best["total_penalty"]
                     ):
                         if (
                             candidate_info["priority_score"]
@@ -193,8 +189,7 @@ class Allocator:
                         elif (
                             candidate_info["priority_score"]
                             == best["priority_score"]
-                            and candidate_info["total_ap"]
-                            < best["total_ap"]
+                            and candidate_info["total_ap"] < best["total_ap"]
                         ):
                             should_replace = True
 

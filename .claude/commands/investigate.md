@@ -6,7 +6,29 @@ Investigate SAE features: $ARGUMENTS
 Use the **mechinterp-investigator** skill directly to investigate the feature.
 
 ### Multiple Features
-Spawn **parallel subagents** using the Task tool, one per feature:
+
+#### Step 1: Pre-warm Server Cache
+**IMPORTANT**: Before spawning parallel subagents, sequentially warm the activation server cache for all features. This prevents parallel agents from hitting simultaneous 40s DB loads.
+
+```bash
+# Check server is running
+curl -s http://127.0.0.1:8765/health | jq .
+
+# Pre-warm cache for each feature (run sequentially, ~40s each on cache miss)
+for fid in {feature_ids}; do
+  echo "Warming cache for feature $fid..."
+  curl -s "http://127.0.0.1:8765/activations/$fid/arrow" -o /dev/null \
+    -w "Feature $fid: %{time_total}s\n"
+done
+```
+
+If server is not running, start it first:
+```bash
+poetry run python -m splatnlp.mechinterp.server.activation_server --port 8765 &
+```
+
+#### Step 2: Spawn Parallel Subagents
+Once cache is warm, spawn parallel subagents:
 
 ```
 For each feature ID in the request:

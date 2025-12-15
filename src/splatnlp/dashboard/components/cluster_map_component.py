@@ -4,7 +4,6 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from dash import Input, Output, callback, dcc, html, no_update
 
-
 cluster_map_component = html.Div(
     [
         html.H4("Feature Clusters", className="mb-3"),
@@ -119,9 +118,8 @@ def update_cluster_scatter(
         className="mt-2",
     )
 
-    if (
-        selected_feature_id is not None
-        and selected_feature_id in set(df["feature_id"].tolist())
+    if selected_feature_id is not None and selected_feature_id in set(
+        df["feature_id"].tolist()
     ):
         sel_row = df[df["feature_id"] == selected_feature_id].iloc[0]
 
@@ -171,8 +169,7 @@ def update_cluster_scatter(
         summary_parts.extend(
             [
                 html.Span(
-                    f"in cluster {cluster_id} "
-                    f"({cluster_size} features). "
+                    f"in cluster {cluster_id} " f"({cluster_size} features). "
                 ),
                 html.Span(
                     f"Top token: {top_tok}" if top_tok else "Top token: n/a"

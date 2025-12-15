@@ -179,7 +179,9 @@ def update_top_examples_grid(selected_feature_id, active_tab):
     State("full-sweep-build-queue", "data"),
     prevent_initial_call=True,
 )
-def add_selected_examples_to_sweep_queue(n_clicks, selected_rows, current_queue):
+def add_selected_examples_to_sweep_queue(
+    n_clicks, selected_rows, current_queue
+):
     """Add selected examples from the grid to the full sweep queue."""
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
 
@@ -205,7 +207,9 @@ def add_selected_examples_to_sweep_queue(n_clicks, selected_rows, current_queue)
             continue
 
         # Get weapon name
-        weapon_name = weapon_name_mapping.get(weapon_id, row.get("Weapon", "Unknown"))
+        weapon_name = weapon_name_mapping.get(
+            weapon_id, row.get("Weapon", "Unknown")
+        )
 
         # Create description
         abilities_str = ", ".join(ability_tokens[:3])

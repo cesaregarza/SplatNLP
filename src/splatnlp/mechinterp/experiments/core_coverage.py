@@ -83,12 +83,16 @@ class CoreCoverageRunner(ExperimentRunner):
         # Get activation data
         logger.info("Loading activation data...")
         try:
-            df = ctx.db.get_all_feature_activations_for_pagerank(spec.feature_id)
+            df = ctx.db.get_all_feature_activations_for_pagerank(
+                spec.feature_id
+            )
         except AttributeError:
             df = ctx.db.get_feature_activations(spec.feature_id, limit=100000)
 
         if df is None or len(df) == 0:
-            raise ValueError(f"No activation data for feature {spec.feature_id}")
+            raise ValueError(
+                f"No activation data for feature {spec.feature_id}"
+            )
 
         logger.info(f"Loaded {len(df)} examples")
 
@@ -217,18 +221,24 @@ class CoreCoverageRunner(ExperimentRunner):
         result.aggregates.custom["coverage_threshold"] = coverage_threshold
 
         if tail_markers:
-            result.aggregates.custom["top_tail_marker"] = tail_markers[0]["token"]
+            result.aggregates.custom["top_tail_marker"] = tail_markers[0][
+                "token"
+            ]
             result.aggregates.custom["top_tail_marker_coverage"] = tail_markers[
                 0
             ]["core_coverage_pct"]
-            result.aggregates.custom["top_tail_marker_enrichment"] = tail_markers[
-                0
-            ]["tail_enrichment"]
+            result.aggregates.custom["top_tail_marker_enrichment"] = (
+                tail_markers[0]["tail_enrichment"]
+            )
 
         if primary_drivers:
             # Best primary driver = highest core coverage
-            best_driver = max(primary_drivers, key=lambda x: x["core_coverage_pct"])
-            result.aggregates.custom["best_primary_driver"] = best_driver["token"]
+            best_driver = max(
+                primary_drivers, key=lambda x: x["core_coverage_pct"]
+            )
+            result.aggregates.custom["best_primary_driver"] = best_driver[
+                "token"
+            ]
             result.aggregates.custom["best_driver_coverage"] = best_driver[
                 "core_coverage_pct"
             ]
@@ -289,9 +299,7 @@ class CoreCoverageRunner(ExperimentRunner):
                     token_counts[base] += int(weight)
 
         # Sort by count and return top-k
-        sorted_tokens = sorted(
-            token_counts.items(), key=lambda x: -x[1]
-        )
+        sorted_tokens = sorted(token_counts.items(), key=lambda x: -x[1])
         return [t[0] for t in sorted_tokens[:top_k]]
 
     def _compute_token_coverage(
@@ -404,7 +412,9 @@ class CoreCoverageRunner(ExperimentRunner):
             is_flanderized = tail_enrichment > 2.0 and tail_coverage > 0.10
 
             # Get weapon name
-            weapon_name = ctx.inv_weapon_vocab.get(weapon_id, f"weapon_{weapon_id}")
+            weapon_name = ctx.inv_weapon_vocab.get(
+                weapon_id, f"weapon_{weapon_id}"
+            )
 
             weapon_stats.append(
                 {

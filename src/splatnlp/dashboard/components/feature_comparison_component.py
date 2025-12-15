@@ -15,7 +15,17 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.graph_objects as go
 import polars as pl
-from dash import ALL, Input, Output, State, callback, callback_context, dcc, html, no_update
+from dash import (
+    ALL,
+    Input,
+    Output,
+    State,
+    callback,
+    callback_context,
+    dcc,
+    html,
+    no_update,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -352,8 +362,16 @@ def build_influence_breakdown_table(
         return html.Div("No influence data available.", className="text-muted")
 
     # Truncate names for headers
-    a_short = (feature_a_name[:10] + "…") if len(feature_a_name) > 10 else feature_a_name
-    b_short = (feature_b_name[:10] + "…") if len(feature_b_name) > 10 else feature_b_name
+    a_short = (
+        (feature_a_name[:10] + "…")
+        if len(feature_a_name) > 10
+        else feature_a_name
+    )
+    b_short = (
+        (feature_b_name[:10] + "…")
+        if len(feature_b_name) > 10
+        else feature_b_name
+    )
 
     # Build rows - show top 30
     rows = []
@@ -362,51 +380,100 @@ def build_influence_breakdown_table(
         if bd.agreement == "agree":
             status_badge = html.Span("✓ Agree", className="badge bg-success")
         elif bd.agreement == "conflict":
-            status_badge = html.Span("⚡ Conflict", className="badge bg-warning text-dark")
+            status_badge = html.Span(
+                "⚡ Conflict", className="badge bg-warning text-dark"
+            )
         else:
-            status_badge = html.Span("— Neutral", className="badge bg-secondary")
+            status_badge = html.Span(
+                "— Neutral", className="badge bg-secondary"
+            )
 
         # Color code difference
-        diff_class = "text-success" if bd.difference > 0 else "text-danger" if bd.difference < 0 else ""
-
-        rows.append(
-            html.Tr([
-                html.Td(bd.token, className="small fw-bold"),
-                html.Td(f"{bd.raw_influence_a:.4f}", className="small text-end"),
-                html.Td(f"{bd.net_influence_a:.4f}", className="small text-end fw-bold"),
-                html.Td(f"{bd.raw_influence_b:.4f}", className="small text-end"),
-                html.Td(f"{bd.net_influence_b:.4f}", className="small text-end fw-bold"),
-                html.Td(f"{bd.difference:+.4f}", className=f"small text-end {diff_class}"),
-                html.Td(status_badge, className="small text-center"),
-            ])
+        diff_class = (
+            "text-success"
+            if bd.difference > 0
+            else "text-danger" if bd.difference < 0 else ""
         )
 
-    return html.Div([
-        html.Div(
-            html.Table(
+        rows.append(
+            html.Tr(
                 [
-                    html.Thead(
-                        html.Tr([
-                            html.Th("Token", className="small"),
-                            html.Th(f"Raw {a_short}", className="small text-end", title=f"Raw influence for {feature_a_name}"),
-                            html.Th(f"Net {a_short}", className="small text-end", title=f"Net influence for {feature_a_name}"),
-                            html.Th(f"Raw {b_short}", className="small text-end", title=f"Raw influence for {feature_b_name}"),
-                            html.Th(f"Net {b_short}", className="small text-end", title=f"Net influence for {feature_b_name}"),
-                            html.Th("Diff", className="small text-end", title="Net A - Net B"),
-                            html.Th("Status", className="small text-center"),
-                        ])
+                    html.Td(bd.token, className="small fw-bold"),
+                    html.Td(
+                        f"{bd.raw_influence_a:.4f}", className="small text-end"
                     ),
-                    html.Tbody(rows),
-                ],
-                className="table table-sm table-striped",
+                    html.Td(
+                        f"{bd.net_influence_a:.4f}",
+                        className="small text-end fw-bold",
+                    ),
+                    html.Td(
+                        f"{bd.raw_influence_b:.4f}", className="small text-end"
+                    ),
+                    html.Td(
+                        f"{bd.net_influence_b:.4f}",
+                        className="small text-end fw-bold",
+                    ),
+                    html.Td(
+                        f"{bd.difference:+.4f}",
+                        className=f"small text-end {diff_class}",
+                    ),
+                    html.Td(status_badge, className="small text-center"),
+                ]
+            )
+        )
+
+    return html.Div(
+        [
+            html.Div(
+                html.Table(
+                    [
+                        html.Thead(
+                            html.Tr(
+                                [
+                                    html.Th("Token", className="small"),
+                                    html.Th(
+                                        f"Raw {a_short}",
+                                        className="small text-end",
+                                        title=f"Raw influence for {feature_a_name}",
+                                    ),
+                                    html.Th(
+                                        f"Net {a_short}",
+                                        className="small text-end",
+                                        title=f"Net influence for {feature_a_name}",
+                                    ),
+                                    html.Th(
+                                        f"Raw {b_short}",
+                                        className="small text-end",
+                                        title=f"Raw influence for {feature_b_name}",
+                                    ),
+                                    html.Th(
+                                        f"Net {b_short}",
+                                        className="small text-end",
+                                        title=f"Net influence for {feature_b_name}",
+                                    ),
+                                    html.Th(
+                                        "Diff",
+                                        className="small text-end",
+                                        title="Net A - Net B",
+                                    ),
+                                    html.Th(
+                                        "Status", className="small text-center"
+                                    ),
+                                ]
+                            )
+                        ),
+                        html.Tbody(rows),
+                    ],
+                    className="table table-sm table-striped",
+                ),
+                style={"maxHeight": "400px", "overflowY": "auto"},
             ),
-            style={"maxHeight": "400px", "overflowY": "auto"},
-        ),
-        html.P(
-            f"Showing {min(30, len(breakdowns))} of {len(breakdowns)} influenced tokens",
-            className="text-muted small mt-2",
-        ),
-    ])
+            html.P(
+                f"Showing {min(30, len(breakdowns))} of {len(breakdowns)} influenced tokens",
+                className="text-muted small mt-2",
+            ),
+        ]
+    )
 
 
 def build_influence_comparison_chart(
@@ -435,8 +502,16 @@ def build_influence_comparison_chart(
     net_b = [bd.net_influence_b for bd in top_breakdowns]
 
     # Truncate names for legend
-    a_short = (feature_a_name[:15] + "…") if len(feature_a_name) > 15 else feature_a_name
-    b_short = (feature_b_name[:15] + "…") if len(feature_b_name) > 15 else feature_b_name
+    a_short = (
+        (feature_a_name[:15] + "…")
+        if len(feature_a_name) > 15
+        else feature_a_name
+    )
+    b_short = (
+        (feature_b_name[:15] + "…")
+        if len(feature_b_name) > 15
+        else feature_b_name
+    )
 
     fig = go.Figure()
 
@@ -471,7 +546,9 @@ def build_influence_comparison_chart(
         margin=dict(l=150, r=50, t=50, b=50),
         xaxis_title="Net Influence",
         yaxis_title="Token",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+        ),
     )
 
     return fig
@@ -570,7 +647,9 @@ def compute_feature_relationship(
         if abs(total_net_a) < threshold or abs(total_net_b) < threshold:
             agreement = "neutral"
             neutral_count += 1
-        elif (total_net_a > 0 and total_net_b > 0) or (total_net_a < 0 and total_net_b < 0):
+        elif (total_net_a > 0 and total_net_b > 0) or (
+            total_net_a < 0 and total_net_b < 0
+        ):
             agreement = "agree"
             agreement_count += 1
         else:
@@ -624,8 +703,16 @@ def build_activation_scatter(relationship: FeatureRelationship) -> go.Figure:
     acts_b = [p[1] for p in relationship.activation_pairs]
 
     # Truncate names
-    a_short = (relationship.feature_a_name[:20] + "…") if len(relationship.feature_a_name) > 20 else relationship.feature_a_name
-    b_short = (relationship.feature_b_name[:20] + "…") if len(relationship.feature_b_name) > 20 else relationship.feature_b_name
+    a_short = (
+        (relationship.feature_a_name[:20] + "…")
+        if len(relationship.feature_a_name) > 20
+        else relationship.feature_a_name
+    )
+    b_short = (
+        (relationship.feature_b_name[:20] + "…")
+        if len(relationship.feature_b_name) > 20
+        else relationship.feature_b_name
+    )
 
     fig = go.Figure()
 
@@ -646,6 +733,7 @@ def build_activation_scatter(relationship: FeatureRelationship) -> go.Figure:
     # Add trend line if correlation is meaningful
     if abs(relationship.activation_correlation) > 0.1 and len(acts_a) > 2:
         import numpy as np
+
         z = np.polyfit(acts_a, acts_b, 1)
         p = np.poly1d(z)
         x_line = [min(acts_a), max(acts_a)]
@@ -672,7 +760,9 @@ def build_activation_scatter(relationship: FeatureRelationship) -> go.Figure:
     return fig
 
 
-def build_aggregate_influence_chart(relationship: FeatureRelationship) -> go.Figure:
+def build_aggregate_influence_chart(
+    relationship: FeatureRelationship,
+) -> go.Figure:
     """Build grouped bar chart of aggregate net influences."""
     if not relationship.aggregate_influences:
         fig = go.Figure()
@@ -704,8 +794,16 @@ def build_aggregate_influence_chart(relationship: FeatureRelationship) -> go.Fig
             colors_b.append("rgba(158, 158, 158, 0.8)")
 
     # Truncate names
-    a_short = (relationship.feature_a_name[:15] + "…") if len(relationship.feature_a_name) > 15 else relationship.feature_a_name
-    b_short = (relationship.feature_b_name[:15] + "…") if len(relationship.feature_b_name) > 15 else relationship.feature_b_name
+    a_short = (
+        (relationship.feature_a_name[:15] + "…")
+        if len(relationship.feature_a_name) > 15
+        else relationship.feature_a_name
+    )
+    b_short = (
+        (relationship.feature_b_name[:15] + "…")
+        if len(relationship.feature_b_name) > 15
+        else relationship.feature_b_name
+    )
 
     fig = go.Figure()
 
@@ -740,27 +838,57 @@ def build_aggregate_influence_chart(relationship: FeatureRelationship) -> go.Fig
         margin=dict(l=150, r=80, t=50, b=50),
         xaxis_title="Total Net Influence (Σ activation × raw)",
         yaxis_title="Token",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+        ),
     )
 
     return fig
 
 
-def build_differentiators_section(relationship: FeatureRelationship) -> html.Div:
+def build_differentiators_section(
+    relationship: FeatureRelationship,
+) -> html.Div:
     """Build section showing key differentiators between features."""
     # Get conflicts (opposite signs)
-    conflicts = [ai for ai in relationship.aggregate_influences if ai.agreement == "conflict"]
+    conflicts = [
+        ai
+        for ai in relationship.aggregate_influences
+        if ai.agreement == "conflict"
+    ]
     # Get agreements (same sign, non-neutral)
-    agreements = [ai for ai in relationship.aggregate_influences if ai.agreement == "agree"]
+    agreements = [
+        ai
+        for ai in relationship.aggregate_influences
+        if ai.agreement == "agree"
+    ]
     # Get tokens unique to each feature
-    unique_a = [ai for ai in relationship.aggregate_influences if ai.raw_influence_b == 0 and ai.raw_influence_a != 0]
-    unique_b = [ai for ai in relationship.aggregate_influences if ai.raw_influence_a == 0 and ai.raw_influence_b != 0]
+    unique_a = [
+        ai
+        for ai in relationship.aggregate_influences
+        if ai.raw_influence_b == 0 and ai.raw_influence_a != 0
+    ]
+    unique_b = [
+        ai
+        for ai in relationship.aggregate_influences
+        if ai.raw_influence_a == 0 and ai.raw_influence_b != 0
+    ]
 
     # Truncate names
-    a_short = (relationship.feature_a_name[:15] + "…") if len(relationship.feature_a_name) > 15 else relationship.feature_a_name
-    b_short = (relationship.feature_b_name[:15] + "…") if len(relationship.feature_b_name) > 15 else relationship.feature_b_name
+    a_short = (
+        (relationship.feature_a_name[:15] + "…")
+        if len(relationship.feature_a_name) > 15
+        else relationship.feature_a_name
+    )
+    b_short = (
+        (relationship.feature_b_name[:15] + "…")
+        if len(relationship.feature_b_name) > 15
+        else relationship.feature_b_name
+    )
 
-    def make_token_list(items: list[AggregateInfluence], show_both: bool = True) -> html.Ul:
+    def make_token_list(
+        items: list[AggregateInfluence], show_both: bool = True
+    ) -> html.Ul:
         if not items:
             return html.P("None", className="text-muted small")
         list_items = []
@@ -773,41 +901,84 @@ def build_differentiators_section(relationship: FeatureRelationship) -> html.Div
                     )
                 )
             else:
-                val = ai.total_net_a if ai.raw_influence_a != 0 else ai.total_net_b
+                val = (
+                    ai.total_net_a
+                    if ai.raw_influence_a != 0
+                    else ai.total_net_b
+                )
                 list_items.append(
                     html.Li(f"{ai.token}: {val:+.2f}", className="small")
                 )
         return html.Ul(list_items, className="mb-0")
 
-    return html.Div([
-        dbc.Row([
-            dbc.Col([
-                html.H6(f"🔵 Unique to {a_short}", className="text-primary"),
-                make_token_list(unique_a, show_both=False),
-            ], width=6),
-            dbc.Col([
-                html.H6(f"🟡 Unique to {b_short}", className="text-warning"),
-                make_token_list(unique_b, show_both=False),
-            ], width=6),
-        ], className="mb-3"),
-        dbc.Row([
-            dbc.Col([
-                html.H6("✓ Strongest Agreements", className="text-success"),
-                make_token_list(agreements[:8]),
-            ], width=6),
-            dbc.Col([
-                html.H6("⚡ Strongest Conflicts", className="text-danger"),
-                make_token_list(conflicts[:8]),
-            ], width=6),
-        ]),
-    ])
+    return html.Div(
+        [
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            html.H6(
+                                f"🔵 Unique to {a_short}",
+                                className="text-primary",
+                            ),
+                            make_token_list(unique_a, show_both=False),
+                        ],
+                        width=6,
+                    ),
+                    dbc.Col(
+                        [
+                            html.H6(
+                                f"🟡 Unique to {b_short}",
+                                className="text-warning",
+                            ),
+                            make_token_list(unique_b, show_both=False),
+                        ],
+                        width=6,
+                    ),
+                ],
+                className="mb-3",
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            html.H6(
+                                "✓ Strongest Agreements",
+                                className="text-success",
+                            ),
+                            make_token_list(agreements[:8]),
+                        ],
+                        width=6,
+                    ),
+                    dbc.Col(
+                        [
+                            html.H6(
+                                "⚡ Strongest Conflicts",
+                                className="text-danger",
+                            ),
+                            make_token_list(conflicts[:8]),
+                        ],
+                        width=6,
+                    ),
+                ]
+            ),
+        ]
+    )
 
 
 def format_relationship_markdown(relationship: FeatureRelationship) -> str:
     """Format relationship analysis as Markdown for Obsidian."""
     # Summary statistics
-    total_tokens = relationship.tokens_both_influence + relationship.tokens_only_a + relationship.tokens_only_b
-    conflict_rate = relationship.conflict_count / max(1, relationship.agreement_count + relationship.conflict_count) * 100
+    total_tokens = (
+        relationship.tokens_both_influence
+        + relationship.tokens_only_a
+        + relationship.tokens_only_b
+    )
+    conflict_rate = (
+        relationship.conflict_count
+        / max(1, relationship.agreement_count + relationship.conflict_count)
+        * 100
+    )
 
     # Interpretation
     if relationship.activation_correlation > 0.7:
@@ -824,15 +995,35 @@ def format_relationship_markdown(relationship: FeatureRelationship) -> str:
     if conflict_rate > 50:
         conflict_interpretation = "These features often compete - they push outputs in opposite directions."
     elif conflict_rate > 20:
-        conflict_interpretation = "These features have some competition but mostly cooperate."
+        conflict_interpretation = (
+            "These features have some competition but mostly cooperate."
+        )
     else:
-        conflict_interpretation = "These features largely cooperate - they reinforce similar outputs."
+        conflict_interpretation = (
+            "These features largely cooperate - they reinforce similar outputs."
+        )
 
     # Get differentiators
-    conflicts = [ai for ai in relationship.aggregate_influences if ai.agreement == "conflict"]
-    agreements = [ai for ai in relationship.aggregate_influences if ai.agreement == "agree"]
-    unique_a = [ai for ai in relationship.aggregate_influences if ai.raw_influence_b == 0 and ai.raw_influence_a != 0]
-    unique_b = [ai for ai in relationship.aggregate_influences if ai.raw_influence_a == 0 and ai.raw_influence_b != 0]
+    conflicts = [
+        ai
+        for ai in relationship.aggregate_influences
+        if ai.agreement == "conflict"
+    ]
+    agreements = [
+        ai
+        for ai in relationship.aggregate_influences
+        if ai.agreement == "agree"
+    ]
+    unique_a = [
+        ai
+        for ai in relationship.aggregate_influences
+        if ai.raw_influence_b == 0 and ai.raw_influence_a != 0
+    ]
+    unique_b = [
+        ai
+        for ai in relationship.aggregate_influences
+        if ai.raw_influence_a == 0 and ai.raw_influence_b != 0
+    ]
 
     # Build markdown
     lines = [
@@ -879,7 +1070,9 @@ def format_relationship_markdown(relationship: FeatureRelationship) -> str:
         lines.append("#### Strongest Agreements")
         lines.append("")
         for ai in agreements[:8]:
-            lines.append(f"- `{ai.token}`: A={ai.total_net_a:+.2f}, B={ai.total_net_b:+.2f}")
+            lines.append(
+                f"- `{ai.token}`: A={ai.total_net_a:+.2f}, B={ai.total_net_b:+.2f}"
+            )
         lines.append("")
 
     # Strongest conflicts
@@ -887,7 +1080,9 @@ def format_relationship_markdown(relationship: FeatureRelationship) -> str:
         lines.append("#### Strongest Conflicts")
         lines.append("")
         for ai in conflicts[:8]:
-            lines.append(f"- `{ai.token}`: A={ai.total_net_a:+.2f}, B={ai.total_net_b:+.2f}")
+            lines.append(
+                f"- `{ai.token}`: A={ai.total_net_a:+.2f}, B={ai.total_net_b:+.2f}"
+            )
         lines.append("")
 
     # Top influences table
@@ -896,18 +1091,34 @@ def format_relationship_markdown(relationship: FeatureRelationship) -> str:
     lines.append("| Token | Net A | Net B | Status |")
     lines.append("|-------|-------|-------|--------|")
     for ai in relationship.aggregate_influences[:15]:
-        status = "✓ Agree" if ai.agreement == "agree" else "⚡ Conflict" if ai.agreement == "conflict" else "—"
-        lines.append(f"| `{ai.token}` | {ai.total_net_a:+.2f} | {ai.total_net_b:+.2f} | {status} |")
+        status = (
+            "✓ Agree"
+            if ai.agreement == "agree"
+            else "⚡ Conflict" if ai.agreement == "conflict" else "—"
+        )
+        lines.append(
+            f"| `{ai.token}` | {ai.total_net_a:+.2f} | {ai.total_net_b:+.2f} | {status} |"
+        )
     lines.append("")
 
     return "\n".join(lines)
 
 
-def build_relationship_analysis_content(relationship: FeatureRelationship) -> html.Div:
+def build_relationship_analysis_content(
+    relationship: FeatureRelationship,
+) -> html.Div:
     """Build the full modal content for feature relationship analysis."""
     # Summary statistics
-    total_tokens = relationship.tokens_both_influence + relationship.tokens_only_a + relationship.tokens_only_b
-    conflict_rate = relationship.conflict_count / max(1, relationship.agreement_count + relationship.conflict_count) * 100
+    total_tokens = (
+        relationship.tokens_both_influence
+        + relationship.tokens_only_a
+        + relationship.tokens_only_b
+    )
+    conflict_rate = (
+        relationship.conflict_count
+        / max(1, relationship.agreement_count + relationship.conflict_count)
+        * 100
+    )
 
     # Interpretation
     if relationship.activation_correlation > 0.7:
@@ -924,102 +1135,209 @@ def build_relationship_analysis_content(relationship: FeatureRelationship) -> ht
     if conflict_rate > 50:
         conflict_interpretation = "These features often compete - they push outputs in opposite directions."
     elif conflict_rate > 20:
-        conflict_interpretation = "These features have some competition but mostly cooperate."
+        conflict_interpretation = (
+            "These features have some competition but mostly cooperate."
+        )
     else:
-        conflict_interpretation = "These features largely cooperate - they reinforce similar outputs."
+        conflict_interpretation = (
+            "These features largely cooperate - they reinforce similar outputs."
+        )
 
     # Generate markdown for clipboard
     markdown_text = format_relationship_markdown(relationship)
 
-    return html.Div([
-        # Header summary with copy button
-        dbc.Row([
-            dbc.Col([
-                dbc.Alert([
-                    html.H5([
-                        relationship.feature_a_name,
-                        html.Span(" vs ", className="text-muted mx-2"),
-                        relationship.feature_b_name,
-                    ], className="mb-2"),
-                    html.P([
-                        f"Analyzed across {relationship.shared_example_count:,} shared examples",
-                    ], className="mb-0 small"),
-                ], color="info", className="mb-0"),
-            ], width=10),
-            dbc.Col([
-                html.Div([
-                    dcc.Clipboard(
-                        target_id="relationship-markdown-content",
-                        title="Copy to clipboard (Markdown)",
-                        className="btn btn-outline-secondary btn-sm",
-                        style={"fontSize": "1.2rem"},
+    return html.Div(
+        [
+            # Header summary with copy button
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            dbc.Alert(
+                                [
+                                    html.H5(
+                                        [
+                                            relationship.feature_a_name,
+                                            html.Span(
+                                                " vs ",
+                                                className="text-muted mx-2",
+                                            ),
+                                            relationship.feature_b_name,
+                                        ],
+                                        className="mb-2",
+                                    ),
+                                    html.P(
+                                        [
+                                            f"Analyzed across {relationship.shared_example_count:,} shared examples",
+                                        ],
+                                        className="mb-0 small",
+                                    ),
+                                ],
+                                color="info",
+                                className="mb-0",
+                            ),
+                        ],
+                        width=10,
                     ),
-                    html.Small("Copy MD", className="d-block text-muted mt-1"),
-                ], className="text-center"),
-            ], width=2, className="d-flex align-items-center justify-content-center"),
-        ], className="mb-3"),
-
-        # Hidden div with markdown content for clipboard
-        html.Div(
-            markdown_text,
-            id="relationship-markdown-content",
-            style={"display": "none"},
-        ),
-
-        # Stats row
-        dbc.Row([
-            dbc.Col([
-                dbc.Card(dbc.CardBody([
-                    html.H3(f"{relationship.activation_correlation:.2f}", className="text-center mb-1"),
-                    html.P("Activation Correlation", className="text-muted text-center small mb-1"),
-                    html.P(corr_interpretation, className="text-center small mb-0"),
-                ]), className="h-100"),
-            ], width=4),
-            dbc.Col([
-                dbc.Card(dbc.CardBody([
-                    html.H3(f"{conflict_rate:.0f}%", className="text-center mb-1"),
-                    html.P("Conflict Rate", className="text-muted text-center small mb-1"),
-                    html.P(f"{relationship.conflict_count} conflicts / {relationship.agreement_count} agreements", className="text-center small mb-0"),
-                ]), className="h-100"),
-            ], width=4),
-            dbc.Col([
-                dbc.Card(dbc.CardBody([
-                    html.H3(f"{total_tokens}", className="text-center mb-1"),
-                    html.P("Tokens Influenced", className="text-muted text-center small mb-1"),
-                    html.P(f"{relationship.tokens_both_influence} shared, {relationship.tokens_only_a}+{relationship.tokens_only_b} unique", className="text-center small mb-0"),
-                ]), className="h-100"),
-            ], width=4),
-        ], className="mb-3"),
-
-        # Interpretation
-        dbc.Alert(conflict_interpretation, color="light", className="mb-3"),
-
-        # Charts row
-        dbc.Row([
-            dbc.Col([
-                dcc.Graph(
-                    figure=build_activation_scatter(relationship),
-                    config={"displayModeBar": False},
-                ),
-            ], width=5),
-            dbc.Col([
-                html.H6("Token Influence Summary", className="mb-2"),
-                html.Div([
-                    html.Span(f"✓ Agree: {relationship.agreement_count}", className="badge bg-success me-2"),
-                    html.Span(f"⚡ Conflict: {relationship.conflict_count}", className="badge bg-danger me-2"),
-                    html.Span(f"— Neutral: {relationship.neutral_count}", className="badge bg-secondary"),
-                ], className="mb-3"),
-                build_differentiators_section(relationship),
-            ], width=7),
-        ], className="mb-3"),
-
-        # Full influence chart
-        html.Hr(),
-        dcc.Graph(
-            figure=build_aggregate_influence_chart(relationship),
-            config={"displayModeBar": False},
-        ),
-    ])
+                    dbc.Col(
+                        [
+                            html.Div(
+                                [
+                                    dcc.Clipboard(
+                                        target_id="relationship-markdown-content",
+                                        title="Copy to clipboard (Markdown)",
+                                        className="btn btn-outline-secondary btn-sm",
+                                        style={"fontSize": "1.2rem"},
+                                    ),
+                                    html.Small(
+                                        "Copy MD",
+                                        className="d-block text-muted mt-1",
+                                    ),
+                                ],
+                                className="text-center",
+                            ),
+                        ],
+                        width=2,
+                        className="d-flex align-items-center justify-content-center",
+                    ),
+                ],
+                className="mb-3",
+            ),
+            # Hidden div with markdown content for clipboard
+            html.Div(
+                markdown_text,
+                id="relationship-markdown-content",
+                style={"display": "none"},
+            ),
+            # Stats row
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            dbc.Card(
+                                dbc.CardBody(
+                                    [
+                                        html.H3(
+                                            f"{relationship.activation_correlation:.2f}",
+                                            className="text-center mb-1",
+                                        ),
+                                        html.P(
+                                            "Activation Correlation",
+                                            className="text-muted text-center small mb-1",
+                                        ),
+                                        html.P(
+                                            corr_interpretation,
+                                            className="text-center small mb-0",
+                                        ),
+                                    ]
+                                ),
+                                className="h-100",
+                            ),
+                        ],
+                        width=4,
+                    ),
+                    dbc.Col(
+                        [
+                            dbc.Card(
+                                dbc.CardBody(
+                                    [
+                                        html.H3(
+                                            f"{conflict_rate:.0f}%",
+                                            className="text-center mb-1",
+                                        ),
+                                        html.P(
+                                            "Conflict Rate",
+                                            className="text-muted text-center small mb-1",
+                                        ),
+                                        html.P(
+                                            f"{relationship.conflict_count} conflicts / {relationship.agreement_count} agreements",
+                                            className="text-center small mb-0",
+                                        ),
+                                    ]
+                                ),
+                                className="h-100",
+                            ),
+                        ],
+                        width=4,
+                    ),
+                    dbc.Col(
+                        [
+                            dbc.Card(
+                                dbc.CardBody(
+                                    [
+                                        html.H3(
+                                            f"{total_tokens}",
+                                            className="text-center mb-1",
+                                        ),
+                                        html.P(
+                                            "Tokens Influenced",
+                                            className="text-muted text-center small mb-1",
+                                        ),
+                                        html.P(
+                                            f"{relationship.tokens_both_influence} shared, {relationship.tokens_only_a}+{relationship.tokens_only_b} unique",
+                                            className="text-center small mb-0",
+                                        ),
+                                    ]
+                                ),
+                                className="h-100",
+                            ),
+                        ],
+                        width=4,
+                    ),
+                ],
+                className="mb-3",
+            ),
+            # Interpretation
+            dbc.Alert(conflict_interpretation, color="light", className="mb-3"),
+            # Charts row
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            dcc.Graph(
+                                figure=build_activation_scatter(relationship),
+                                config={"displayModeBar": False},
+                            ),
+                        ],
+                        width=5,
+                    ),
+                    dbc.Col(
+                        [
+                            html.H6(
+                                "Token Influence Summary", className="mb-2"
+                            ),
+                            html.Div(
+                                [
+                                    html.Span(
+                                        f"✓ Agree: {relationship.agreement_count}",
+                                        className="badge bg-success me-2",
+                                    ),
+                                    html.Span(
+                                        f"⚡ Conflict: {relationship.conflict_count}",
+                                        className="badge bg-danger me-2",
+                                    ),
+                                    html.Span(
+                                        f"— Neutral: {relationship.neutral_count}",
+                                        className="badge bg-secondary",
+                                    ),
+                                ],
+                                className="mb-3",
+                            ),
+                            build_differentiators_section(relationship),
+                        ],
+                        width=7,
+                    ),
+                ],
+                className="mb-3",
+            ),
+            # Full influence chart
+            html.Hr(),
+            dcc.Graph(
+                figure=build_aggregate_influence_chart(relationship),
+                config={"displayModeBar": False},
+            ),
+        ]
+    )
 
 
 def compute_percentile_range_data(
@@ -1102,7 +1420,9 @@ def compute_percentile_range_data(
 
     # Get column names (handle both naming conventions)
     act_col = "activation"
-    weapon_col = "weapon_id" if "weapon_id" in range_df.columns else "weapon_id_token"
+    weapon_col = (
+        "weapon_id" if "weapon_id" in range_df.columns else "weapon_id_token"
+    )
     ability_col = (
         "ability_tokens"
         if "ability_tokens" in range_df.columns
@@ -1129,7 +1449,9 @@ def compute_percentile_range_data(
     token_distribution = {}
     for token_id, count in token_counts.most_common(15):
         # Try direct lookup first, then string conversion as fallback
-        token_name = inv_vocab.get(token_id) or inv_vocab.get(str(token_id), str(token_id))
+        token_name = inv_vocab.get(token_id) or inv_vocab.get(
+            str(token_id), str(token_id)
+        )
         percentage = (count / example_count) * 100
         token_distribution[token_name] = (count, percentage)
 
@@ -1195,7 +1517,13 @@ def compute_percentile_range_data(
             )
 
     # Sample examples
-    sample_indices = [0, len(range_df) // 4, len(range_df) // 2, 3 * len(range_df) // 4, -1]
+    sample_indices = [
+        0,
+        len(range_df) // 4,
+        len(range_df) // 2,
+        3 * len(range_df) // 4,
+        -1,
+    ]
     sample_examples = []
     for idx in sample_indices:
         if idx < 0:
@@ -1245,14 +1573,18 @@ def build_percentile_range_card(
     """Build UI card for a single percentile range."""
     # Token list
     token_items = []
-    for token_name, (count, pct) in list(range_data.token_distribution.items())[:8]:
+    for token_name, (count, pct) in list(range_data.token_distribution.items())[
+        :8
+    ]:
         token_items.append(
             html.Li(f"{token_name} ({pct:.0f}%)", className="small")
         )
 
     # Weapon list with sub/special hover
     weapon_items = []
-    for weapon_name, (count, pct) in list(range_data.weapon_distribution.items())[:5]:
+    for weapon_name, (count, pct) in list(
+        range_data.weapon_distribution.items()
+    )[:5]:
         props = range_data.weapon_properties.get(weapon_name, {})
         sub = props.get("sub", "")
         special = props.get("special", "")
@@ -1267,8 +1599,12 @@ def build_percentile_range_card(
         )
 
     # Net influence list
-    pos_influences = [i for i in range_data.net_influences if i["direction"] == "positive"][:5]
-    neg_influences = [i for i in range_data.net_influences if i["direction"] == "negative"][:5]
+    pos_influences = [
+        i for i in range_data.net_influences if i["direction"] == "positive"
+    ][:5]
+    neg_influences = [
+        i for i in range_data.net_influences if i["direction"] == "negative"
+    ][:5]
 
     influence_items = []
     for inf in pos_influences:
@@ -1289,7 +1625,9 @@ def build_percentile_range_card(
     # Sample examples
     example_items = []
     for ex in range_data.sample_examples[:3]:
-        abilities_str = ", ".join(ex["abilities"][:3]) if ex["abilities"] else "—"
+        abilities_str = (
+            ", ".join(ex["abilities"][:3]) if ex["abilities"] else "—"
+        )
         example_items.append(
             html.Li(
                 f"{ex['weapon']} - {abilities_str} (act: {ex['activation']:.2f})",
@@ -1368,7 +1706,10 @@ def build_percentile_comparison_content(
                                     html.H5(
                                         [
                                             comparison.feature_a_name,
-                                            html.Span(" vs ", className="text-muted mx-2"),
+                                            html.Span(
+                                                " vs ",
+                                                className="text-muted mx-2",
+                                            ),
                                             comparison.feature_b_name,
                                         ],
                                         className="mb-2",
@@ -1394,7 +1735,10 @@ def build_percentile_comparison_content(
                                         className="btn btn-outline-secondary btn-sm",
                                         style={"fontSize": "1.2rem"},
                                     ),
-                                    html.Small("Copy MD", className="d-block text-muted mt-1"),
+                                    html.Small(
+                                        "Copy MD",
+                                        className="d-block text-muted mt-1",
+                                    ),
                                 ],
                                 className="text-center",
                             ),
@@ -1469,11 +1813,15 @@ def format_percentile_markdown(comparison: PercentileComparison) -> str:
             "",
             "**Top Tokens**:",
         ]
-        for token_name, (count, pct) in list(data.token_distribution.items())[:8]:
+        for token_name, (count, pct) in list(data.token_distribution.items())[
+            :8
+        ]:
             lines.append(f"- `{token_name}` ({pct:.0f}%)")
         lines.append("")
         lines.append("**Top Weapons**:")
-        for weapon_name, (count, pct) in list(data.weapon_distribution.items())[:5]:
+        for weapon_name, (count, pct) in list(data.weapon_distribution.items())[
+            :5
+        ]:
             lines.append(f"- {weapon_name} ({pct:.0f}%)")
         lines.append("")
         lines.append("**Net Output Influence**:")
@@ -1483,8 +1831,12 @@ def format_percentile_markdown(comparison: PercentileComparison) -> str:
         lines.append("")
         lines.append("**Sample Builds**:")
         for ex in data.sample_examples[:3]:
-            abilities = ", ".join(ex["abilities"][:3]) if ex["abilities"] else "—"
-            lines.append(f"- {ex['weapon']} — {abilities} (act: {ex['activation']:.2f})")
+            abilities = (
+                ", ".join(ex["abilities"][:3]) if ex["abilities"] else "—"
+            )
+            lines.append(
+                f"- {ex['weapon']} — {abilities} (act: {ex['activation']:.2f})"
+            )
         lines.append("")
         return lines
 
@@ -1499,16 +1851,22 @@ def format_percentile_markdown(comparison: PercentileComparison) -> str:
         "",
     ]
     lines.extend(format_range(comparison.top_range_a, "Top 10% (90th–100th)"))
-    lines.extend(format_range(comparison.middle_range_a, "Middle 20% (40th–60th)"))
+    lines.extend(
+        format_range(comparison.middle_range_a, "Middle 20% (40th–60th)")
+    )
 
-    lines.extend([
-        "---",
-        "",
-        f"## {comparison.feature_b_name}",
-        "",
-    ])
+    lines.extend(
+        [
+            "---",
+            "",
+            f"## {comparison.feature_b_name}",
+            "",
+        ]
+    )
     lines.extend(format_range(comparison.top_range_b, "Top 10% (90th–100th)"))
-    lines.extend(format_range(comparison.middle_range_b, "Middle 20% (40th–60th)"))
+    lines.extend(
+        format_range(comparison.middle_range_b, "Middle 20% (40th–60th)")
+    )
 
     return "\n".join(lines)
 
@@ -1552,7 +1910,9 @@ def get_feature_comparison_data(
             example_indices=example_indices,
         )
     except Exception as e:
-        logger.error(f"Error loading comparison data for feature {feature_id}: {e}")
+        logger.error(
+            f"Error loading comparison data for feature {feature_id}: {e}"
+        )
         return None
 
 
@@ -1672,15 +2032,21 @@ def build_comparison_card(feature_data: ComparisonFeatureData) -> dbc.Card:
                     # TF-IDF tokens
                     html.Div(
                         [
-                            html.Small("Top Tokens:", className="text-muted d-block"),
-                            html.Div(tfidf_badges, className="d-flex flex-wrap"),
+                            html.Small(
+                                "Top Tokens:", className="text-muted d-block"
+                            ),
+                            html.Div(
+                                tfidf_badges, className="d-flex flex-wrap"
+                            ),
                         ],
                         className="mb-2",
                     ),
                     # Top weapons
                     html.Div(
                         [
-                            html.Small("Top Weapons:", className="text-muted d-block"),
+                            html.Small(
+                                "Top Weapons:", className="text-muted d-block"
+                            ),
                             html.Div(weapon_items),
                         ],
                         className="mb-2",
@@ -1688,7 +2054,9 @@ def build_comparison_card(feature_data: ComparisonFeatureData) -> dbc.Card:
                     # Classes
                     html.Div(
                         [
-                            html.Small("Classes:", className="text-muted d-block"),
+                            html.Small(
+                                "Classes:", className="text-muted d-block"
+                            ),
                             html.Div(class_items, className="d-flex flex-wrap"),
                         ],
                     ),
@@ -1729,16 +2097,20 @@ def get_feature_influence_data(feature_id: int) -> Optional[dict]:
         neg_val_col = f"-{i}_val"
 
         if pos_tok_col in feature_row and pd.notna(feature_row[pos_tok_col]):
-            pos_data.append({
-                "token": feature_row[pos_tok_col],
-                "value": float(feature_row[pos_val_col]),
-            })
+            pos_data.append(
+                {
+                    "token": feature_row[pos_tok_col],
+                    "value": float(feature_row[pos_val_col]),
+                }
+            )
 
         if neg_tok_col in feature_row and pd.notna(feature_row[neg_tok_col]):
-            neg_data.append({
-                "token": feature_row[neg_tok_col],
-                "value": float(feature_row[neg_val_col]),
-            })
+            neg_data.append(
+                {
+                    "token": feature_row[neg_tok_col],
+                    "value": float(feature_row[neg_val_col]),
+                }
+            )
 
     return {
         "positive": pos_data,
@@ -1766,107 +2138,210 @@ def build_logit_comparison(
         influence_type: str,  # "positive" or "negative"
     ) -> html.Div:
         if not influence_data or not influence_data.get(influence_type):
-            return html.Div(f"No {influence_type} influence data", className="text-muted small")
+            return html.Div(
+                f"No {influence_type} influence data",
+                className="text-muted small",
+            )
 
         items = influence_data[influence_type][:15]  # Top 15
-        color_class = "text-success" if influence_type == "positive" else "text-danger"
+        color_class = (
+            "text-success" if influence_type == "positive" else "text-danger"
+        )
 
         rows = []
         for item in items:
             rows.append(
-                html.Tr([
-                    html.Td(item["token"], className="small"),
-                    html.Td(f"{item['value']:.4f}", className=f"small text-end {color_class}"),
-                ])
+                html.Tr(
+                    [
+                        html.Td(item["token"], className="small"),
+                        html.Td(
+                            f"{item['value']:.4f}",
+                            className=f"small text-end {color_class}",
+                        ),
+                    ]
+                )
             )
 
         return html.Table(
             [
-                html.Thead(html.Tr([
-                    html.Th("Token", className="small"),
-                    html.Th("Influence", className="small text-end"),
-                ])),
+                html.Thead(
+                    html.Tr(
+                        [
+                            html.Th("Token", className="small"),
+                            html.Th("Influence", className="small text-end"),
+                        ]
+                    )
+                ),
                 html.Tbody(rows),
             ],
             className="table table-sm table-striped mb-0",
         )
 
     # Find common tokens between the two features
-    def find_common_tokens(left: Optional[dict], right: Optional[dict], influence_type: str) -> set:
+    def find_common_tokens(
+        left: Optional[dict], right: Optional[dict], influence_type: str
+    ) -> set:
         if not left or not right:
             return set()
         left_tokens = {item["token"] for item in left.get(influence_type, [])}
         right_tokens = {item["token"] for item in right.get(influence_type, [])}
         return left_tokens.intersection(right_tokens)
 
-    common_positive = find_common_tokens(left_influence, right_influence, "positive")
-    common_negative = find_common_tokens(left_influence, right_influence, "negative")
+    common_positive = find_common_tokens(
+        left_influence, right_influence, "positive"
+    )
+    common_negative = find_common_tokens(
+        left_influence, right_influence, "negative"
+    )
 
     # Truncate names for display
     left_short = (left_name[:15] + "…") if len(left_name) > 15 else left_name
-    right_short = (right_name[:15] + "…") if len(right_name) > 15 else right_name
+    right_short = (
+        (right_name[:15] + "…") if len(right_name) > 15 else right_name
+    )
 
-    return html.Div([
-        # Positive influences comparison
-        html.H6("Positive Influences (tokens more likely)", className="text-success mb-2"),
-        dbc.Row([
-            dbc.Col([
-                html.P(left_short, className="fw-bold small mb-1", title=left_name),
-                html.Div(
-                    build_influence_table(left_influence, left_name, "positive"),
-                    style={"maxHeight": "250px", "overflowY": "auto"},
-                ),
-            ], width=6),
-            dbc.Col([
-                html.P(right_short, className="fw-bold small mb-1", title=right_name),
-                html.Div(
-                    build_influence_table(right_influence, right_name, "positive"),
-                    style={"maxHeight": "250px", "overflowY": "auto"},
-                ),
-            ], width=6),
-        ], className="mb-3"),
-
-        # Common positive tokens
-        html.P(
-            [
-                html.Strong("Common positive tokens: "),
-                ", ".join(sorted(common_positive)[:10]) if common_positive else "None",
-                f" (+{len(common_positive) - 10} more)" if len(common_positive) > 10 else "",
-            ],
-            className="text-muted small mb-3",
-        ) if common_positive else None,
-
-        html.Hr(),
-
-        # Negative influences comparison
-        html.H6("Negative Influences (tokens less likely)", className="text-danger mb-2"),
-        dbc.Row([
-            dbc.Col([
-                html.P(left_short, className="fw-bold small mb-1", title=left_name),
-                html.Div(
-                    build_influence_table(left_influence, left_name, "negative"),
-                    style={"maxHeight": "250px", "overflowY": "auto"},
-                ),
-            ], width=6),
-            dbc.Col([
-                html.P(right_short, className="fw-bold small mb-1", title=right_name),
-                html.Div(
-                    build_influence_table(right_influence, right_name, "negative"),
-                    style={"maxHeight": "250px", "overflowY": "auto"},
-                ),
-            ], width=6),
-        ]),
-
-        # Common negative tokens
-        html.P(
-            [
-                html.Strong("Common negative tokens: "),
-                ", ".join(sorted(common_negative)[:10]) if common_negative else "None",
-                f" (+{len(common_negative) - 10} more)" if len(common_negative) > 10 else "",
-            ],
-            className="text-muted small mt-2",
-        ) if common_negative else None,
-    ])
+    return html.Div(
+        [
+            # Positive influences comparison
+            html.H6(
+                "Positive Influences (tokens more likely)",
+                className="text-success mb-2",
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            html.P(
+                                left_short,
+                                className="fw-bold small mb-1",
+                                title=left_name,
+                            ),
+                            html.Div(
+                                build_influence_table(
+                                    left_influence, left_name, "positive"
+                                ),
+                                style={
+                                    "maxHeight": "250px",
+                                    "overflowY": "auto",
+                                },
+                            ),
+                        ],
+                        width=6,
+                    ),
+                    dbc.Col(
+                        [
+                            html.P(
+                                right_short,
+                                className="fw-bold small mb-1",
+                                title=right_name,
+                            ),
+                            html.Div(
+                                build_influence_table(
+                                    right_influence, right_name, "positive"
+                                ),
+                                style={
+                                    "maxHeight": "250px",
+                                    "overflowY": "auto",
+                                },
+                            ),
+                        ],
+                        width=6,
+                    ),
+                ],
+                className="mb-3",
+            ),
+            # Common positive tokens
+            (
+                html.P(
+                    [
+                        html.Strong("Common positive tokens: "),
+                        (
+                            ", ".join(sorted(common_positive)[:10])
+                            if common_positive
+                            else "None"
+                        ),
+                        (
+                            f" (+{len(common_positive) - 10} more)"
+                            if len(common_positive) > 10
+                            else ""
+                        ),
+                    ],
+                    className="text-muted small mb-3",
+                )
+                if common_positive
+                else None
+            ),
+            html.Hr(),
+            # Negative influences comparison
+            html.H6(
+                "Negative Influences (tokens less likely)",
+                className="text-danger mb-2",
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            html.P(
+                                left_short,
+                                className="fw-bold small mb-1",
+                                title=left_name,
+                            ),
+                            html.Div(
+                                build_influence_table(
+                                    left_influence, left_name, "negative"
+                                ),
+                                style={
+                                    "maxHeight": "250px",
+                                    "overflowY": "auto",
+                                },
+                            ),
+                        ],
+                        width=6,
+                    ),
+                    dbc.Col(
+                        [
+                            html.P(
+                                right_short,
+                                className="fw-bold small mb-1",
+                                title=right_name,
+                            ),
+                            html.Div(
+                                build_influence_table(
+                                    right_influence, right_name, "negative"
+                                ),
+                                style={
+                                    "maxHeight": "250px",
+                                    "overflowY": "auto",
+                                },
+                            ),
+                        ],
+                        width=6,
+                    ),
+                ]
+            ),
+            # Common negative tokens
+            (
+                html.P(
+                    [
+                        html.Strong("Common negative tokens: "),
+                        (
+                            ", ".join(sorted(common_negative)[:10])
+                            if common_negative
+                            else "None"
+                        ),
+                        (
+                            f" (+{len(common_negative) - 10} more)"
+                            if len(common_negative) > 10
+                            else ""
+                        ),
+                    ],
+                    className="text-muted small mt-2",
+                )
+                if common_negative
+                else None
+            ),
+        ]
+    )
 
 
 def build_overlap_matrix(
@@ -1985,8 +2460,14 @@ def build_shared_examples_table(
         )
 
     # Calculate max activations for context
-    left_max = max((ex.get("activation", 0.0) for ex in left_examples.values()), default=0.0)
-    right_max = max((ex.get("activation", 0.0) for ex in right_examples.values()), default=0.0)
+    left_max = max(
+        (ex.get("activation", 0.0) for ex in left_examples.values()),
+        default=0.0,
+    )
+    right_max = max(
+        (ex.get("activation", 0.0) for ex in right_examples.values()),
+        default=0.0,
+    )
 
     # Build rows sorted by sum of activations (most activated first)
     rows_data = []
@@ -2000,30 +2481,44 @@ def build_shared_examples_table(
         weapon_id = left_data.get("weapon_id") or right_data.get("weapon_id")
         # Handle both int and string keys (JSON serialization converts to strings)
         weapon_name = (
-            weapon_names.get(weapon_id)
-            or weapon_names.get(str(weapon_id))
-            or f"Weapon {weapon_id}"
-        ) if weapon_id else "Unknown"
+            (
+                weapon_names.get(weapon_id)
+                or weapon_names.get(str(weapon_id))
+                or f"Weapon {weapon_id}"
+            )
+            if weapon_id
+            else "Unknown"
+        )
 
         # Get ability tokens - use left or right
-        ability_tokens = left_data.get("ability_tokens") or right_data.get("ability_tokens") or []
-        ability_names = [inv_vocab.get(str(t), str(t)) for t in ability_tokens[:5]]  # Limit to 5
+        ability_tokens = (
+            left_data.get("ability_tokens")
+            or right_data.get("ability_tokens")
+            or []
+        )
+        ability_names = [
+            inv_vocab.get(str(t), str(t)) for t in ability_tokens[:5]
+        ]  # Limit to 5
 
-        rows_data.append({
-            "index": idx,
-            "weapon_name": weapon_name,
-            "abilities": ", ".join(ability_names) if ability_names else "—",
-            "left_act": left_act,
-            "right_act": right_act,
-            "sum_act": left_act + right_act,
-        })
+        rows_data.append(
+            {
+                "index": idx,
+                "weapon_name": weapon_name,
+                "abilities": ", ".join(ability_names) if ability_names else "—",
+                "left_act": left_act,
+                "right_act": right_act,
+                "sum_act": left_act + right_act,
+            }
+        )
 
     # Sort by sum of activations descending
     rows_data.sort(key=lambda x: x["sum_act"], reverse=True)
 
     # Truncate long names for headers
     left_short = (left_name[:12] + "…") if len(left_name) > 12 else left_name
-    right_short = (right_name[:12] + "…") if len(right_name) > 12 else right_name
+    right_short = (
+        (right_name[:12] + "…") if len(right_name) > 12 else right_name
+    )
 
     # Build table rows - clickable for influence analysis
     table_rows = []
@@ -2032,9 +2527,21 @@ def build_shared_examples_table(
             html.Tr(
                 [
                     html.Td(row["weapon_name"], className="small"),
-                    html.Td(row["abilities"], className="small", style={"maxWidth": "200px", "overflow": "hidden", "textOverflow": "ellipsis"}),
-                    html.Td(f"{row['left_act']:.3f}", className="small text-end"),
-                    html.Td(f"{row['right_act']:.3f}", className="small text-end"),
+                    html.Td(
+                        row["abilities"],
+                        className="small",
+                        style={
+                            "maxWidth": "200px",
+                            "overflow": "hidden",
+                            "textOverflow": "ellipsis",
+                        },
+                    ),
+                    html.Td(
+                        f"{row['left_act']:.3f}", className="small text-end"
+                    ),
+                    html.Td(
+                        f"{row['right_act']:.3f}", className="small text-end"
+                    ),
                 ],
                 id={"type": "shared-example-row", "index": row["index"]},
                 n_clicks=0,
@@ -2043,47 +2550,65 @@ def build_shared_examples_table(
             )
         )
 
-    return html.Div([
-        html.H6(
-            f"Shared Examples ({len(shared_indices)} total)",
-            className="mt-3 mb-2",
-        ),
-        # Show max activation context
-        html.P(
-            [
-                html.Span("Max activations: ", className="fw-bold"),
-                html.Span(f"{left_short}: {left_max:.3f}", title=left_name),
-                html.Span(" | "),
-                html.Span(f"{right_short}: {right_max:.3f}", title=right_name),
-            ],
-            className="text-muted small mb-2",
-        ),
-        html.Div(
-            html.Table(
-                [
-                    html.Thead(
-                        html.Tr([
-                            html.Th("Weapon", className="small"),
-                            html.Th("Abilities", className="small"),
-                            html.Th(left_short, className="small text-end", title=left_name),
-                            html.Th(right_short, className="small text-end", title=right_name),
-                        ])
-                    ),
-                    html.Tbody(table_rows),
-                ],
-                className="table table-sm table-striped",
+    return html.Div(
+        [
+            html.H6(
+                f"Shared Examples ({len(shared_indices)} total)",
+                className="mt-3 mb-2",
             ),
-            style={"maxHeight": "300px", "overflowY": "auto"},
-        ),
-        html.P(
-            f"Showing top {min(max_examples, len(shared_indices))} by combined activation",
-            className="text-muted small mb-0",
-        ) if len(shared_indices) > max_examples else None,
-        html.P(
-            "Click a row to analyze activation-weighted influence",
-            className="text-muted small fst-italic mb-0 mt-1",
-        ),
-    ])
+            # Show max activation context
+            html.P(
+                [
+                    html.Span("Max activations: ", className="fw-bold"),
+                    html.Span(f"{left_short}: {left_max:.3f}", title=left_name),
+                    html.Span(" | "),
+                    html.Span(
+                        f"{right_short}: {right_max:.3f}", title=right_name
+                    ),
+                ],
+                className="text-muted small mb-2",
+            ),
+            html.Div(
+                html.Table(
+                    [
+                        html.Thead(
+                            html.Tr(
+                                [
+                                    html.Th("Weapon", className="small"),
+                                    html.Th("Abilities", className="small"),
+                                    html.Th(
+                                        left_short,
+                                        className="small text-end",
+                                        title=left_name,
+                                    ),
+                                    html.Th(
+                                        right_short,
+                                        className="small text-end",
+                                        title=right_name,
+                                    ),
+                                ]
+                            )
+                        ),
+                        html.Tbody(table_rows),
+                    ],
+                    className="table table-sm table-striped",
+                ),
+                style={"maxHeight": "300px", "overflowY": "auto"},
+            ),
+            (
+                html.P(
+                    f"Showing top {min(max_examples, len(shared_indices))} by combined activation",
+                    className="text-muted small mb-0",
+                )
+                if len(shared_indices) > max_examples
+                else None
+            ),
+            html.P(
+                "Click a row to analyze activation-weighted influence",
+                className="text-muted small fst-italic mb-0 mt-1",
+            ),
+        ]
+    )
 
 
 def build_head_to_head_ui(
@@ -2125,9 +2650,21 @@ def build_head_to_head_ui(
         # Build example maps for shared examples table
         def get_examples_map(fd: ComparisonFeatureData) -> dict[int, dict]:
             examples_map = {}
-            index_col = "index" if "index" in fd.activations_df.columns else "global_index"
-            weapon_col = "weapon_id" if "weapon_id" in fd.activations_df.columns else "weapon_id_token"
-            ability_col = "ability_tokens" if "ability_tokens" in fd.activations_df.columns else "ability_input_tokens"
+            index_col = (
+                "index"
+                if "index" in fd.activations_df.columns
+                else "global_index"
+            )
+            weapon_col = (
+                "weapon_id"
+                if "weapon_id" in fd.activations_df.columns
+                else "weapon_id_token"
+            )
+            ability_col = (
+                "ability_tokens"
+                if "ability_tokens" in fd.activations_df.columns
+                else "ability_input_tokens"
+            )
             for row in fd.activations_df.iter_rows(named=True):
                 idx = row.get(index_col)
                 if idx is not None:
@@ -2196,7 +2733,11 @@ def build_head_to_head_ui(
                                 dcc.Dropdown(
                                     id="venn-feature-left",
                                     options=options,
-                                    value=default_left.feature_id if default_left else None,
+                                    value=(
+                                        default_left.feature_id
+                                        if default_left
+                                        else None
+                                    ),
                                     clearable=False,
                                     className="mb-2",
                                 ),
@@ -2206,7 +2747,9 @@ def build_head_to_head_ui(
                         dbc.Col(
                             html.Div(
                                 [
-                                    html.Div("vs", className="text-center fw-bold"),
+                                    html.Div(
+                                        "vs", className="text-center fw-bold"
+                                    ),
                                     dbc.ButtonGroup(
                                         [
                                             dbc.Button(
@@ -2235,7 +2778,11 @@ def build_head_to_head_ui(
                                 dcc.Dropdown(
                                     id="venn-feature-right",
                                     options=options,
-                                    value=default_right.feature_id if default_right else None,
+                                    value=(
+                                        default_right.feature_id
+                                        if default_right
+                                        else None
+                                    ),
                                     clearable=False,
                                     className="mb-2",
                                 ),
@@ -2362,7 +2909,9 @@ def render_comparison(
 
     try:
         db = DASHBOARD_CONTEXT.db
-        labels_manager = getattr(DASHBOARD_CONTEXT, "feature_labels_manager", None)
+        labels_manager = getattr(
+            DASHBOARD_CONTEXT, "feature_labels_manager", None
+        )
 
         # Create analyzer (reuse pattern from intervals_grid)
         from splatnlp.dashboard.components.intervals_grid_component import (
@@ -2389,7 +2938,14 @@ def render_comparison(
                 features_data.append(fd)
 
         if len(features_data) < 2:
-            return [], [], [], [], None, "Not enough feature data available for comparison."
+            return (
+                [],
+                [],
+                [],
+                [],
+                None,
+                "Not enough feature data available for comparison.",
+            )
 
         # Build comparison cards with row wrapping (max 4 per row)
         cards_per_row = min(len(features_data), MAX_CARDS_PER_ROW)
@@ -2399,10 +2955,15 @@ def render_comparison(
         current_row = []
         for i, fd in enumerate(features_data):
             current_row.append(
-                dbc.Col(build_comparison_card(fd), width=col_width, className="mb-3")
+                dbc.Col(
+                    build_comparison_card(fd), width=col_width, className="mb-3"
+                )
             )
             # Start new row after MAX_CARDS_PER_ROW or at the end
-            if len(current_row) >= MAX_CARDS_PER_ROW or i == len(features_data) - 1:
+            if (
+                len(current_row) >= MAX_CARDS_PER_ROW
+                or i == len(features_data) - 1
+            ):
                 card_rows.append(dbc.Row(current_row))
                 current_row = []
 
@@ -2413,7 +2974,9 @@ def render_comparison(
         matrix_content = dbc.Card(
             dbc.CardBody(
                 [
-                    dcc.Graph(figure=matrix_fig, config={"displayModeBar": False}),
+                    dcc.Graph(
+                        figure=matrix_fig, config={"displayModeBar": False}
+                    ),
                 ]
             ),
             className="mb-3",
@@ -2425,15 +2988,29 @@ def render_comparison(
         # Cache feature data for Venn sub-selection (store as serializable dict)
         # Include full example data for showing shared examples with weapon/tokens
         cache_data = {
-            "_weapon_names": {str(k): v for k, v in analyzer.id_to_name_mapping.items()},
+            "_weapon_names": {
+                str(k): v for k, v in analyzer.id_to_name_mapping.items()
+            },
             "_inv_vocab": DASHBOARD_CONTEXT.inv_vocab,
         }
         for fd in features_data:
             # Build index -> example data mapping (weapon_id, ability_tokens, activation)
             examples_map = {}
-            index_col = "index" if "index" in fd.activations_df.columns else "global_index"
-            weapon_col = "weapon_id" if "weapon_id" in fd.activations_df.columns else "weapon_id_token"
-            ability_col = "ability_tokens" if "ability_tokens" in fd.activations_df.columns else "ability_input_tokens"
+            index_col = (
+                "index"
+                if "index" in fd.activations_df.columns
+                else "global_index"
+            )
+            weapon_col = (
+                "weapon_id"
+                if "weapon_id" in fd.activations_df.columns
+                else "weapon_id_token"
+            )
+            ability_col = (
+                "ability_tokens"
+                if "ability_tokens" in fd.activations_df.columns
+                else "ability_input_tokens"
+            )
 
             for row in fd.activations_df.iter_rows(named=True):
                 idx = row.get(index_col)
@@ -2491,7 +3068,14 @@ def render_comparison(
                 DASHBOARD_CONTEXT.inv_vocab,
             )
 
-        return cards_container, matrix_content, overlap_content, venn_subselect, cache_data, ""
+        return (
+            cards_container,
+            matrix_content,
+            overlap_content,
+            venn_subselect,
+            cache_data,
+            "",
+        )
 
     except Exception as e:
         logger.error(f"Error rendering comparison: {e}", exc_info=True)
@@ -2514,7 +3098,9 @@ def render_head_to_head_comparison(
 ):
     """Render head-to-head comparison with logit influences and shared examples."""
     if not left_feature_id or not right_feature_id:
-        return html.Div("Select two features to compare.", className="text-muted")
+        return html.Div(
+            "Select two features to compare.", className="text-muted"
+        )
 
     if left_feature_id == right_feature_id:
         return dbc.Alert(
@@ -2526,11 +3112,17 @@ def render_head_to_head_comparison(
         return html.Div("No comparison data available.", className="text-muted")
 
     # Get cached data for the selected features
-    left_data = cache_data.get(str(left_feature_id)) or cache_data.get(left_feature_id)
-    right_data = cache_data.get(str(right_feature_id)) or cache_data.get(right_feature_id)
+    left_data = cache_data.get(str(left_feature_id)) or cache_data.get(
+        left_feature_id
+    )
+    right_data = cache_data.get(str(right_feature_id)) or cache_data.get(
+        right_feature_id
+    )
 
     if not left_data or not right_data:
-        return html.Div("Feature data not found in cache.", className="text-muted")
+        return html.Div(
+            "Feature data not found in cache.", className="text-muted"
+        )
 
     # Get display names
     left_name = left_data["display_name"]
@@ -2627,6 +3219,7 @@ def show_influence_analysis(
 
     # Parse the index from the triggered ID
     import json
+
     try:
         # Extract the JSON part from "{'type': 'shared-example-row', 'index': 123}.n_clicks"
         json_str = triggered_id.replace(".n_clicks", "")
@@ -2637,14 +3230,22 @@ def show_influence_analysis(
 
     # Validate we have the required data
     if not feature_a_id or not feature_b_id or not cache_data:
-        return True, html.Div("Missing feature selection or cache data.", className="text-warning")
+        return True, html.Div(
+            "Missing feature selection or cache data.", className="text-warning"
+        )
 
     # Get cached data for the selected features
-    left_data = cache_data.get(str(feature_a_id)) or cache_data.get(feature_a_id)
-    right_data = cache_data.get(str(feature_b_id)) or cache_data.get(feature_b_id)
+    left_data = cache_data.get(str(feature_a_id)) or cache_data.get(
+        feature_a_id
+    )
+    right_data = cache_data.get(str(feature_b_id)) or cache_data.get(
+        feature_b_id
+    )
 
     if not left_data or not right_data:
-        return True, html.Div("Feature data not found in cache.", className="text-warning")
+        return True, html.Div(
+            "Feature data not found in cache.", className="text-warning"
+        )
 
     # Get example data and activation values
     left_examples = left_data.get("examples", {})
@@ -2666,8 +3267,14 @@ def show_influence_analysis(
     weapon_names = cache_data.get("_weapon_names", {})
     inv_vocab = cache_data.get("_inv_vocab", {})
     weapon_id = left_ex.get("weapon_id") or right_ex.get("weapon_id")
-    weapon_name = weapon_names.get(weapon_id) or weapon_names.get(str(weapon_id)) or f"Weapon {weapon_id}"
-    ability_tokens = left_ex.get("ability_tokens") or right_ex.get("ability_tokens") or []
+    weapon_name = (
+        weapon_names.get(weapon_id)
+        or weapon_names.get(str(weapon_id))
+        or f"Weapon {weapon_id}"
+    )
+    ability_tokens = (
+        left_ex.get("ability_tokens") or right_ex.get("ability_tokens") or []
+    )
     ability_names = [inv_vocab.get(str(t), str(t)) for t in ability_tokens[:5]]
 
     # Compute influence breakdown
@@ -2679,52 +3286,88 @@ def show_influence_analysis(
     feature_a_name = left_data["display_name"]
     feature_b_name = right_data["display_name"]
 
-    content = html.Div([
-        # Example header
-        html.Div([
-            html.H5(f"{weapon_name}", className="mb-1"),
-            html.P(", ".join(ability_names) if ability_names else "No abilities", className="text-muted small mb-0"),
-        ], className="mb-3 p-2 bg-light rounded"),
-
-        # Feature activation summary
-        dbc.Row([
-            dbc.Col([
-                html.Div([
-                    html.Span(feature_a_name, className="fw-bold"),
-                    html.Br(),
-                    html.Span(f"Activation: {activation_a:.4f}", className="text-primary"),
-                ], className="p-2 border rounded"),
-            ], width=6),
-            dbc.Col([
-                html.Div([
-                    html.Span(feature_b_name, className="fw-bold"),
-                    html.Br(),
-                    html.Span(f"Activation: {activation_b:.4f}", className="text-danger"),
-                ], className="p-2 border rounded"),
-            ], width=6),
-        ], className="mb-4"),
-
-        # Explanation
-        html.P(
-            [
-                "Net influence = raw influence × activation. ",
-                "This shows how much each feature contributes to output token probabilities for this specific example.",
-            ],
-            className="text-muted small mb-3",
-        ),
-
-        # Bar chart
-        dcc.Graph(
-            figure=build_influence_comparison_chart(breakdowns, feature_a_name, feature_b_name),
-            config={"displayModeBar": False},
-        ),
-
-        html.Hr(),
-
-        # Breakdown table
-        html.H6("Detailed Breakdown", className="mb-2"),
-        build_influence_breakdown_table(breakdowns, feature_a_name, feature_b_name),
-    ])
+    content = html.Div(
+        [
+            # Example header
+            html.Div(
+                [
+                    html.H5(f"{weapon_name}", className="mb-1"),
+                    html.P(
+                        (
+                            ", ".join(ability_names)
+                            if ability_names
+                            else "No abilities"
+                        ),
+                        className="text-muted small mb-0",
+                    ),
+                ],
+                className="mb-3 p-2 bg-light rounded",
+            ),
+            # Feature activation summary
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            html.Div(
+                                [
+                                    html.Span(
+                                        feature_a_name, className="fw-bold"
+                                    ),
+                                    html.Br(),
+                                    html.Span(
+                                        f"Activation: {activation_a:.4f}",
+                                        className="text-primary",
+                                    ),
+                                ],
+                                className="p-2 border rounded",
+                            ),
+                        ],
+                        width=6,
+                    ),
+                    dbc.Col(
+                        [
+                            html.Div(
+                                [
+                                    html.Span(
+                                        feature_b_name, className="fw-bold"
+                                    ),
+                                    html.Br(),
+                                    html.Span(
+                                        f"Activation: {activation_b:.4f}",
+                                        className="text-danger",
+                                    ),
+                                ],
+                                className="p-2 border rounded",
+                            ),
+                        ],
+                        width=6,
+                    ),
+                ],
+                className="mb-4",
+            ),
+            # Explanation
+            html.P(
+                [
+                    "Net influence = raw influence × activation. ",
+                    "This shows how much each feature contributes to output token probabilities for this specific example.",
+                ],
+                className="text-muted small mb-3",
+            ),
+            # Bar chart
+            dcc.Graph(
+                figure=build_influence_comparison_chart(
+                    breakdowns, feature_a_name, feature_b_name
+                ),
+                config={"displayModeBar": False},
+            ),
+            html.Hr(),
+            # Breakdown table
+            html.H6("Detailed Breakdown", className="mb-2"),
+            build_influence_breakdown_table(
+                breakdowns, feature_a_name, feature_b_name
+            ),
+        ]
+    )
 
     return True, content
 
@@ -2767,8 +3410,12 @@ def show_relationship_analysis(
         )
 
     # Get cached data
-    left_data = cache_data.get(str(feature_a_id)) or cache_data.get(feature_a_id)
-    right_data = cache_data.get(str(feature_b_id)) or cache_data.get(feature_b_id)
+    left_data = cache_data.get(str(feature_a_id)) or cache_data.get(
+        feature_a_id
+    )
+    right_data = cache_data.get(str(feature_b_id)) or cache_data.get(
+        feature_b_id
+    )
 
     if not left_data or not right_data:
         return True, dbc.Alert(
@@ -2854,8 +3501,12 @@ def show_percentile_analysis(
         )
 
     # Get cached data for names
-    left_data = cache_data.get(str(feature_a_id)) or cache_data.get(feature_a_id)
-    right_data = cache_data.get(str(feature_b_id)) or cache_data.get(feature_b_id)
+    left_data = cache_data.get(str(feature_a_id)) or cache_data.get(
+        feature_a_id
+    )
+    right_data = cache_data.get(str(feature_b_id)) or cache_data.get(
+        feature_b_id
+    )
 
     if not left_data or not right_data:
         return True, dbc.Alert(
@@ -2894,7 +3545,12 @@ def show_percentile_analysis(
         feature_b_id, feature_b_name, 40.0, 60.0, inv_vocab, weapon_names
     )
 
-    if not top_range_a or not top_range_b or not middle_range_a or not middle_range_b:
+    if (
+        not top_range_a
+        or not top_range_b
+        or not middle_range_a
+        or not middle_range_b
+    ):
         return True, dbc.Alert(
             "Could not compute percentile ranges. Not enough activation data.",
             color="warning",

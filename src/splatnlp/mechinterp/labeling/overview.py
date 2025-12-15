@@ -843,14 +843,10 @@ def compute_region_breakdown(
 
         # Find indices in this region
         if high_pct > 1.0:  # Flanderization: >=90%
-            indices = [
-                i for i, a in enumerate(acts) if a > low_thresh
-            ]
+            indices = [i for i, a in enumerate(acts) if a > low_thresh]
         else:
             indices = [
-                i
-                for i, a in enumerate(acts)
-                if low_thresh < a <= high_thresh
+                i for i, a in enumerate(acts) if low_thresh < a <= high_thresh
             ]
 
         n_region = len(indices)
@@ -881,9 +877,9 @@ def compute_region_breakdown(
 
         # Top 5 weapons
         top_weapons = []
-        for wid, count in sorted(
-            weapon_counts.items(), key=lambda x: -x[1]
-        )[:5]:
+        for wid, count in sorted(weapon_counts.items(), key=lambda x: -x[1])[
+            :5
+        ]:
             wname = ctx.id_to_weapon_display_name(wid)
             pct = count / n_region * 100
             top_weapons.append((wname, count, round(pct, 1)))
@@ -891,9 +887,9 @@ def compute_region_breakdown(
         # Top 5 families
         top_families = []
         total_family = sum(family_counts.values())
-        for fam, count in sorted(
-            family_counts.items(), key=lambda x: -x[1]
-        )[:5]:
+        for fam, count in sorted(family_counts.items(), key=lambda x: -x[1])[
+            :5
+        ]:
             freq = count / total_family if total_family > 0 else 0
             top_families.append((fam, round(freq, 3)))
 
@@ -1073,7 +1069,9 @@ def compute_kit_breakdown(
         )
     except Exception as e:
         logger.warning(f"Could not load weapon kit data: {e}")
-        return KitBreakdown(region=region, n_examples=n_region, subs=[], specials=[])
+        return KitBreakdown(
+            region=region, n_examples=n_region, subs=[], specials=[]
+        )
 
     # Count subs and specials
     sub_counts: dict[str, int] = defaultdict(int)
@@ -1114,5 +1112,8 @@ def compute_kit_breakdown(
     ]
 
     return KitBreakdown(
-        region=region, n_examples=n_region, subs=subs[:15], specials=specials[:15]
+        region=region,
+        n_examples=n_region,
+        subs=subs[:15],
+        specials=specials[:15],
     )

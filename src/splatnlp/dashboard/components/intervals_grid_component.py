@@ -753,11 +753,9 @@ class IntervalsGridRenderer:
         # Ensure we have at least 1 sample
         top_n = max(1, top_n)
 
-        top_activations = (
-            self._cache.activations_df
-            .sort("activation", descending=True)
-            .head(top_n)
-        )
+        top_activations = self._cache.activations_df.sort(
+            "activation", descending=True
+        ).head(top_n)
 
         if top_activations.is_empty():
             logger.warning("No activations found for analysis!")
@@ -944,11 +942,17 @@ def get_feature_influence_data(feature_id: int) -> Optional[dict]:
 
         if pos_tok_col in feature_row and feature_row[pos_tok_col]:
             positive.append(
-                {"token": feature_row[pos_tok_col], "value": feature_row[pos_val_col]}
+                {
+                    "token": feature_row[pos_tok_col],
+                    "value": feature_row[pos_val_col],
+                }
             )
         if neg_tok_col in feature_row and feature_row[neg_tok_col]:
             negative.append(
-                {"token": feature_row[neg_tok_col], "value": feature_row[neg_val_col]}
+                {
+                    "token": feature_row[neg_tok_col],
+                    "value": feature_row[neg_val_col],
+                }
             )
 
     return {"positive": positive, "negative": negative}
@@ -1023,7 +1027,9 @@ def compute_percentile_range_data(
     range_df = range_df.sort(act_col, descending=True)
 
     # Get column names
-    weapon_col = "weapon_id" if "weapon_id" in range_df.columns else "weapon_id_token"
+    weapon_col = (
+        "weapon_id" if "weapon_id" in range_df.columns else "weapon_id_token"
+    )
     ability_col = (
         "ability_tokens"
         if "ability_tokens" in range_df.columns
@@ -1050,7 +1056,9 @@ def compute_percentile_range_data(
     token_distribution = {}
     for token_id, count in token_counts.most_common(15):
         # Try direct lookup first, then string conversion as fallback
-        token_name = inv_vocab.get(token_id) or inv_vocab.get(str(token_id), str(token_id))
+        token_name = inv_vocab.get(token_id) or inv_vocab.get(
+            str(token_id), str(token_id)
+        )
         percentage = (count / example_count) * 100
         token_distribution[token_name] = (count, percentage)
 
@@ -1171,12 +1179,18 @@ def build_percentile_range_card(
     """Build UI card for a single percentile range."""
     # Token list
     token_items = []
-    for token_name, (count, pct) in list(range_data.token_distribution.items())[:8]:
-        token_items.append(html.Li(f"{token_name} ({pct:.0f}%)", className="small"))
+    for token_name, (count, pct) in list(range_data.token_distribution.items())[
+        :8
+    ]:
+        token_items.append(
+            html.Li(f"{token_name} ({pct:.0f}%)", className="small")
+        )
 
     # Weapon list with sub/special hover
     weapon_items = []
-    for weapon_name, (count, pct) in list(range_data.weapon_distribution.items())[:5]:
+    for weapon_name, (count, pct) in list(
+        range_data.weapon_distribution.items()
+    )[:5]:
         props = range_data.weapon_properties.get(weapon_name, {})
         sub = props.get("sub", "")
         special = props.get("special", "")
@@ -1217,7 +1231,9 @@ def build_percentile_range_card(
     # Sample examples
     example_items = []
     for ex in range_data.sample_examples[:3]:
-        abilities_str = ", ".join(ex["abilities"][:3]) if ex["abilities"] else "—"
+        abilities_str = (
+            ", ".join(ex["abilities"][:3]) if ex["abilities"] else "—"
+        )
         example_items.append(
             html.Li(
                 f"{ex['weapon']} - {abilities_str} (act: {ex['activation']:.2f})",
@@ -1239,7 +1255,9 @@ def build_percentile_range_card(
                                 f"Activation: {range_data.activation_min:.2f} – {range_data.activation_max:.2f}",
                                 className="me-3",
                             ),
-                            html.Span(f"Examples: {range_data.example_count:,}"),
+                            html.Span(
+                                f"Examples: {range_data.example_count:,}"
+                            ),
                         ],
                         className="small text-muted mb-2",
                     ),
@@ -1247,15 +1265,21 @@ def build_percentile_range_card(
                         [
                             dbc.Col(
                                 [
-                                    html.Strong("Top Tokens", className="small"),
+                                    html.Strong(
+                                        "Top Tokens", className="small"
+                                    ),
                                     html.Ul(token_items, className="mb-0 ps-3"),
                                 ],
                                 width=4,
                             ),
                             dbc.Col(
                                 [
-                                    html.Strong("Top Weapons", className="small"),
-                                    html.Ul(weapon_items, className="mb-0 ps-3"),
+                                    html.Strong(
+                                        "Top Weapons", className="small"
+                                    ),
+                                    html.Ul(
+                                        weapon_items, className="mb-0 ps-3"
+                                    ),
                                 ],
                                 width=4,
                             ),
@@ -1265,7 +1289,9 @@ def build_percentile_range_card(
                                         f"Net Influence (med={range_data.median_activation:.2f})",
                                         className="small",
                                     ),
-                                    html.Ul(influence_items, className="mb-0 ps-3"),
+                                    html.Ul(
+                                        influence_items, className="mb-0 ps-3"
+                                    ),
                                 ],
                                 width=4,
                             ),
@@ -1477,7 +1503,9 @@ def render_intervals_grid(
                 DASHBOARD_CONTEXT
             )
         renderer = DASHBOARD_CONTEXT._intervals_grid_renderer
-        return renderer.render(selected_feature_id, analysis_mode=analysis_mode or "200")
+        return renderer.render(
+            selected_feature_id, analysis_mode=analysis_mode or "200"
+        )
     except Exception as e:
         logger.error(f"Failed to render intervals grid: {e}", exc_info=True)
         return [], f"Error: {str(e)}"
@@ -1514,7 +1542,9 @@ def render_percentile_analysis(
 
     if selected_feature_id is None:
         return html.Div(
-            dbc.Alert("Select a feature to view percentile analysis.", color="info")
+            dbc.Alert(
+                "Select a feature to view percentile analysis.", color="info"
+            )
         )
 
     if (
@@ -1532,7 +1562,9 @@ def render_percentile_analysis(
         if hasattr(DASHBOARD_CONTEXT, "feature_labels_manager"):
             labels_manager = DASHBOARD_CONTEXT.feature_labels_manager
             if labels_manager:
-                feature_name = labels_manager.get_display_name(selected_feature_id)
+                feature_name = labels_manager.get_display_name(
+                    selected_feature_id
+                )
 
         # Get weapon names mapping
         weapon_names = {}
@@ -1548,10 +1580,10 @@ def render_percentile_analysis(
             weapon_names,
         )
     except Exception as e:
-        logger.error(f"Failed to render percentile analysis: {e}", exc_info=True)
-        return html.Div(
-            dbc.Alert(f"Error: {str(e)}", color="danger")
+        logger.error(
+            f"Failed to render percentile analysis: {e}", exc_info=True
         )
+        return html.Div(dbc.Alert(f"Error: {str(e)}", color="danger"))
 
 
 @callback(
@@ -1652,9 +1684,15 @@ def add_example_to_sweep_queue(n_clicks_list, example_data_list, current_queue):
     # The states_list contains the wrapper data in the same order as they appear in DOM
     raw_data_str = None
     if ctx.states_list and len(ctx.states_list) > 0:
-        states = ctx.states_list[0] if isinstance(ctx.states_list[0], list) else ctx.states_list
+        states = (
+            ctx.states_list[0]
+            if isinstance(ctx.states_list[0], list)
+            else ctx.states_list
+        )
         for i, state_def in enumerate(states):
-            if isinstance(state_def, dict) and isinstance(state_def.get("id"), dict):
+            if isinstance(state_def, dict) and isinstance(
+                state_def.get("id"), dict
+            ):
                 if state_def["id"].get("index") == clicked_button_index_str:
                     raw_data_str = state_def.get("value")
                     break
@@ -1664,7 +1702,9 @@ def add_example_to_sweep_queue(n_clicks_list, example_data_list, current_queue):
             example_data = json.loads(raw_data_str)
 
             inv_vocab = getattr(DASHBOARD_CONTEXT, "inv_vocab", {})
-            inv_weapon_vocab = getattr(DASHBOARD_CONTEXT, "inv_weapon_vocab", {})
+            inv_weapon_vocab = getattr(
+                DASHBOARD_CONTEXT, "inv_weapon_vocab", {}
+            )
             weapon_name_mapping = generate_weapon_name_mapping(inv_weapon_vocab)
 
             weapon_id = example_data.get("weapon_id_token")

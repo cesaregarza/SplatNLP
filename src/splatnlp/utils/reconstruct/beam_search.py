@@ -156,9 +156,7 @@ def greedy_closure(
         if record_traces:
             assert traces is not None
             # Try to allocate a build for this state
-            build, _ = allocator.allocate(
-                capstones, priority=family_logp
-            )
+            build, _ = allocator.allocate(capstones, priority=family_logp)
             traces.append(
                 TraceFrame(
                     step=step,
@@ -474,7 +472,9 @@ def reconstruct_build(
                 new_log_prob = state.log_prob + lp + token_bonus
                 new_family_logp = dict(state.family_logp)
                 if lp > 0:
-                    prev_lp = new_family_logp.get(next_cap.family, float("-inf"))
+                    prev_lp = new_family_logp.get(
+                        next_cap.family, float("-inf")
+                    )
                     new_family_logp[next_cap.family] = max(prev_lp, float(lp))
 
                 if record_traces and frame is None:
@@ -583,9 +583,7 @@ def reconstruct_build(
                     )
 
         # Early stop if beam signatures stopped changing
-        current_signatures = {
-            tuple(sorted(st.capstones.keys())) for st in beam
-        }
+        current_signatures = {tuple(sorted(st.capstones.keys())) for st in beam}
         any_new = any(sig not in prev_signatures for sig in current_signatures)
         prev_signatures.update(current_signatures)
         if not any_new:

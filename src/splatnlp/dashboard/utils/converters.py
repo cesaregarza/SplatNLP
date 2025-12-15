@@ -128,7 +128,9 @@ def _load_local_weapon_names() -> dict[str, str]:
                     )
                     return mapping
             except Exception as exc:  # pragma: no cover - best effort
-                logger.debug(f"Failed to load local weapon names from {path}: {exc}")
+                logger.debug(
+                    f"Failed to load local weapon names from {path}: {exc}"
+                )
 
     # Fallback to network-based mapping as a last resort
     try:

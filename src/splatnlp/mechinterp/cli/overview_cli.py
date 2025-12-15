@@ -60,9 +60,7 @@ def _enrichment_to_markdown(enrichments: list[TokenEnrichment]) -> str:
     if suppressors:
         lines.append("### Suppressors (under-represented in high activation)")
         lines.append("")
-        lines.append(
-            "| Token | Family | Baseline | High | Enrichment |"
-        )
+        lines.append("| Token | Family | Baseline | High | Enrichment |")
         lines.append("|-------|--------|----------|------|------------|")
         for e in suppressors[:15]:
             lines.append(
@@ -74,9 +72,7 @@ def _enrichment_to_markdown(enrichments: list[TokenEnrichment]) -> str:
     if enhancers:
         lines.append("### Enhancers (over-represented in high activation)")
         lines.append("")
-        lines.append(
-            "| Token | Family | Baseline | High | Enrichment |"
-        )
+        lines.append("| Token | Family | Baseline | High | Enrichment |")
         lines.append("|-------|--------|----------|------|------------|")
         for e in sorted(enhancers, key=lambda x: -x.enrichment_ratio)[:15]:
             lines.append(
@@ -337,7 +333,9 @@ def main():
             print(_binary_to_markdown(binary))
 
         if args.kit:
-            logger.info(f"Computing kit breakdown for {args.kit_region} region...")
+            logger.info(
+                f"Computing kit breakdown for {args.kit_region} region..."
+            )
             kit = compute_kit_breakdown(
                 args.feature_id, ctx, region=args.kit_region
             )

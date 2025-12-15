@@ -10,12 +10,14 @@ Or via CLI:
     python -m splatnlp.mechinterp.server.activation_server --port 8765
 """
 
+import io
 import logging
 import time
 from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -131,13 +133,15 @@ async def get_activations(
     sample_frac: float | None = None,
     include_abilities: bool = True,
 ):
-    """Get activation data for a feature.
+    """Get activation data for a feature as JSON.
 
     Args:
         feature_id: The SAE feature ID
         limit: Optional limit on number of rows returned
         sample_frac: Optional random fraction (0-1) to downsample rows
         include_abilities: If False, skip ability_input_tokens for faster scans
+
+    For larger responses, prefer /activations/{feature_id}/arrow.
     """
     if "db" not in _state:
         raise HTTPException(503, "Database not loaded")
@@ -184,6 +188,86 @@ async def get_activations(
             columns=columns,
             data=data,
             load_time_ms=load_time_ms,
+        )
+
+    except Exception as e:
+        raise HTTPException(404, f"Feature {feature_id} not found: {e}")
+
+
+@app.get("/activations/{feature_id}/arrow")
+async def get_activations_arrow(
+    feature_id: int,
+    limit: int | None = None,
+    sample_frac: float | None = None,
+    include_abilities: bool = True,
+):
+    """Get activation data for a feature as Arrow IPC format.
+
+    Args:
+        feature_id: The SAE feature ID
+        limit: Optional limit on number of rows returned
+        sample_frac: Optional random fraction (0-1) to downsample rows
+        include_abilities: If False, skip ability_input_tokens for faster scans
+
+    Returns:
+        Arrow IPC binary data with custom headers for metadata.
+    """
+    if "db" not in _state:
+        raise HTTPException(503, "Database not loaded")
+
+    db = _state["db"]
+    arrow_cache = _state.get("arrow_cache", {})
+    if "arrow_cache" not in _state:
+        _state["arrow_cache"] = arrow_cache
+
+    # Check Arrow cache first
+    cache_key = f"{feature_id}_{limit}_{sample_frac}_{include_abilities}"
+    if cache_key in arrow_cache:
+        cached = arrow_cache[cache_key]
+        return Response(
+            content=cached["bytes"],
+            media_type="application/vnd.apache.arrow.stream",
+            headers={
+                "X-Feature-Id": str(feature_id),
+                "X-Num-Rows": str(cached["n_rows"]),
+                "X-Load-Time-Ms": "0.0",
+                "X-Cache-Hit": "true",
+            },
+        )
+
+    start = time.time()
+    try:
+        df = db.get_all_feature_activations_for_pagerank(
+            feature_id,
+            include_negative=True,
+            limit=limit,
+            sample_frac=sample_frac,
+            include_abilities=include_abilities,
+        )
+
+        # Serialize to Arrow IPC format
+        buf = io.BytesIO()
+        df.write_ipc(buf)
+        arrow_bytes = buf.getvalue()
+        n_rows = len(df)
+
+        # Cache result (keep last 20 features in Arrow format)
+        if len(arrow_cache) >= 20:
+            oldest = next(iter(arrow_cache))
+            del arrow_cache[oldest]
+        arrow_cache[cache_key] = {"bytes": arrow_bytes, "n_rows": n_rows}
+
+        load_time_ms = (time.time() - start) * 1000
+
+        return Response(
+            content=arrow_bytes,
+            media_type="application/vnd.apache.arrow.stream",
+            headers={
+                "X-Feature-Id": str(feature_id),
+                "X-Num-Rows": str(n_rows),
+                "X-Load-Time-Ms": f"{load_time_ms:.1f}",
+                "X-Cache-Hit": "false",
+            },
         )
 
     except Exception as e:

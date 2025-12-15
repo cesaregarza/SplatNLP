@@ -149,7 +149,9 @@ class PageRankAnalyzer:
         else:
             self._add_example_tokens(token_ids, activation)
 
-    def _add_example_tokens(self, token_ids: List[int], activation: float) -> None:
+    def _add_example_tokens(
+        self, token_ids: List[int], activation: float
+    ) -> None:
         """Add edges for token-level modes (raw or ap_weighted)."""
         for i, u in enumerate(token_ids):
             if u >= self.vocab_size:
@@ -165,7 +167,9 @@ class PageRankAnalyzer:
 
                 self._adj_matrix[u, v] += weight
 
-    def _add_example_family(self, token_ids: List[int], activation: float) -> None:
+    def _add_example_family(
+        self, token_ids: List[int], activation: float
+    ) -> None:
         """Add edges for family-collapsed mode.
 
         For each family, only the highest AP token is used.

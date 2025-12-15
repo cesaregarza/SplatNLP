@@ -77,12 +77,16 @@ class TokenInfluenceSweepRunner(ExperimentRunner):
         # Get activation data
         logger.info("Loading activation data...")
         try:
-            df = ctx.db.get_all_feature_activations_for_pagerank(spec.feature_id)
+            df = ctx.db.get_all_feature_activations_for_pagerank(
+                spec.feature_id
+            )
         except AttributeError:
             df = ctx.db.get_feature_activations(spec.feature_id, limit=50000)
 
         if df is None or len(df) == 0:
-            raise ValueError(f"No activation data for feature {spec.feature_id}")
+            raise ValueError(
+                f"No activation data for feature {spec.feature_id}"
+            )
 
         logger.info(f"Loaded {len(df)} examples")
 
@@ -140,7 +144,9 @@ class TokenInfluenceSweepRunner(ExperimentRunner):
                 continue
 
             # Count high/low activation examples containing this token
-            n_high_with_token = sum(1 for a in present_acts if a >= high_threshold)
+            n_high_with_token = sum(
+                1 for a in present_acts if a >= high_threshold
+            )
             n_low_with_token = n_present - n_high_with_token
 
             # Compute rates
@@ -162,7 +168,9 @@ class TokenInfluenceSweepRunner(ExperimentRunner):
             )
 
             sum_present = sum(present_acts)
-            mean_absent = (sum_all - sum_present) / n_absent if n_absent > 0 else 0
+            mean_absent = (
+                (sum_all - sum_present) / n_absent if n_absent > 0 else 0
+            )
 
             # Compute absent variance
             sum_sq_all = sum(a * a for a in all_activations)

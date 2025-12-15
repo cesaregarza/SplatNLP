@@ -236,13 +236,15 @@ def cmd_token_influence(args) -> int:
 def _add_common_args(parser):
     """Add common arguments to a subcommand parser."""
     parser.add_argument(
-        "--feature-id", "-f",
+        "--feature-id",
+        "-f",
         type=int,
         required=True,
         help="SAE feature ID to analyze",
     )
     parser.add_argument(
-        "--model", "-m",
+        "--model",
+        "-m",
         type=str,
         choices=["full", "ultra"],
         default="ultra",

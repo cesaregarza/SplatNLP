@@ -179,7 +179,9 @@ def compute_output_contribution(
         affects each token's logit.
     """
     output_weight = _load_model_weights(model_type)  # [vocab_size, hidden_dim]
-    feature_decoder = get_feature_decoder_vector(feature_id, model_type)  # [hidden_dim]
+    feature_decoder = get_feature_decoder_vector(
+        feature_id, model_type
+    )  # [hidden_dim]
 
     # Compute contribution: [vocab_size, hidden_dim] @ [hidden_dim] = [vocab_size]
     contribution = torch.matmul(output_weight, feature_decoder)
@@ -331,7 +333,9 @@ class DecoderOutputRunner(ExperimentRunner):
             spec.feature_id, spec.model_type
         )
         decoder_magnitude = float(torch.norm(feature_decoder, p=2))
-        result.aggregates.custom["decoder_magnitude"] = round(decoder_magnitude, 4)
+        result.aggregates.custom["decoder_magnitude"] = round(
+            decoder_magnitude, 4
+        )
 
         # Diagnostics
         result.diagnostics.n_contexts_tested = vocab_size
@@ -359,7 +363,9 @@ class DecoderOutputRunner(ExperimentRunner):
             summary.append(
                 {
                     "family": family,
-                    "mean_contribution": round(sum(contribs) / len(contribs), 4),
+                    "mean_contribution": round(
+                        sum(contribs) / len(contribs), 4
+                    ),
                     "max_contribution": round(max(contribs), 4),
                     "min_contribution": round(min(contribs), 4),
                     "n_tokens": len(contribs),
@@ -390,7 +396,9 @@ class DecoderOutputRunner(ExperimentRunner):
             patterns.append(
                 {
                     "ap_level": str(ap) if ap != "binary" else "binary",
-                    "mean_contribution": round(sum(contribs) / len(contribs), 4),
+                    "mean_contribution": round(
+                        sum(contribs) / len(contribs), 4
+                    ),
                     "n_tokens": len(contribs),
                 }
             )

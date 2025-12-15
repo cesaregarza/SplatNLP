@@ -43,7 +43,6 @@ class FeatureLabelsManager:
     """Enhanced feature labeling with categories and metadata."""
 
     def __init__(
-        
         self, storage_path: Optional[Path] = None, model_type: str = "full"
     ):
         """Initialize the feature labels manager.
@@ -70,9 +69,7 @@ class FeatureLabelsManager:
             return {}
         with open(self.storage_path, "r") as f:
             data = json.load(f)
-        return {
-            int(k): FeatureLabel.from_dict(v) for k, v in data.items()
-        }
+        return {int(k): FeatureLabel.from_dict(v) for k, v in data.items()}
 
     def _migrate_from_names_if_needed(self):
         """Migrate from old feature_names.json if it exists."""
