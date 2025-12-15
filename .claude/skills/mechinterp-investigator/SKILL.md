@@ -106,6 +106,7 @@ A proper deep dive requires **experiments**, not just reading overview data. The
 | 3. Binary Check | For binary abilities (Comeback, Stealth Jump, LDE, Haunt, etc.), check presence rate | Binary abilities show delta=0 in sweeps but may still be characteristic |
 | 4. Bottom Tokens | Check suppressors from overview | What the feature AVOIDS is often more informative |
 | 5. 2D Heatmaps | Test interactions between primary driver and correlated tokens | Verify if correlations are causal or spurious |
+| 6. Kit Analysis | Check if core weapons share sub/special/class pattern | Can explain "why" behind build philosophy - determine if causal or spurious |
 
 ### Binary Abilities Need Special Handling
 
@@ -602,6 +603,256 @@ Label: "Zombie Slayer QR (Splatana/Dualies)" - tactical category
 - When top weapons seem unrelated by kit but share a playstyle
 - To validate that ability patterns match expected meta builds
 - To identify if weapons share archetype despite different kits
+
+### Phase 1.7.5: Kit Component Analysis (OPTIONAL but Recommended)
+
+**When to use:** After weapon sweep, check if the core weapons share patterns in ANY kit component: **sub weapon**, **special weapon**, or **main weapon class**. This can reveal WHY certain build philosophies emerge.
+
+**Key insight:** Weapons may cluster by:
+- **Sub weapon** (Burst Bomb users, Beakon users → explains SPU/ISS builds)
+- **Special weapon** (Aggressive push specials → explains survival builds)
+- **Main weapon class** (All dualies, all chargers → explains mobility/positioning builds)
+
+The feature may be driven by ONE of these - identify which, then determine if it's causal or spurious.
+
+---
+
+#### Component 1: Sub Weapon Pattern Analysis
+
+**When relevant:** If kit_sweep (Phase 1.7/3d) shows sub concentration, investigate further.
+
+```python
+from collections import Counter
+
+# Map top weapons to their subs (from weapons.md)
+weapon_subs = {
+    "Splattershot Jr.": "Splat Bomb",
+    "Neo Splash-o-matic": "Suction Bomb",
+    "Sploosh-o-matic 7": "Splat Bomb",
+    # ... add more as needed
+}
+
+# Categorize subs
+sub_categories = {
+    # Lethal bombs
+    "Splat Bomb": "lethal", "Suction Bomb": "lethal", "Burst Bomb": "lethal",
+    "Curling Bomb": "lethal", "Autobomb": "lethal", "Torpedo": "lethal",
+    "Fizzy Bomb": "lethal", "Ink Mine": "lethal", "Toxic Mist": "lethal",
+    # Utility/Support
+    "Squid Beakon": "utility", "Splash Wall": "utility", "Sprinkler": "utility",
+    "Point Sensor": "utility", "Angle Shooter": "utility",
+}
+
+# Count categories
+sub_counts = Counter()
+for weapon in top_weapons:
+    sub = weapon_subs.get(weapon)
+    if sub:
+        category = sub_categories.get(sub, "other")
+        sub_counts[category] += 1
+
+print("Sub Weapon Breakdown:")
+for sub, count in Counter(weapon_subs.get(w) for w in top_weapons if weapon_subs.get(w)).most_common():
+    print(f"  {sub}: {count}")
+```
+
+**Sub pattern implications:**
+
+| Sub Pattern | Build Implication | Example |
+|-------------|-------------------|---------|
+| Shared Beakons | SPU/ISS focus for sub spam | Beacon Support builds |
+| Shared Burst Bomb | Mobility + burst damage | Aggressive flanker builds |
+| Shared Splash Wall | Positional/defensive play | Lane control builds |
+| Diverse subs | Sub is NOT the clustering factor | Check special or main class |
+
+---
+
+#### Component 2: Special Weapon Pattern Analysis
+
+**When relevant:** After weapon sweep, check if core weapons share a special weapon pattern.
+
+```python
+from collections import Counter
+
+# Map top weapons to their specials (from weapons.md)
+weapon_specials = {
+    "Splatana Stamper": "Zipcaster",
+    "Sloshing Machine": "Booyah Bomb",
+    "Squeezer": "Trizooka",
+    # ... add more as needed
+}
+
+# Categorize specials
+special_categories = {
+    # Zoning/Area Denial
+    "Ink Storm": "zoning", "Wave Breaker": "zoning", "Tenta Missiles": "zoning",
+    "Killer Wail 5.1": "zoning", "Triple Inkstrike": "zoning",
+    # Team Support
+    "Tacticooler": "team_support", "Big Bubbler": "team_support",
+    "Splattercolor Screen": "team_support",
+    # Aggression/Push
+    "Trizooka": "aggression", "Crab Tank": "aggression", "Ink Jet": "aggression",
+    "Ultra Stamp": "aggression", "Booyah Bomb": "aggression", "Reefslider": "aggression",
+    "Kraken Royale": "aggression", "Zipcaster": "aggression",
+    # Utility/Defense
+    "Ink Vac": "utility", "Super Chump": "utility", "Triple Splashdown": "utility",
+}
+
+# Count categories
+category_counts = Counter()
+for weapon in top_weapons:
+    special = weapon_specials.get(weapon)
+    if special:
+        category = special_categories.get(special, "other")
+        category_counts[category] += 1
+
+print("Special Category Breakdown:")
+for cat, count in category_counts.most_common():
+    print(f"  {cat}: {count/sum(category_counts.values())*100:.0f}%")
+```
+
+**Special pattern implications:**
+
+| Special Pattern | Build Implication | Example |
+|-----------------|-------------------|---------|
+| >60% aggression | Players build for survival to deploy push specials | Feature 14964 |
+| >60% zoning | Players may invest in SCU/SPU for area denial uptime | Ink Storm spam |
+| >50% team_support | Team-oriented builds, may see Tenacity/CB | Support kit |
+| Diverse specials | Special is NOT the clustering factor | Check sub or main class |
+
+---
+
+#### Component 3: Main Weapon Class Pattern Analysis
+
+**When relevant:** If weapons seem diverse but may share a class (all shooters, all dualies, all chargers).
+
+```python
+# Weapon class mapping (from weapon-vibes.md)
+weapon_classes = {
+    "Splattershot": "shooter", "Splattershot Jr.": "shooter", "Splattershot Pro": "shooter",
+    "Dark Tetra Dualies": "dualie", "Dapple Dualies": "dualie", "Splat Dualies": "dualie",
+    "E-liter 4K": "charger", "Splat Charger": "charger", "Goo Tuber": "charger",
+    "Luna Blaster": "blaster", "Range Blaster": "blaster", "Rapid Blaster": "blaster",
+    "Hydra Splatling": "splatling", "Mini Splatling": "splatling",
+    "Splatana Stamper": "splatana", "Splatana Wiper": "splatana",
+    # ... add more as needed
+}
+
+# Count classes
+class_counts = Counter(weapon_classes.get(w, "other") for w in top_weapons)
+
+print("Weapon Class Breakdown:")
+for cls, count in class_counts.most_common():
+    pct = count / len(top_weapons) * 100
+    print(f"  {cls}: {pct:.0f}%")
+```
+
+**Class pattern implications:**
+
+| Class Pattern | Build Implication | Example |
+|---------------|-------------------|---------|
+| >60% dualies | Mobility-focused, dodge-roll builds | SSU + QSJ synergy |
+| >60% chargers | Positioning, low death tolerance | Anchor builds |
+| >60% blasters | Burst damage, trade-happy | QR + Comeback synergy |
+| >60% splatlings | Charge management, lane holding | ISM + positioning |
+| Diverse classes | Class is NOT the clustering factor | Check sub or special |
+
+---
+
+#### Step 4: Determine if Pattern is CAUSAL or SPURIOUS
+
+**This is the critical step.** A strong pattern in ANY component could be causal or spurious.
+
+| Pattern Type | Evidence | Implication |
+|--------------|----------|-------------|
+| **CAUSAL** | Kit component explains build philosophy | Include in label rationale |
+| **SPURIOUS** | Weapons share other traits that better explain clustering | Don't emphasize that component |
+
+**Questions to determine causality:**
+
+1. **Does the kit component align with decoder output?**
+   - Decoder promotes SCU/SS/SPU + aggressive specials → Special farming is likely causal
+   - Decoder promotes ISS/SPU + shared sub weapon → Sub spam is likely causal
+   - Decoder promotes SSU/QSJ + all dualies → Weapon class mobility is likely causal
+
+2. **Do weapons share OTHER traits that better explain the clustering?**
+   - All dualies with aggressive specials → Is it the CLASS or the SPECIAL?
+   - Test: Do other dualies (without aggressive specials) also cluster here?
+
+3. **Does the build philosophy make sense for this kit component?**
+   - Survival builds + aggressive specials → "Stay alive to use push special" (causal)
+   - Mobility builds + all dualies → "Dualies need SSU for dodge-roll play" (causal)
+   - Survival builds + diverse subs/specials + all chargers → "Chargers can't trade" (class is causal)
+
+**Example Analysis (Special-driven):**
+
+```
+Feature 14964 special breakdown: 77% aggression (Zipcaster, Booyah Bomb, Trizooka)
+Build philosophy: "Balanced utility spread for survival"
+
+Analysis:
+- Decoder suppresses death-trading (Comeback, RP) ✓
+- Decoder promotes survival abilities (SS, ISM) ✓
+- Weapons have LOW-MED death tolerance ✓
+- Weapons have aggressive push specials ✓
+- Sub weapons are DIVERSE (no pattern)
+- Weapon classes are DIVERSE (shooters, slosher, splatana)
+
+Conclusion: CAUSAL - Players build for survival BECAUSE they have aggressive specials
+           that require staying alive to deploy effectively.
+
+Note: "Core weapons have aggressive push specials (77%) requiring survival to deploy"
+```
+
+**Example Analysis (Class-driven):**
+
+```
+Feature shows: 80% dualies (Dark Tetra, Dapple, Dualie Squelchers)
+Decoder promotes: SSU, QSJ, RSU (mobility family)
+
+Analysis:
+- Specials are DIVERSE (not the driver)
+- Subs are DIVERSE (not the driver)
+- All weapons are DUALIES with dodge-roll mechanics ✓
+- Dualies benefit uniquely from SSU for roll distance/recovery
+
+Conclusion: CAUSAL - Dualies cluster because dodge-roll playstyle needs mobility
+           The feature encodes "dualie mobility optimization"
+```
+
+**Counter-example (Spurious):**
+
+```
+Feature has 70% aggression specials
+But: All weapons are CLOSE-range SLAYER with HIGH death tolerance
+And: Decoder promotes QR, Comeback (death-trading)
+
+Conclusion: SPURIOUS - Weapons are aggressive slayers who happen to have aggressive specials
+           The special type is incidental to the slayer playstyle.
+           Primary driver is ROLE (slayer), not KIT.
+```
+
+---
+
+#### Step 5: Record findings in notes
+
+**If pattern is CAUSAL, add to dashboard_notes:**
+```
+KIT PATTERN: {component} - {X}% {category/type} ({list top examples}).
+INTERPRETATION: [Why this explains the build philosophy]
+```
+
+**If pattern is SPURIOUS, note briefly:**
+```
+KIT PATTERN: Diverse/incidental. Weapons cluster by [range/role/playstyle], not kit.
+```
+
+---
+
+#### When to skip this phase:
+- Feature is clearly mechanical (single ability stacker like "SCU_57 threshold")
+- Weapons are highly diverse with no concentration in any component
+- Earlier analysis already identified clear driver (e.g., single weapon dominance)
 
 ### Phase 1.8: Weapon Range/Role Classification (REQUIRED for Labels)
 
@@ -1350,6 +1601,10 @@ poetry run python -m splatnlp.mechinterp.cli.runner_cli binary \
 # Phase 3f: Core coverage analysis
 poetry run python -m splatnlp.mechinterp.cli.runner_cli coverage \
     --feature-id {ID} --tokens {TOKEN1},{TOKEN2}
+
+# Phase 1.7.5: Kit Component Analysis (see skill for full code)
+# After weapon sweep, check for patterns in: sub weapons, specials, or weapon class
+# For any concentrated pattern, determine if CAUSAL (explains build) or SPURIOUS (incidental)
 
 # Phase 5: Set label
 poetry run python -m splatnlp.mechinterp.cli.labeler_cli label \
