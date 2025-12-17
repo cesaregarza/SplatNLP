@@ -28,7 +28,7 @@ constraint-aware reconstruction, and SAE feature readouts.
 The canonical, publishable blog posts live on `cegarza.com`:
 
 - Blog home: https://cegarza.com/
-- Series entry: https://cegarza.com/introducing-splatgpt/
+- Series entry: https://cegarza.com/splatgpt-part-1/
 
 Note: the `docs/splatgpt-blog-part-*.txt` / `docs/splatgpt-blog-part-*-draft.md`
 files in this repo are **LLM-friendly extracts/drafts for tooling**, not the
