@@ -9,7 +9,7 @@ import json
 import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import orjson
@@ -17,7 +17,15 @@ import pandas as pd
 import polars as pl
 import zarr
 
+from splatnlp.dashboard.storage_backends import (
+    ActivationLoader,
+    NeuronActsLoader,
+    TransposedZarrLoader,
+)
 from splatnlp.dashboard.utils.tfidf import compute_idf
+
+if TYPE_CHECKING:
+    from splatnlp.dashboard.storage_config import StorageConfig
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +38,9 @@ class EfficientFSDatabase:
         data_dir: str = "/mnt/e/activations_ultra_efficient",
         examples_dir: str = "/mnt/e/dashboard_examples_optimized",
         num_bins: int = 20,
+        transposed_dir: str | None = None,
+        neuron_acts_dir: str | None = None,
+        config: StorageConfig | None = None,
     ):
         """
         Initialize the efficient database.
@@ -38,7 +49,21 @@ class EfficientFSDatabase:
             data_dir: Path to Parquet/Zarr converted data
             examples_dir: Path to optimized examples storage
             num_bins: Number of bins for histograms
+            transposed_dir: Optional path to transposed zarr (features x samples)
+            neuron_acts_dir: Optional path to neuron_acts sparse format
+            config: Optional StorageConfig for explicit configuration
         """
+        # Support config-based initialization (new pattern)
+        if config is not None:
+            data_dir = str(config.data_dir)
+            examples_dir = str(config.examples_dir)
+            transposed_dir = (
+                str(config.transposed_dir) if config.transposed_dir else None
+            )
+            neuron_acts_dir = (
+                str(config.neuron_acts_dir) if config.neuron_acts_dir else None
+            )
+
         self.data_dir = Path(data_dir)
         self.examples_dir = Path(examples_dir)
         self._nb_hist_bins = num_bins
@@ -56,6 +81,12 @@ class EfficientFSDatabase:
                 self.metadata = json.load(f)
         else:
             self.metadata = {}
+
+        # Initialize global metadata (shared by fast-path backends)
+        self.global_metadata: pl.DataFrame | None = None
+
+        # Initialize storage backends
+        self._init_storage_backends(transposed_dir, neuron_acts_dir)
 
         # Load optimized storage
         self.examples_df = None
@@ -127,6 +158,79 @@ class EfficientFSDatabase:
                 break
 
     # ---------- internal helpers -------------------------------------------
+
+    def _init_storage_backends(
+        self,
+        transposed_dir: str | None,
+        neuron_acts_dir: str | None,
+    ) -> None:
+        """Initialize fast-path storage backends."""
+        # Auto-detect transposed dir if not provided (backward compat)
+        if transposed_dir is None:
+            transposed_dir = self._auto_detect_transposed_dir()
+
+        # Auto-detect neuron_acts dir if not provided (backward compat)
+        if neuron_acts_dir is None:
+            neuron_acts_dir = self._auto_detect_neuron_acts_dir()
+
+        # Create loaders
+        zarr_path = (
+            Path(transposed_dir) / "transposed_activations.zarr"
+            if transposed_dir
+            else None
+        )
+        self._transposed_loader = TransposedZarrLoader(zarr_path)
+        self._neuron_acts_loader = NeuronActsLoader(
+            Path(neuron_acts_dir) if neuron_acts_dir else None
+        )
+
+        # Load global metadata if any fast path is available
+        if (
+            self._transposed_loader.is_available
+            or self._neuron_acts_loader.is_available
+        ):
+            self._load_global_metadata()
+
+    def _auto_detect_transposed_dir(self) -> str | None:
+        """Auto-detect transposed dir based on data_dir name (backward compat)."""
+        data_dir_name = self.data_dir.name
+        if "full" in data_dir_name:
+            return "/mnt/e/activations_full_transposed"
+        elif "ultra" in data_dir_name:
+            return "/mnt/e/activations_ultra_transposed"
+        return None
+
+    def _auto_detect_neuron_acts_dir(self) -> str | None:
+        """Auto-detect neuron_acts dir for Full model (backward compat)."""
+        if "full" in self.data_dir.name:
+            candidate = Path("/mnt/e/activations2/outputs/neuron_acts")
+            if candidate.exists():
+                return str(candidate)
+        return None
+
+    def _load_global_metadata(self) -> None:
+        """Load combined metadata for all samples (for transposed access)."""
+        if self.global_metadata is not None:
+            return
+
+        n_batches = self.metadata.get("n_batches", 0)
+        all_meta: list[pl.DataFrame] = []
+
+        for batch_idx in range(n_batches):
+            parquet_path = (
+                self.data_dir / "metadata" / f"batch_{batch_idx:04d}.parquet"
+            )
+            if parquet_path.exists():
+                meta = pl.read_parquet(parquet_path)
+                all_meta.append(meta)
+
+        if all_meta:
+            self.global_metadata = pl.concat(all_meta, how="vertical")
+            logger.info(
+                f"Loaded global metadata: {len(self.global_metadata)} samples"
+            )
+        else:
+            self.global_metadata = pl.DataFrame()
 
     def _get_batch_metadata(self, batch_idx: int) -> pl.DataFrame:
         """Load metadata for a batch (cached)."""
@@ -781,7 +885,101 @@ class EfficientFSDatabase:
         Returns:
             DataFrame with 'activation', 'ability_input_tokens', and 'weapon_id' columns
         """
-        # Use batch-wise joins instead of Python loops for speed
+        # FAST PATH 1: Try transposed zarr loader
+        result = self._get_activations_fast_path(
+            feature_id,
+            self._transposed_loader,
+            include_negative=include_negative,
+            limit=limit,
+            sample_frac=sample_frac,
+            include_abilities=include_abilities,
+        )
+        if result is not None:
+            return result
+
+        # FAST PATH 2: Try neuron_acts loader
+        result = self._get_activations_fast_path(
+            feature_id,
+            self._neuron_acts_loader,
+            include_negative=include_negative,
+            limit=limit,
+            sample_frac=sample_frac,
+            include_abilities=include_abilities,
+        )
+        if result is not None:
+            return result
+
+        # SLOW PATH: Batch-wise scan
+        return self._get_activations_batch_scan(
+            feature_id,
+            include_negative=include_negative,
+            limit=limit,
+            sample_frac=sample_frac,
+            include_abilities=include_abilities,
+        )
+
+    def _get_activations_fast_path(
+        self,
+        feature_id: int,
+        loader: ActivationLoader,
+        include_negative: bool = True,
+        limit: int | None = None,
+        sample_frac: float | None = None,
+        include_abilities: bool = True,
+    ) -> pl.DataFrame | None:
+        """
+        Common fast-path logic for transposed zarr and neuron_acts.
+
+        Returns DataFrame or None if loader unavailable/failed.
+        """
+        if not loader.is_available or self.global_metadata is None:
+            return None
+
+        result = loader.load(feature_id)
+        if result is None:
+            return None
+
+        indices, activations = result
+
+        # Filter by sign if needed
+        if not include_negative:
+            mask = activations > 0
+            activations = activations[mask]
+            indices = indices[mask]
+
+        # Return empty schema if no results
+        if len(activations) == 0:
+            return self._empty_activation_schema(include_abilities)
+
+        # Create activation DataFrame with global_index as join key
+        act_df = pl.DataFrame(
+            {"global_index": indices, "activation": activations}
+        )
+
+        # Join to global metadata
+        result_df = act_df.join(
+            self.global_metadata.select(
+                ["global_index", "weapon_id_token", "ability_tokens"]
+            ),
+            on="global_index",
+            how="inner",
+        )
+
+        # Select and rename columns to match expected output format
+        df = self._select_activation_columns(result_df, include_abilities)
+
+        # Apply sampling and limit
+        return self._apply_sampling(df, sample_frac, limit)
+
+    def _get_activations_batch_scan(
+        self,
+        feature_id: int,
+        include_negative: bool = True,
+        limit: int | None = None,
+        sample_frac: float | None = None,
+        include_abilities: bool = True,
+    ) -> pl.DataFrame:
+        """Slow path: scan all zarr batches sequentially."""
         all_batches: list[pl.DataFrame] = []
         n_batches = self.metadata.get("n_batches", 0)
 
@@ -811,23 +1009,14 @@ class EfficientFSDatabase:
                 if len(meta_df) == 0:
                     continue
 
-                # Join activations to metadata on sample_id for vectorized throughput
+                # Join activations to metadata on sample_id
                 act_df = pl.DataFrame(
                     {"sample_id": indices, "activation": activations}
                 )
-
                 batch_df = act_df.join(meta_df, on="sample_id", how="inner")
-
-                select_cols = [
-                    pl.col("activation").cast(pl.Float32),
-                    pl.col("weapon_id_token").cast(pl.Int64).alias("weapon_id"),
-                ]
-                if include_abilities:
-                    select_cols.append(
-                        pl.col("ability_tokens").alias("ability_input_tokens")
-                    )
-
-                batch_df = batch_df.select(select_cols)
+                batch_df = self._select_activation_columns(
+                    batch_df, include_abilities
+                )
 
                 if len(batch_df) > 0:
                     all_batches.append(batch_df)
@@ -839,21 +1028,44 @@ class EfficientFSDatabase:
                 continue
 
         if not all_batches:
-            schema = {
-                "activation": pl.Float64,
-                "weapon_id": pl.Int64,
-            }
-            if include_abilities:
-                schema["ability_input_tokens"] = pl.List(pl.Int64)
-            return pl.DataFrame(schema=schema)
+            return self._empty_activation_schema(include_abilities)
 
         df = pl.concat(all_batches, how="vertical")
+        return self._apply_sampling(df, sample_frac, limit)
 
-        # Optional random sample before limit to reduce transfer size
+    def _empty_activation_schema(self, include_abilities: bool) -> pl.DataFrame:
+        """Return empty DataFrame with correct schema."""
+        schema = {
+            "activation": pl.Float32,
+            "weapon_id": pl.Int64,
+        }
+        if include_abilities:
+            schema["ability_input_tokens"] = pl.List(pl.Int64)
+        return pl.DataFrame(schema=schema)
+
+    def _select_activation_columns(
+        self, df: pl.DataFrame, include_abilities: bool
+    ) -> pl.DataFrame:
+        """Select and rename columns to match expected output format."""
+        select_cols = [
+            pl.col("activation").cast(pl.Float32),
+            pl.col("weapon_id_token").cast(pl.Int64).alias("weapon_id"),
+        ]
+        if include_abilities:
+            select_cols.append(
+                pl.col("ability_tokens").alias("ability_input_tokens")
+            )
+        return df.select(select_cols)
+
+    def _apply_sampling(
+        self,
+        df: pl.DataFrame,
+        sample_frac: float | None,
+        limit: int | None,
+    ) -> pl.DataFrame:
+        """Apply optional sampling and limit."""
         if sample_frac is not None and 0 < sample_frac < 1:
             df = df.sample(fraction=sample_frac, with_replacement=False)
-
         if limit is not None and limit > 0:
             df = df.head(limit)
-
         return df

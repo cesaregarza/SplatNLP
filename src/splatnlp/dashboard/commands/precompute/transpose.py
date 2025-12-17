@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 def transpose_activations(
     source_dir: Path,
     target_dir: Path,
-    n_features: int = 24576,
+    n_features: int | None = None,
     chunk_features: int = 100,
 ):
     """
@@ -49,6 +49,11 @@ def transpose_activations(
         metadata = json.load(f)
 
     n_batches = metadata.get("n_batches", 0)
+
+    # Auto-detect n_features from metadata if not provided
+    if n_features is None:
+        n_features = metadata.get("n_features", 24576)
+        logger.info(f"Auto-detected n_features={n_features} from metadata")
 
     # First, determine total samples
     logger.info("Counting total samples...")

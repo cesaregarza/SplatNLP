@@ -147,6 +147,39 @@ class ServerBackedDatabase:
             include_abilities=include_abilities,
         )
 
+    def get_feature_activations(
+        self,
+        feature_id: int,
+        limit: int | None = None,
+    ) -> pl.DataFrame:
+        """Get top activations for a feature.
+
+        This method is used by overview CLI when --max-examples is specified.
+        Delegates to get_all_feature_activations_for_pagerank with limit.
+        """
+        return self.get_all_feature_activations_for_pagerank(
+            feature_id, limit=limit, include_abilities=True
+        )
+
+    def get_feature_stats(self, feature_id: int) -> dict[str, Any] | None:
+        """Get precomputed stats for a feature.
+
+        Returns None if no precomputed stats available - overview will
+        compute from activations instead.
+        """
+        # No server endpoint for stats yet - return None to skip
+        # This avoids loading the slow fallback database
+        return None
+
+    def get_feature_summary(self, feature_id: int) -> dict[str, Any] | None:
+        """Get precomputed summary for a feature.
+
+        Returns None if no precomputed summary available - overview will
+        compute from activations instead.
+        """
+        # No server endpoint for summary yet - return None to skip
+        return None
+
     # Delegate other methods to the fallback database
     def __getattr__(self, name: str) -> Any:
         """Delegate unknown methods to the fallback database."""

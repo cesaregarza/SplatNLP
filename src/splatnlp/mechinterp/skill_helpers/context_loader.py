@@ -86,8 +86,8 @@ def _get_weapon_id_to_name() -> dict[str, str]:
 FULL_MODEL_PATHS = {
     "vocab": "saved_models/dataset_v0_2_full/vocab.json",
     "weapon_vocab": "saved_models/dataset_v0_2_full/weapon_vocab.json",
-    "meta_path": "/mnt/e/activations2/outputs/",
-    "neurons_root": "/mnt/e/activations2/outputs/neuron_acts",
+    "data_dir": "/mnt/e/activations_full_efficient",
+    "examples_dir": "/mnt/e/activations_full_efficient/examples",
 }
 
 ULTRA_MODEL_PATHS = {
@@ -231,15 +231,19 @@ def load_context(
 
 
 def _load_full_db():
-    """Load database for Full model (2K features)."""
-    try:
-        from splatnlp.dashboard.fs_database import FSDatabase
+    """Load database for Full model (2K features).
 
-        db = FSDatabase(
-            meta_path=FULL_MODEL_PATHS["meta_path"],
-            neurons_root=FULL_MODEL_PATHS["neurons_root"],
+    Uses ServerBackedDatabase which automatically connects to the activation
+    server if it's running, otherwise falls back to direct database access.
+    """
+    try:
+        from splatnlp.mechinterp.server.client import ServerBackedDatabase
+
+        db = ServerBackedDatabase(
+            data_dir=FULL_MODEL_PATHS["data_dir"],
+            examples_dir=FULL_MODEL_PATHS["examples_dir"],
         )
-        logger.info("Loaded FSDatabase for Full model")
+        logger.info("Loaded ServerBackedDatabase for Full model")
         return db
     except Exception as e:
         logger.error(f"Failed to load Full model database: {e}")

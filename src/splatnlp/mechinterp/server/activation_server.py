@@ -8,10 +8,15 @@ Usage:
 
 Or via CLI:
     python -m splatnlp.mechinterp.server.activation_server --port 8765
+
+Model selection via environment variable:
+    ACTIVATION_MODEL=full python -m splatnlp.mechinterp.server.activation_server
+    ACTIVATION_MODEL=ultra python -m splatnlp.mechinterp.server.activation_server
 """
 
 import io
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from typing import Literal
@@ -21,6 +26,11 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+# Model selection via environment variable (default: ultra)
+MODEL_TYPE: Literal["full", "ultra"] = os.environ.get(
+    "ACTIVATION_MODEL", "ultra"
+).lower()  # type: ignore
 
 # Global state - loaded once, shared across requests
 _state: dict = {}
@@ -56,27 +66,34 @@ class HealthResponse(BaseModel):
 async def lifespan(app: FastAPI):
     """Load database on startup, cleanup on shutdown."""
     start = time.time()
-    logger.info("Loading activation database...")
+    logger.info(f"Loading activation database for model: {MODEL_TYPE}")
 
     try:
         from splatnlp.dashboard.efficient_fs_database import EfficientFSDatabase
         from splatnlp.mechinterp.skill_helpers.context_loader import (
+            FULL_MODEL_PATHS,
             ULTRA_MODEL_PATHS,
             load_context,
         )
 
+        # Select paths based on model type
+        if MODEL_TYPE == "full":
+            paths = FULL_MODEL_PATHS
+        else:
+            paths = ULTRA_MODEL_PATHS
+
         # Load the database
         db = EfficientFSDatabase(
-            data_dir=ULTRA_MODEL_PATHS["data_dir"],
-            examples_dir=ULTRA_MODEL_PATHS["examples_dir"],
+            data_dir=paths["data_dir"],
+            examples_dir=paths["examples_dir"],
         )
 
         # Load context for vocab access
-        ctx = load_context("ultra")
+        ctx = load_context(MODEL_TYPE)
 
         _state["db"] = db
         _state["ctx"] = ctx
-        _state["model_type"] = "ultra"
+        _state["model_type"] = MODEL_TYPE
         _state["start_time"] = time.time()
         _state["feature_cache"] = {}  # LRU-ish cache for recent features
 
@@ -314,17 +331,29 @@ def main():
         "--port", type=int, default=8765, help="Port to bind to"
     )
     parser.add_argument(
+        "--model",
+        choices=["full", "ultra"],
+        default=None,
+        help="Model type (full=2K features, ultra=24K features)",
+    )
+    parser.add_argument(
         "--reload", action="store_true", help="Enable auto-reload"
     )
 
     args = parser.parse_args()
+
+    # Set model via environment variable if provided via CLI
+    if args.model:
+        os.environ["ACTIVATION_MODEL"] = args.model
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
+    model_name = os.environ.get("ACTIVATION_MODEL", "ultra")
     print(f"Starting activation server on http://{args.host}:{args.port}")
+    print(f"Model: {model_name}")
     print("Endpoints:")
     print("  GET /health - Health check")
     print("  GET /features - List feature IDs")

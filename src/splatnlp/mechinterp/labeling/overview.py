@@ -200,11 +200,11 @@ def compute_overview(
     logger.info(f"Computing overview for feature {feature_id}")
 
     # Get basic stats (fast - precomputed)
-    stats = ctx.db.get_feature_stats(feature_id)
+    stats = ctx.db.get_feature_stats(feature_id) or {}
     logger.debug(f"Got stats: {stats}")
 
     # Get feature summary for weapon breakdown
-    summary = ctx.db.get_feature_summary(feature_id)
+    summary = ctx.db.get_feature_summary(feature_id) or {}
 
     # Get activations for PageRank and samples
     logger.info("Loading activation data for PageRank...")
@@ -330,7 +330,7 @@ def compute_overview(
 
     # Process weapon breakdown from summary
     top_weapons = []
-    if "top_weapons" in summary:
+    if summary and "top_weapons" in summary:
         for wp in summary["top_weapons"]:
             weapon_id = wp.get("weapon_id", 0)
             count = wp.get("count", 0)

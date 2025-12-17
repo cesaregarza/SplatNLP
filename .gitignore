@@ -28,6 +28,7 @@ env/
 # IDE
 .idea/
 .vscode/
+.cursor/
 *.swp
 *.swo
 
@@ -52,6 +53,7 @@ test_data
 dashboard_outputs/
 bench/
 decomp_models/
+decomp_models
 *.db
 *.csv
 *.json
