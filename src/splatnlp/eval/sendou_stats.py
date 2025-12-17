@@ -1,0 +1,470 @@
+from __future__ import annotations
+
+import argparse
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import orjson
+from scipy import stats
+
+from splatnlp.eval.sendou_baseline import (
+    ap_to_slot_items,
+    load_sendou_builds,
+    split_builds_by_tier,
+)
+
+
+def _load_json(path: Path) -> Any:
+    return orjson.loads(path.read_bytes())
+
+
+def _signature(weapon_token: str, abilities_ap: dict[str, int]) -> tuple:
+    return (
+        weapon_token,
+        tuple(sorted((str(k), int(v)) for k, v in abilities_ap.items())),
+    )
+
+
+def _completion_slot_accuracy(
+    case: dict[str, Any], pred_ap: dict[str, int] | None
+) -> float:
+    if pred_ap is None:
+        return 0.0
+
+    truth = Counter(ap_to_slot_items(dict(case["truth_abilities_ap"])))
+    observed = Counter(ap_to_slot_items(dict(case["masked_abilities_ap"])))
+    missing = truth - observed
+    denom = sum(missing.values())
+    if denom <= 0:
+        return 1.0
+
+    pred = Counter(ap_to_slot_items(dict(pred_ap)))
+    added = pred - observed
+    correct = sum((added & missing).values())
+    return float(correct) / float(denom)
+
+
+def _bootstrap_ci_mean(
+    values: np.ndarray,
+    *,
+    rng: np.random.Generator,
+    n_resamples: int,
+    ci: float,
+) -> tuple[float, float, float]:
+    if values.ndim != 1:
+        raise ValueError(f"Expected 1D array, got shape {values.shape}")
+    if len(values) == 0:
+        raise ValueError("Cannot bootstrap empty array")
+
+    n = len(values)
+    idx = rng.integers(0, n, size=(n_resamples, n), endpoint=False)
+    means = values[idx].mean(axis=1)
+    alpha = (1.0 - ci) / 2.0
+    return (
+        float(values.mean()),
+        float(np.quantile(means, alpha)),
+        float(np.quantile(means, 1.0 - alpha)),
+    )
+
+
+def _bootstrap_ci_mean_diff(
+    a: np.ndarray,
+    b: np.ndarray,
+    *,
+    rng: np.random.Generator,
+    n_resamples: int,
+    ci: float,
+) -> tuple[float, float, float]:
+    if a.shape != b.shape:
+        raise ValueError(f"Shape mismatch: {a.shape} vs {b.shape}")
+    diff = a - b
+    return _bootstrap_ci_mean(diff, rng=rng, n_resamples=n_resamples, ci=ci)
+
+
+def _paired_tests(a: np.ndarray, b: np.ndarray) -> dict[str, float]:
+    if a.shape != b.shape:
+        raise ValueError(f"Shape mismatch: {a.shape} vs {b.shape}")
+    diff = a - b
+    if np.allclose(diff, 0.0):
+        return {"ttest_p": 1.0, "wilcoxon_p": 1.0, "paired_d": 0.0}
+
+    ttest = stats.ttest_rel(a, b, alternative="two-sided")
+    try:
+        wil = stats.wilcoxon(
+            diff,
+            alternative="two-sided",
+            zero_method="zsplit",
+            mode="approx",
+        )
+        wil_p = float(wil.pvalue)
+    except ValueError:
+        wil_p = 1.0
+
+    denom = float(np.std(diff, ddof=1))
+    paired_d = float(diff.mean() / denom) if denom > 0 else 0.0
+    return {
+        "ttest_p": float(ttest.pvalue),
+        "wilcoxon_p": wil_p,
+        "paired_d": paired_d,
+    }
+
+
+@dataclass(frozen=True)
+class MethodSummary:
+    method: str
+    mask: int
+    metric: str
+    n: int
+    mean: float
+    ci_low: float
+    ci_high: float
+
+
+@dataclass(frozen=True)
+class PairwiseSummary:
+    a: str
+    b: str
+    mask: int
+    metric: str
+    n: int
+    mean_diff: float
+    ci_low: float
+    ci_high: float
+    ttest_p: float
+    wilcoxon_p: float
+    paired_d: float
+
+
+def analyze_compare_file(
+    path: Path,
+    *,
+    metric_names: list[str],
+    seed: int,
+    n_resamples: int,
+    ci: float,
+    split_overlap: bool,
+    csv_path: Path | None,
+    weapon_vocab_path: Path | None,
+) -> dict[str, Any]:
+    payload = _load_json(path)
+    meta = payload.get("meta") or {}
+    cases = payload.get("cases") or []
+    results = payload.get("results") or {}
+
+    if (
+        not isinstance(meta, dict)
+        or not isinstance(cases, list)
+        or not isinstance(results, dict)
+    ):
+        raise ValueError(f"Unexpected file shape for {path}")
+
+    case_by_id = {int(c["case_id"]): c for c in cases}
+
+    overlap_by_case_id: dict[int, bool] | None = None
+    if split_overlap:
+        csv_path_eff = csv_path or Path(
+            str(meta.get("csv", "test_data/abilities-with-weapons.csv"))
+        )
+        weapon_vocab_eff = weapon_vocab_path or Path(
+            str(
+                meta.get(
+                    "weapon_vocab",
+                    "saved_models/dataset_v0_2_full/weapon_vocab.json",
+                )
+            )
+        )
+        weapon_vocab = _load_json(weapon_vocab_eff)
+        builds = load_sendou_builds(csv_path_eff, weapon_vocab=weapon_vocab)
+        train_builds, _ = split_builds_by_tier(
+            builds,
+            train_tiers=list(meta.get("train_tiers", [2, 3])),
+            eval_tiers=list(meta.get("eval_tiers", [1])),
+        )
+        train_sigs = {
+            _signature(r.weapon_token, r.abilities_ap) for r in train_builds
+        }
+        overlap_by_case_id = {}
+        for cid, c in case_by_id.items():
+            overlap_by_case_id[cid] = (
+                _signature(
+                    str(c["weapon_token"]), dict(c["truth_abilities_ap"])
+                )
+                in train_sigs
+            )
+
+    rng = np.random.default_rng(seed)
+
+    method_rows_by_case_id: dict[str, dict[int, dict[str, Any]]] = {}
+    for method, method_payload in results.items():
+        rows = (
+            method_payload.get("rows")
+            if isinstance(method_payload, dict)
+            else None
+        )
+        if not isinstance(rows, list):
+            continue
+        method_rows_by_case_id[str(method)] = {
+            int(r["case_id"]): r for r in rows
+        }
+
+    methods = sorted(method_rows_by_case_id.keys())
+    if not methods:
+        raise ValueError(f"No methods found in {path}")
+
+    masks = sorted({int(c["ability_mask"]) for c in cases})
+
+    out: dict[str, Any] = {"path": str(path), "meta": meta}
+    out["methods"] = methods
+    out["masks"] = masks
+    out["metrics"] = metric_names
+
+    group_specs: list[tuple[str, list[int]]] = [
+        ("all", list(case_by_id.keys()))
+    ]
+    if overlap_by_case_id is not None:
+        overlap_ids = [cid for cid, flag in overlap_by_case_id.items() if flag]
+        non_overlap_ids = [
+            cid for cid, flag in overlap_by_case_id.items() if not flag
+        ]
+        group_specs = [
+            ("all", list(case_by_id.keys())),
+            ("no_overlap", non_overlap_ids),
+            ("overlap", overlap_ids),
+        ]
+
+    for group_name, group_case_ids in group_specs:
+        group_summaries: list[MethodSummary] = []
+        group_pairwise: list[PairwiseSummary] = []
+        n_by_mask: dict[int, int] = {}
+
+        for mask in masks:
+            mask_case_ids = [
+                cid
+                for cid in group_case_ids
+                if int(case_by_id[cid]["ability_mask"]) == mask
+            ]
+            if not mask_case_ids:
+                continue
+
+            n_by_mask[int(mask)] = len(mask_case_ids)
+
+            for metric in metric_names:
+                values_by_method: dict[str, np.ndarray] = {}
+                for method in methods:
+                    arr: list[float] = []
+                    for cid in mask_case_ids:
+                        row = method_rows_by_case_id[method].get(cid)
+                        if row is None:
+                            arr.append(0.0)
+                            continue
+                        if metric == "best_accuracy":
+                            arr.append(float(row.get("best_accuracy", 0.0)))
+                        elif metric == "exact_hit":
+                            arr.append(float(row.get("exact_hit", 0.0)))
+                        elif metric == "completion_slot_acc":
+                            arr.append(
+                                _completion_slot_accuracy(
+                                    case_by_id[cid],
+                                    row.get("predicted_best_achieved_ap"),
+                                )
+                            )
+                        else:
+                            raise ValueError(f"Unknown metric: {metric}")
+                    values_by_method[method] = np.array(arr, dtype=np.float64)
+
+                for method, vals in values_by_method.items():
+                    mean, lo, hi = _bootstrap_ci_mean(
+                        vals,
+                        rng=rng,
+                        n_resamples=n_resamples,
+                        ci=ci,
+                    )
+                    group_summaries.append(
+                        MethodSummary(
+                            method=method,
+                            mask=mask,
+                            metric=metric,
+                            n=len(vals),
+                            mean=mean,
+                            ci_low=lo,
+                            ci_high=hi,
+                        )
+                    )
+
+                for i, a in enumerate(methods):
+                    for b in methods[i + 1 :]:
+                        av = values_by_method[a]
+                        bv = values_by_method[b]
+                        mean, lo, hi = _bootstrap_ci_mean_diff(
+                            av,
+                            bv,
+                            rng=rng,
+                            n_resamples=n_resamples,
+                            ci=ci,
+                        )
+                        tests = _paired_tests(av, bv)
+                        group_pairwise.append(
+                            PairwiseSummary(
+                                a=a,
+                                b=b,
+                                mask=mask,
+                                metric=metric,
+                                n=len(av),
+                                mean_diff=mean,
+                                ci_low=lo,
+                                ci_high=hi,
+                                **tests,
+                            )
+                        )
+
+        out[group_name] = {
+            "n_by_mask": dict(n_by_mask),
+            "summaries": [s.__dict__ for s in group_summaries],
+            "pairwise": [p.__dict__ for p in group_pairwise],
+        }
+
+    return out
+
+
+def _print_report(report: dict[str, Any], *, ci: float) -> None:
+    path = report["path"]
+    methods = report["methods"]
+    masks = report["masks"]
+    metrics = report["metrics"]
+    meta = report.get("meta", {})
+    print(f"\n=== {path} ===")
+    if isinstance(meta, dict):
+        train_tiers = meta.get("train_tiers")
+        eval_tiers = meta.get("eval_tiers")
+        top_k = meta.get("top_k")
+        print(
+            f"train_tiers={train_tiers} eval_tiers={eval_tiers} top_k={top_k}"
+        )
+    print(f"methods={methods} masks={masks} metrics={metrics}")
+
+    for group in ["all", "no_overlap", "overlap"]:
+        if group not in report:
+            continue
+        print(f"\n[{group}]")
+        summaries = report[group]["summaries"]
+        pairwise = report[group]["pairwise"]
+
+        by_key = {(s["mask"], s["metric"], s["method"]): s for s in summaries}
+        for metric in metrics:
+            print(f"\nmetric={metric} (mean, {int(ci*100)}% CI)")
+            for mask in masks:
+                parts = []
+                for method in methods:
+                    s = by_key.get((mask, metric, method))
+                    if s is None:
+                        continue
+                    parts.append(
+                        f"{method}={s['mean']:.4f} [{s['ci_low']:.4f},{s['ci_high']:.4f}]"
+                    )
+                joined = "  ".join(parts)
+                print(f" mask={mask}: {joined}")
+
+        print("\npairwise mean diffs (A-B) w/ p-values")
+        for metric in metrics:
+            print(f"\nmetric={metric}")
+            for mask in masks:
+                rows = [
+                    p
+                    for p in pairwise
+                    if int(p["mask"]) == int(mask)
+                    and str(p["metric"]) == metric
+                ]
+                rows.sort(
+                    key=lambda r: abs(float(r["mean_diff"])), reverse=True
+                )
+                for r in rows:
+                    print(
+                        f" mask={mask} {r['a']}-{r['b']} "
+                        f"diff={r['mean_diff']:.4f} "
+                        f"[{r['ci_low']:.4f},{r['ci_high']:.4f}] "
+                        f"ttest_p={r['ttest_p']:.2e} "
+                        f"wilcoxon_p={r['wilcoxon_p']:.2e}"
+                    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--in",
+        dest="inputs",
+        type=Path,
+        nargs="+",
+        required=True,
+        help="One or more sendou_compare_*.json files.",
+    )
+    parser.add_argument(
+        "--metrics",
+        type=str,
+        nargs="+",
+        default=["best_accuracy", "completion_slot_acc"],
+        choices=["best_accuracy", "completion_slot_acc", "exact_hit"],
+    )
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--bootstrap", type=int, default=5000)
+    parser.add_argument("--ci", type=float, default=0.95)
+    parser.add_argument(
+        "--split-overlap",
+        action="store_true",
+        help="Report stats for cases whose exact (weapon, build) appears in "
+        "the train tiers vs not.",
+    )
+    parser.add_argument(
+        "--csv",
+        type=Path,
+        default=None,
+        help="Sendou CSV (defaults to meta['csv']).",
+    )
+    parser.add_argument(
+        "--weapon-vocab",
+        type=Path,
+        default=None,
+        help="weapon_vocab.json (defaults to meta['weapon_vocab']).",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Optional JSON output path (writes combined report).",
+    )
+    args = parser.parse_args()
+
+    combined: dict[str, Any] = {
+        "inputs": [str(p) for p in args.inputs],
+        "reports": [],
+    }
+
+    for path in args.inputs:
+        report = analyze_compare_file(
+            path,
+            metric_names=list(args.metrics),
+            seed=int(args.seed),
+            n_resamples=int(args.bootstrap),
+            ci=float(args.ci),
+            split_overlap=bool(args.split_overlap),
+            csv_path=args.csv,
+            weapon_vocab_path=args.weapon_vocab,
+        )
+        combined["reports"].append(report)
+        _print_report(report, ci=float(args.ci))
+
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_bytes(
+            orjson.dumps(
+                combined,
+                option=orjson.OPT_INDENT_2 | orjson.OPT_NON_STR_KEYS,
+            )
+        )
+        print(f"\nWrote {args.out}")
+
+
+if __name__ == "__main__":
+    main()

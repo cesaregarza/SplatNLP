@@ -8,6 +8,7 @@ project for predicting and analyzing optimal Splatoon 3 gear loadouts.
 **Quick links**
 
 - Reviewer guide: `docs/START_HERE.md`
+- Project one-pager: `docs/PROJECT_ONEPAGER.md`
 - Runnable demo: `notebooks/colab_demo.ipynb`
 - Canonical blog posts: `cegarza.com` (see below)
 

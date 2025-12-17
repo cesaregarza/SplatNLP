@@ -42,7 +42,7 @@ FULL_MODEL_PATH = Path(
     "/root/dev/SplatNLP/saved_models/dataset_v0_2_full/model.pth"
 )
 FULL_SAE_PATH = Path(
-    "/mnt/d/activations/sae_checkpoint.pth"  # Adjust as needed
+    "/root/dev/SplatNLP/saved_models/dataset_v0_2_full/sae_runs/run_20250429_023422/sae_model_final.pth"
 )
 
 

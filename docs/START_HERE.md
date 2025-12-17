@@ -5,6 +5,8 @@ code lives, and what you can run quickly.
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cesaregarza/SplatNLP/blob/main/notebooks/colab_demo.ipynb)
 
+If you want the fastest high-level skim: `docs/PROJECT_ONEPAGER.md`.
+
 If you only do one thing: open the Colab and “Run all”. It downloads pretrained
 artifacts (model + vocabs + Ultra SAE) and walks through token-space inference,
 constraint-aware reconstruction, and SAE feature readouts.
