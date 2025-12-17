@@ -1,83 +1,49 @@
-# SplatNLP — Project One‑Pager (Research + Systems Summary)
+# SplatNLP - Project One-Pager (Research + Systems Summary)
 
-## One‑line summary
+## One-line summary
 
-**SplatNLP** is an end‑to‑end ML + mechanistic interpretability project that
-frames Splatoon 3 gear building as **multi‑label set completion** conditioned on
-weapon, then decodes predictions into **legal builds under hard constraints**.
+SplatNLP is an end-to-end ML + mechanistic interpretability project that frames
+Splatoon 3 gear building as multi-label set completion conditioned on weapon,
+then decodes predictions into legal builds under hard constraints.
 
-## What this demonstrates (at a glance)
+Key numbers: ~83M params; pooled 512-D rep; Ultra SAE has 24,576 features.
 
-- A **set‑structured prediction problem** with real constraints and a clean
-  mapping between “token space” and “build space”.
-- A **SetTransformer‑style model** adapted for permutation invariance +
-  weapon‑conditioned context.
-- **Constraint‑aware decoding** (greedy closure + beam search + exact allocator)
-  that turns probabilities into a legal discrete structure.
-- A practical **mech‑interp stack**: SAE training, probe/edit hooks, activation
-  storage, and tooling for repeated investigations.
+## Concrete contributions (3)
 
-## Key technical pieces
+- Constraint-aware set completion: decode learned token probabilities into a
+  legal build under hard rules (3 mains / 9 subs, 57 AP budget, slot rules).
+- MechInterp workflow + tooling: Sparse Autoencoder (SAE) on a pooled 512-D
+  representation with probe/edit hooks, anti-flanderization guidance (core vs
+  tail), beam-trace attribution, and an activation server to avoid repeated
+  cold loads.
+- Eval + baselines: reconstruction-from-partial-info harness with baselines and
+  case-level outputs for analysis (Sendou; entrypoint below).
 
-**Problem framing**
-- Tokenization encodes gear builds as cumulative AP “capstone” tokens plus
-  weapon ID, enabling multi‑label prediction with hard legality constraints.
+## Quick reviewer paths (time budget)
 
-**Model**
-- `SetCompletionModel` (“SplatGPT”): SetTransformer‑style stack with
-  weapon‑conditioned embeddings and masked mean pooling.
-- Two trained variants referenced in `README.md`: **Full** and **Ultra**
-  (both ~**83M params**).
+- 5 minutes: open `notebooks/colab_demo.ipynb` and "Run all" (tokenization,
+  decoding/legality, and an interpretability readout).
+- 30 minutes: read `docs/START_HERE.md`, skim the core implementation files
+  below, and (optionally) run the Sendou eval if you have local artifacts.
 
-**Decoding / constraints**
-- **Greedy closure + beam search over capstones**, then an **exact allocator**
-  that materializes a legal 3‑main/9‑sub build under AP and slot rules.
+## Evidence map (best places to look)
 
-**Interpretability**
-- **Sparse Autoencoder (SAE)** on the pooled 512‑D representation.
-- Hooking supports **probe/no‑change** tracing vs **reconstruction/edit**
-  interventions.
-- Dashboard + efficient activation storage + local activation server for fast,
-  repeatable feature investigations.
-
-**Serving / systems**
-- FastAPI inference service with artifact loading via env‑configured URLs.
-- Docker/Make targets for packaging + repeatable runs.
-
-## Evaluation (what’s here, what’s optional)
-
-- Trained‑model compute notes live in `README.md` (Full vs Ultra).
-- A reconstruction‑from‑partial‑info evaluation (Sendou) lives under
-  `src/splatnlp/eval/` (entrypoint: `src/splatnlp/eval/sendou_compare.py`), with
-  baselines and paired comparisons.
-- The most “end‑to‑end wow path” depends on large local artifacts
-  (checkpoints / activation DBs); the Colab demo + activation server exist to
-  keep the review experience lightweight.
-
-## Evidence map (best places to look in the repo)
-
-**Fast reviewer path**
-- Reviewer guide: `docs/START_HERE.md`
-- MechInterp workflow: `docs/mechinterp_workflow.md`
-- Colab demo: `notebooks/colab_demo.ipynb`
-- Tests / CI: `tests/`, `.github/workflows/tests.yml`
-
-**Core implementation**
+- Start here: `docs/START_HERE.md`
+- MechInterp workflow notes: `docs/mechinterp_workflow.md`
 - Model: `src/splatnlp/model/models.py`
 - Training loop + DDP path: `src/splatnlp/model/training_loop.py`,
   `src/splatnlp/model/cli.py`
-- Constraint‑aware decoding: `src/splatnlp/utils/reconstruct/beam_search.py`,
+- Constraint-aware decoding: `src/splatnlp/utils/reconstruct/beam_search.py`,
   `src/splatnlp/utils/reconstruct/allocator.py`
-- SAE + hook (probe vs reconstruction/edit): `src/splatnlp/monosemantic_sae/`,
-  `src/splatnlp/monosemantic_sae/hooks.py`
-- Activation server (avoid repeated cold loads): `src/splatnlp/mechinterp/server/activation_server.py`
-- FastAPI service: `src/splatnlp/serve/app.py`, `src/splatnlp/serve/load_model.py`
-- Deploy packaging: `dockerfile`, `Makefile`
+- SAE + hook (probe vs edit): `src/splatnlp/monosemantic_sae/hooks.py`,
+  `src/splatnlp/monosemantic_sae/models.py`
+- Decoder-output experiment: `src/splatnlp/mechinterp/experiments/decoder_output.py`
+- Activation server: `src/splatnlp/mechinterp/server/activation_server.py`
+- Serving: `src/splatnlp/serve/app.py`, `src/splatnlp/serve/load_model.py`
+- Tests / CI: `tests/`, `.github/workflows/tests.yml`
 
 ## How to verify quickly (no big artifacts)
 
 - Install + run tests: `poetry install --with dev && poetry run pytest -q`
-- If you only do one thing: open `notebooks/colab_demo.ipynb` (linked in
-  `docs/START_HERE.md`) and “Run all”.
 - Optional local eval (requires `test_data/` + `saved_models/` present):
   `poetry run python -m splatnlp.eval.sendou_compare --masks 1 2 3 --limit 50`
