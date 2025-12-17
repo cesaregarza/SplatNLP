@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,6 +15,69 @@ from splatnlp.eval.sendou_baseline import (
     load_sendou_builds,
     split_builds_by_tier,
 )
+
+MAX_TOTAL_AP = 57
+MAX_AP_L1 = MAX_TOTAL_AP * 2
+
+RefBuild = tuple[dict[str, int], Counter[str]]
+RefByWeapon = dict[str, list[RefBuild]]
+
+
+def _normalize_ap_dict(ap: dict[str, int] | None) -> dict[str, int] | None:
+    if ap is None:
+        return None
+    return {str(k): int(v) for k, v in ap.items() if int(v) != 0}
+
+
+def _ap_l1_diff(a: dict[str, int], b: dict[str, int]) -> int:
+    keys = set(a) | set(b)
+    return int(sum(abs(int(a.get(k, 0)) - int(b.get(k, 0))) for k in keys))
+
+
+def _accuracy_from_ap(a: dict[str, int], b: dict[str, int]) -> float:
+    return 1.0 - float(_ap_l1_diff(a, b)) / float(MAX_AP_L1)
+
+
+def _slot_counter(abilities_ap: dict[str, int]) -> Counter[str]:
+    return Counter(ap_to_slot_items(abilities_ap))
+
+
+def _multiset_is_subset(need: Counter[str], have: Counter[str]) -> bool:
+    return not (need - have)
+
+
+def _completion_slot_accuracy_from_counters(
+    *,
+    truth: Counter[str],
+    observed: Counter[str],
+    pred: Counter[str],
+) -> float:
+    missing = truth - observed
+    denom = sum(missing.values())
+    if denom <= 0:
+        return 1.0
+
+    added = pred - observed
+    correct = sum((added & missing).values())
+    return float(correct) / float(denom)
+
+
+def _observed_slot_recall_from_counters(
+    *, observed: Counter[str], pred: Counter[str]
+) -> float:
+    denom = sum(observed.values())
+    if denom <= 0:
+        return 1.0
+    correct = sum((pred & observed).values())
+    return float(correct) / float(denom)
+
+
+def _context_violation_from_counters(
+    *, observed: Counter[str], pred: Counter[str] | None
+) -> float:
+    if pred is None:
+        return 1.0 if sum(observed.values()) > 0 else 0.0
+    return 0.0 if _multiset_is_subset(observed, pred) else 1.0
 
 
 def _load_json(path: Path) -> Any:
@@ -36,15 +99,12 @@ def _completion_slot_accuracy(
 
     truth = Counter(ap_to_slot_items(dict(case["truth_abilities_ap"])))
     observed = Counter(ap_to_slot_items(dict(case["masked_abilities_ap"])))
-    missing = truth - observed
-    denom = sum(missing.values())
-    if denom <= 0:
-        return 1.0
-
     pred = Counter(ap_to_slot_items(dict(pred_ap)))
-    added = pred - observed
-    correct = sum((added & missing).values())
-    return float(correct) / float(denom)
+    return _completion_slot_accuracy_from_counters(
+        truth=truth,
+        observed=observed,
+        pred=pred,
+    )
 
 
 def _bootstrap_ci_mean(
@@ -162,9 +222,30 @@ def analyze_compare_file(
         raise ValueError(f"Unexpected file shape for {path}")
 
     case_by_id = {int(c["case_id"]): c for c in cases}
+    case_cache: dict[int, dict[str, Any]] = {}
+    for cid, c in case_by_id.items():
+        truth_ap = _normalize_ap_dict(dict(c["truth_abilities_ap"])) or {}
+        truth_slots = _slot_counter(truth_ap)
+
+        observed_ap = _normalize_ap_dict(dict(c["masked_abilities_ap"])) or {}
+        observed_slots = _slot_counter(observed_ap)
+
+        case_cache[cid] = {
+            "weapon_token": str(c["weapon_token"]),
+            "truth_ap": truth_ap,
+            "truth_slots": truth_slots,
+            "observed_slots": observed_slots,
+        }
 
     overlap_by_case_id: dict[int, bool] | None = None
-    if split_overlap:
+    ref_by_weapon: RefByWeapon | None = None
+    needs_ref_set = any(m.startswith("tier1_set_") for m in metric_names)
+    needs_builds = split_overlap or needs_ref_set
+
+    train_builds = []
+    eval_builds = []
+
+    if needs_builds:
         csv_path_eff = csv_path or Path(
             str(meta.get("csv", "test_data/abilities-with-weapons.csv"))
         )
@@ -178,11 +259,13 @@ def analyze_compare_file(
         )
         weapon_vocab = _load_json(weapon_vocab_eff)
         builds = load_sendou_builds(csv_path_eff, weapon_vocab=weapon_vocab)
-        train_builds, _ = split_builds_by_tier(
+        train_builds, eval_builds = split_builds_by_tier(
             builds,
             train_tiers=list(meta.get("train_tiers", [2, 3])),
             eval_tiers=list(meta.get("eval_tiers", [1])),
         )
+
+    if split_overlap:
         train_sigs = {
             _signature(r.weapon_token, r.abilities_ap) for r in train_builds
         }
@@ -194,6 +277,13 @@ def analyze_compare_file(
                 )
                 in train_sigs
             )
+
+    if needs_ref_set:
+        ref_by_weapon = defaultdict(list)
+        for row in eval_builds:
+            ap = _normalize_ap_dict(dict(row.abilities_ap)) or {}
+            slots = _slot_counter(ap)
+            ref_by_weapon[str(row.weapon_token)].append((ap, slots))
 
     rng = np.random.default_rng(seed)
 
@@ -221,19 +311,53 @@ def analyze_compare_file(
     out["masks"] = masks
     out["metrics"] = metric_names
 
-    group_specs: list[tuple[str, list[int]]] = [
-        ("all", list(case_by_id.keys()))
-    ]
+    all_ids = list(case_by_id.keys())
+    group_specs: list[tuple[str, list[int]]] = [("all", all_ids)]
     if overlap_by_case_id is not None:
         overlap_ids = [cid for cid, flag in overlap_by_case_id.items() if flag]
         non_overlap_ids = [
             cid for cid, flag in overlap_by_case_id.items() if not flag
         ]
-        group_specs = [
-            ("all", list(case_by_id.keys())),
-            ("no_overlap", non_overlap_ids),
-            ("overlap", overlap_ids),
-        ]
+        group_specs = [("all", all_ids), ("no_overlap", non_overlap_ids)]
+        group_specs.append(("overlap", overlap_ids))
+
+    if "full" in method_rows_by_case_id and "ultra" in method_rows_by_case_id:
+        full_rows = method_rows_by_case_id["full"]
+        ultra_rows = method_rows_by_case_id["ultra"]
+        divergent = []
+        for cid in all_ids:
+            full_row = full_rows.get(cid)
+            ultra_row = ultra_rows.get(cid)
+            if full_row is None or ultra_row is None:
+                continue
+            full_ap = _normalize_ap_dict(
+                full_row.get("predicted_top1_achieved_ap")
+            )
+            ultra_ap = _normalize_ap_dict(
+                ultra_row.get("predicted_top1_achieved_ap")
+            )
+            if full_ap != ultra_ap:
+                divergent.append(cid)
+        if divergent:
+            divergent_set = set(divergent)
+            group_specs.append(("full_ultra_divergent", divergent))
+            if overlap_by_case_id is not None:
+                group_specs.append(
+                    (
+                        "full_ultra_divergent_no_overlap",
+                        [
+                            cid
+                            for cid in non_overlap_ids
+                            if cid in divergent_set
+                        ],
+                    )
+                )
+                group_specs.append(
+                    (
+                        "full_ultra_divergent_overlap",
+                        [cid for cid in overlap_ids if cid in divergent_set],
+                    )
+                )
 
     for group_name, group_case_ids in group_specs:
         group_summaries: list[MethodSummary] = []
@@ -260,10 +384,42 @@ def analyze_compare_file(
                         if row is None:
                             arr.append(0.0)
                             continue
+
+                        cache = case_cache[cid]
+                        truth_ap: dict[str, int] = cache["truth_ap"]
+                        truth_slots: Counter[str] = cache["truth_slots"]
+                        observed_slots: Counter[str] = cache["observed_slots"]
+
+                        pred_best_ap = _normalize_ap_dict(
+                            row.get("predicted_best_achieved_ap")
+                        )
+                        pred_top1_ap = _normalize_ap_dict(
+                            row.get("predicted_top1_achieved_ap")
+                        )
+                        pred_best_slots = (
+                            None
+                            if pred_best_ap is None
+                            else _slot_counter(pred_best_ap)
+                        )
+                        pred_top1_slots = (
+                            None
+                            if pred_top1_ap is None
+                            else _slot_counter(pred_top1_ap)
+                        )
+
                         if metric == "best_accuracy":
                             arr.append(float(row.get("best_accuracy", 0.0)))
+                        elif metric == "top1_best_accuracy":
+                            if pred_top1_ap is None:
+                                arr.append(0.0)
+                            else:
+                                arr.append(
+                                    _accuracy_from_ap(truth_ap, pred_top1_ap)
+                                )
                         elif metric == "exact_hit":
                             arr.append(float(row.get("exact_hit", 0.0)))
+                        elif metric == "top1_exact_hit":
+                            arr.append(1.0 if pred_top1_ap == truth_ap else 0.0)
                         elif metric == "completion_slot_acc":
                             arr.append(
                                 _completion_slot_accuracy(
@@ -271,6 +427,115 @@ def analyze_compare_file(
                                     row.get("predicted_best_achieved_ap"),
                                 )
                             )
+                        elif metric == "top1_completion_slot_acc":
+                            if pred_top1_slots is None:
+                                arr.append(0.0)
+                            else:
+                                arr.append(
+                                    _completion_slot_accuracy_from_counters(
+                                        truth=truth_slots,
+                                        observed=observed_slots,
+                                        pred=pred_top1_slots,
+                                    )
+                                )
+                        elif metric == "top1_observed_slot_recall":
+                            if pred_top1_slots is None:
+                                arr.append(0.0)
+                            else:
+                                arr.append(
+                                    _observed_slot_recall_from_counters(
+                                        observed=observed_slots,
+                                        pred=pred_top1_slots,
+                                    )
+                                )
+                        elif metric == "top1_context_violation":
+                            arr.append(
+                                _context_violation_from_counters(
+                                    observed=observed_slots,
+                                    pred=pred_top1_slots,
+                                )
+                            )
+                        elif metric.startswith("tier1_set_"):
+                            if ref_by_weapon is None:
+                                raise ValueError(
+                                    "tier1_set_* metrics require eval builds."
+                                )
+
+                            refs = ref_by_weapon.get(cache["weapon_token"], [])
+                            consistent_refs: list[RefBuild] = []
+                            for ref_ap, ref_slots in refs:
+                                if _multiset_is_subset(
+                                    observed_slots, ref_slots
+                                ):
+                                    consistent_refs.append((ref_ap, ref_slots))
+                            if not consistent_refs:
+                                arr.append(0.0)
+                                continue
+
+                            if metric == "tier1_set_best_accuracy":
+                                if pred_best_ap is None:
+                                    arr.append(0.0)
+                                else:
+                                    best = max(
+                                        _accuracy_from_ap(pred_best_ap, ref_ap)
+                                        for ref_ap, _ in consistent_refs
+                                    )
+                                    arr.append(float(best))
+                            elif metric == "tier1_set_best_accuracy_top1":
+                                if pred_top1_ap is None:
+                                    arr.append(0.0)
+                                else:
+                                    best = max(
+                                        _accuracy_from_ap(pred_top1_ap, ref_ap)
+                                        for ref_ap, _ in consistent_refs
+                                    )
+                                    arr.append(float(best))
+                            elif metric == "tier1_set_completion_slot_acc":
+                                if pred_best_slots is None:
+                                    arr.append(0.0)
+                                else:
+                                    best = max(
+                                        _completion_slot_accuracy_from_counters(
+                                            truth=ref_slots,
+                                            observed=observed_slots,
+                                            pred=pred_best_slots,
+                                        )
+                                        for _, ref_slots in consistent_refs
+                                    )
+                                    arr.append(float(best))
+                            elif metric == "tier1_set_completion_slot_acc_top1":
+                                if pred_top1_slots is None:
+                                    arr.append(0.0)
+                                else:
+                                    best = max(
+                                        _completion_slot_accuracy_from_counters(
+                                            truth=ref_slots,
+                                            observed=observed_slots,
+                                            pred=pred_top1_slots,
+                                        )
+                                        for _, ref_slots in consistent_refs
+                                    )
+                                    arr.append(float(best))
+                            elif metric == "tier1_set_exact_hit":
+                                if pred_best_slots is None:
+                                    arr.append(0.0)
+                                else:
+                                    hit = any(
+                                        pred_best_slots == ref_slots
+                                        for _, ref_slots in consistent_refs
+                                    )
+                                    arr.append(1.0 if hit else 0.0)
+                            elif metric == "tier1_set_exact_hit_top1":
+                                if pred_top1_slots is None:
+                                    arr.append(0.0)
+                                else:
+                                    hit = any(
+                                        pred_top1_slots == ref_slots
+                                        for _, ref_slots in consistent_refs
+                                    )
+                                    arr.append(1.0 if hit else 0.0)
+                            else:
+                                raise ValueError(f"Unknown metric: {metric}")
                         else:
                             raise ValueError(f"Unknown metric: {metric}")
                     values_by_method[method] = np.array(arr, dtype=np.float64)
@@ -345,7 +610,14 @@ def _print_report(report: dict[str, Any], *, ci: float) -> None:
         )
     print(f"methods={methods} masks={masks} metrics={metrics}")
 
-    for group in ["all", "no_overlap", "overlap"]:
+    for group in [
+        "all",
+        "no_overlap",
+        "overlap",
+        "full_ultra_divergent",
+        "full_ultra_divergent_no_overlap",
+        "full_ultra_divergent_overlap",
+    ]:
         if group not in report:
             continue
         print(f"\n[{group}]")
@@ -362,7 +634,8 @@ def _print_report(report: dict[str, Any], *, ci: float) -> None:
                     if s is None:
                         continue
                     parts.append(
-                        f"{method}={s['mean']:.4f} [{s['ci_low']:.4f},{s['ci_high']:.4f}]"
+                        f"{method}={s['mean']:.4f} "
+                        f"[{s['ci_low']:.4f},{s['ci_high']:.4f}]"
                     )
                 joined = "  ".join(parts)
                 print(f" mask={mask}: {joined}")
@@ -405,7 +678,22 @@ def main() -> None:
         type=str,
         nargs="+",
         default=["best_accuracy", "completion_slot_acc"],
-        choices=["best_accuracy", "completion_slot_acc", "exact_hit"],
+        choices=[
+            "best_accuracy",
+            "completion_slot_acc",
+            "exact_hit",
+            "top1_best_accuracy",
+            "top1_completion_slot_acc",
+            "top1_exact_hit",
+            "top1_observed_slot_recall",
+            "top1_context_violation",
+            "tier1_set_best_accuracy",
+            "tier1_set_best_accuracy_top1",
+            "tier1_set_completion_slot_acc",
+            "tier1_set_completion_slot_acc_top1",
+            "tier1_set_exact_hit",
+            "tier1_set_exact_hit_top1",
+        ],
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--bootstrap", type=int, default=5000)

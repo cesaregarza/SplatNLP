@@ -9,14 +9,23 @@ and to give a shared vocabulary for "depth" when discussing features.
 
 ## Context: Full vs Ultra output quality is (currently) similar
 
-On the Sendou Tier-1 reconstruction eval, Full and Ultra are statistically
-indistinguishable across masks 1-6 on both `best_accuracy` and
-`completion_slot_acc`.
+On the Sendou Tier-1 reconstruction eval, Full and Ultra are extremely close on
+the original single-reference, oracle best-of-3 metrics (`best_accuracy` and
+`completion_slot_acc`).
 
-See: `docs/sendou_tier1_eval_report.md`.
+However, diagnostic views (Top-1 and multi-reference Tier-1 set scoring) show a
+modest but consistent Ultra advantage, especially on the slice where the models
+disagree. See: `docs/sendou_tier1_eval_report.md`.
 
 This matters because it helps decouple task performance from feature depth: the
 features can differ substantially even when the eval metrics do not.
+
+Working synthesis: the reconstruction benchmark is still useful, but it is
+single-reference in a multi-solution domain. It can correctly say "both models
+are strong" while undercounting cases where Ultra produces a different-but-good
+Tier-1-like completion. In parallel, the label evidence suggests Ultra's SAE
+features are deeper (more strategic axes, fewer single-driver bundles), which
+can matter for interpretability even when headline task metrics barely move.
 
 ## What "feature depth" means in this doc
 
