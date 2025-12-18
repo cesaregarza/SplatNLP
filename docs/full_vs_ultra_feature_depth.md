@@ -20,12 +20,14 @@ disagree. See: `docs/sendou_tier1_eval_report.md`.
 This matters because it helps decouple task performance from feature depth: the
 features can differ substantially even when the eval metrics do not.
 
-Working synthesis: the reconstruction benchmark is still useful, but it is
-single-reference in a multi-solution domain. It can correctly say "both models
-are strong" while undercounting cases where Ultra produces a different-but-good
-Tier-1-like completion. In parallel, the label evidence suggests Ultra's SAE
-features are deeper (more strategic axes, fewer single-driver bundles), which
-can matter for interpretability even when headline task metrics barely move.
+Working synthesis:
+- The reconstruction benchmark is still useful, but it is single-reference in a
+  multi-solution domain; it can undercount different-but-Tier-1-like
+  completions.
+- The models can look close on headline task metrics while still differing
+  substantially in feature geometry: the current labels suggest Ultra has more
+  strategy/role axes and fewer single-driver bundles, which matters for
+  interpretability even when task metrics barely move.
 
 ## What "feature depth" means in this doc
 
@@ -189,9 +191,9 @@ Example (respawn/stealth packages):
   - **13352** "Zombie Slayer (ISM + CB/SJ)" (a conditional "zombie package")
 
 This doesn't mean Full "lacks" the concept; it often means the Full SAE (2K)
-cannot disentangle overlapping concepts as cleanly as the Ultra SAE (24K), and
-and/or the Ultra model's representation itself is more separable after longer
-training.
+cannot disentangle overlapping concepts as cleanly as the Ultra SAE (24K),
+or because the Ultra model's representation itself is more separable after
+longer training.
 
 ## Beyond horizontal splitting: vertical hierarchy
 
@@ -292,7 +294,9 @@ unlabeled 2,013 features. The current snapshot (35 Full labels vs 103 Ultra) is
 too small to be conclusive.
 
 A sharper test: run the same labeling protocol on a random sample of Full
-features and compare the category distribution at scale.
+features and compare the category distribution at scale, ideally with matching
+on some notion of feature "strength" (for example, decoder norm or logit
+influence percentile).
 
 ## Case study: Splatana Stamper beam trace comparison
 
@@ -352,6 +356,10 @@ Full's per-feature contributions are ~30-50x stronger. This reflects:
 - **Ultra**: many features contribute small amounts. The decision emerges from
   distributed voting across dozens of weak contributors.
 
+Caveat: raw magnitude comparisons can be affected by activation scaling and
+dictionary size. A more scale-invariant view is contribution concentration (for
+example, top promoter share or a Herfindahl index over positive contributions).
+
 ### Feature-by-feature breakdown
 
 #### Step 2: Comeback selection (both models agree)
@@ -374,8 +382,9 @@ zombie path. Ultra has no equivalent "lock-in" feature.
 Full continues the zombie package: f889 is another tactical bundle that
 promotes QR stacking alongside Comeback (and often Stealth Jump).
 
-Ultra pivots to a different build philosophy. f9252 represents a strategic
-concept (scaling ISM and SPU together), not a specific meta build.
+Ultra pivots to a different build philosophy. f9252 represents a tactical
+concept (scaling ISM and SPU together) that reads more like an axis than a
+specific meta build.
 
 #### Step 4: Utility additions
 
@@ -387,7 +396,7 @@ concept (scaling ISM and SPU together), not a specific meta build.
 Full's f1654 is a mechanical detector: it fires on exactly 3 AP of Ink
 Resistance (an "omamori"/utility-spread investment pattern).
 
-Ultra's f6291 is a strategic feature: it encodes investment philosophy
+Ultra's f6291 is a tactical feature: it encodes investment philosophy
 (distributed sub/special investment) rather than a specific AP threshold.
 
 ### Suppressor patterns
@@ -433,24 +442,6 @@ This trace comparison supports the vertical hierarchy hypothesis:
    coverage). This matches the "omamori"/utility-spread philosophy: small
    investments across multiple defensive options to prevent catastrophic
    outcomes without over-committing to any single family.
-
-## Working hypothesis (what to test next)
-
-The observed depth gap plausibly reflects a mix of:
-
-1. **Effective SAE capacity**: Ultra's SAE is larger (selected ex post to hit
-   the target "healthy" regime), which reduces the pressure to compress
-   multiple correlated concepts into one latent and makes splitting easier.
-2. **Backbone representation**: Ultra's longer training may encode more (or
-   more separable) high-level structure, making strategic/role axes easier for
-   the SAE to isolate.
-
-To disentangle these:
-
-- Compare against smaller Ultra SAE runs from the sweep (lower expansion
-  factors) to estimate how much "depth" is purely capacity-driven.
-- Train a larger Full SAE (targeting similar sparsity/MSE) to test whether
-  strategic/role concepts emerge with more splitting.
 
 ## Practical implications (why this matters)
 

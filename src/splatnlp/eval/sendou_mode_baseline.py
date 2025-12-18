@@ -17,11 +17,99 @@ from splatnlp.eval.sendou_baseline import (
     slots_to_build,
     split_builds_by_tier,
 )
+from splatnlp.utils.constants import (
+    CANONICAL_MAIN_ONLY_ABILITIES,
+    STANDARD_ABILITIES,
+)
 from splatnlp.utils.reconstruct.classes import Build
 
 
 def _load_json(path: Path) -> dict:
     return orjson.loads(path.read_bytes())
+
+
+def _expand_slots(counter: Counter[str]) -> list[str]:
+    out: list[str] = []
+    for item in sorted(counter.keys()):
+        out.extend([item] * int(counter[item]))
+    return out
+
+
+def _context_preserving_completion(
+    observed: Counter[str], completion: Counter[str]
+) -> Build:
+    observed_mains = Counter(
+        {k: v for k, v in observed.items() if k.endswith("_main")}
+    )
+    observed_subs = Counter(
+        {k: v for k, v in observed.items() if k.endswith("_sub")}
+    )
+    observed_mains_n = sum(observed_mains.values())
+    observed_subs_n = sum(observed_subs.values())
+    missing_mains = 3 - observed_mains_n
+    missing_subs = 9 - observed_subs_n
+    if missing_mains < 0 or missing_subs < 0:
+        raise ValueError(
+            "Invalid observed slots: "
+            f"mains={observed_mains_n} subs={observed_subs_n}"
+        )
+
+    completion_mains = Counter(
+        {k: v for k, v in completion.items() if k.endswith("_main")}
+    )
+    completion_subs = Counter(
+        {k: v for k, v in completion.items() if k.endswith("_sub")}
+    )
+
+    taken_slots = set()
+    for item in observed_mains.keys():
+        family = item[:-5]
+        if family in CANONICAL_MAIN_ONLY_ABILITIES:
+            taken_slots.add(CANONICAL_MAIN_ONLY_ABILITIES[family])
+
+    fill_mains: list[str] = []
+    if missing_mains > 0:
+        need_mains = completion_mains - observed_mains
+        for item in _expand_slots(need_mains):
+            family = item[:-5]
+            if family in CANONICAL_MAIN_ONLY_ABILITIES:
+                slot = CANONICAL_MAIN_ONLY_ABILITIES[family]
+                if slot in taken_slots:
+                    continue
+                taken_slots.add(slot)
+            fill_mains.append(item)
+            if len(fill_mains) >= missing_mains:
+                break
+
+        if len(fill_mains) < missing_mains:
+            standard_pool = [
+                item
+                for item in _expand_slots(completion_mains)
+                if item[:-5] not in CANONICAL_MAIN_ONLY_ABILITIES
+            ]
+            if not standard_pool:
+                standard_pool = [f"{STANDARD_ABILITIES[0]}_main"]
+            while len(fill_mains) < missing_mains:
+                fill_mains.append(
+                    standard_pool[len(fill_mains) % len(standard_pool)]
+                )
+
+    fill_subs: list[str] = []
+    if missing_subs > 0:
+        need_subs = completion_subs - observed_subs
+        fill_subs = _expand_slots(need_subs)[:missing_subs]
+        if len(fill_subs) < missing_subs:
+            fallback_pool = _expand_slots(completion_subs)
+            if not fallback_pool:
+                fallback_pool = [f"{STANDARD_ABILITIES[0]}_sub"]
+            while len(fill_subs) < missing_subs:
+                fill_subs.append(
+                    fallback_pool[len(fill_subs) % len(fallback_pool)]
+                )
+
+    slot_items = _expand_slots(observed_mains) + fill_mains
+    slot_items += _expand_slots(observed_subs) + fill_subs
+    return slots_to_build(slot_items)
 
 
 def _abilities_key(abilities_ap: dict[str, int]) -> tuple[tuple[str, int], ...]:
@@ -75,11 +163,13 @@ def choose_mode_completion(
     if not conditional:
         return mode_builds[weapon_token]
 
-    for _, slot_counts, build in candidates.get(weapon_token, []):
+    for _, slot_counts, _build in candidates.get(weapon_token, []):
         if not (context_slots - slot_counts):
-            return build
+            return _context_preserving_completion(context_slots, slot_counts)
 
-    return mode_builds[weapon_token]
+    mode_build = mode_builds[weapon_token]
+    mode_slots = Counter(ap_to_slot_items(mode_build.achieved_ap))
+    return _context_preserving_completion(context_slots, mode_slots)
 
 
 def run_eval(
