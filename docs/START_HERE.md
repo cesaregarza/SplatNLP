@@ -7,6 +7,8 @@ code lives, and what you can run quickly.
 
 If you want the fastest high-level skim: `docs/PROJECT_ONEPAGER.md`.
 
+If you want the fastest “wow” path: `docs/SHOWCASE.md`.
+
 If you only do one thing: open the Colab and “Run all”. It downloads pretrained
 artifacts (model + vocabs + Ultra SAE) and walks through token-space inference,
 constraint-aware reconstruction, and SAE feature readouts.

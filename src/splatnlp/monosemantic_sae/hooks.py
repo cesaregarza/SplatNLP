@@ -152,7 +152,7 @@ class SetCompletionHook:
 
         Returns:
             str: The current mode description ("BYPASS", "NO-CHANGE", or
-                "EDIT(n=<idx>, v=<value>)").
+                "RECON", or "EDIT(n=<idx>, v=<value>)").
         """
         return (
             "BYPASS"
@@ -160,7 +160,11 @@ class SetCompletionHook:
             else (
                 "NO-CHANGE"
                 if self.no_change
-                else f"EDIT(n={self.idx}, v={self.value})"
+                else (
+                    "RECON"
+                    if self.idx is None or self.value is None
+                    else f"EDIT(n={self.idx}, v={self.value})"
+                )
             )
         )
 
@@ -192,6 +196,14 @@ class SetCompletionHook:
         """
         self.idx = neuron_number
         self.value = neuron_value
+        self.bypass = False
+        self.no_change = False
+        logger.debug("[Hook %s]", self.mode_str)
+
+    def clear_edit(self) -> None:
+        """Clears neuron editing parameters and ensures reconstruction mode."""
+        self.idx = None
+        self.value = None
         self.bypass = False
         self.no_change = False
         logger.debug("[Hook %s]", self.mode_str)

@@ -25,6 +25,7 @@ Key numbers: ~83M params; pooled 512-D rep; Ultra SAE has 24,576 features.
   decoding/legality, and an interpretability readout).
 - 30 minutes: read `docs/START_HERE.md`, skim the core implementation files
   below, and (optionally) run the Sendou eval if you have local artifacts.
+- For a curated “wow” path: start with `docs/SHOWCASE.md`.
 
 ## Evidence map (best places to look)
 
