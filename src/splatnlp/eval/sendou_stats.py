@@ -448,7 +448,10 @@ def analyze_compare_file(
                                         pred=pred_top1_slots,
                                     )
                                 )
-                        elif metric == "top1_context_violation":
+                        elif metric in (
+                            "top1_context_violation",
+                            "top1_edit_chance",
+                        ):
                             arr.append(
                                 _context_violation_from_counters(
                                     observed=observed_slots,
@@ -687,6 +690,7 @@ def main() -> None:
             "top1_exact_hit",
             "top1_observed_slot_recall",
             "top1_context_violation",
+            "top1_edit_chance",
             "tier1_set_best_accuracy",
             "tier1_set_best_accuracy_top1",
             "tier1_set_completion_slot_acc",

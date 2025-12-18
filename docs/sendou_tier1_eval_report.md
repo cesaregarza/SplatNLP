@@ -231,9 +231,9 @@ case (for `top_k=3`).
 - `top1_completion_slot_acc`
 - `top1_exact_hit`
 
-**Context preservation**
+**Edit behavior (does the method change observed slot-items?)**
 - `top1_observed_slot_recall = |pred_slots & observed_slots| / |observed_slots|`
-- `top1_context_violation = 1` if any observed slot-item is missing in `pred`
+- `top1_edit_chance = 1` if any observed slot-item is missing in `pred`
 
 **Multi-reference Tier-1 set scoring (wrong-but-good)**
 
@@ -381,7 +381,7 @@ Tier-1 set completion_slot_acc_top1 on the no-overlap slice:
 | 5 | 0.6217 [0.5995,0.6433] | 0.6252 [0.6030,0.6463] |
 | 6 | 0.6440 [0.6230,0.6646] | 0.6566 [0.6364,0.6772] |
 
-### Context preservation (Top-1)
+### Edit behavior (Top-1)
 
 top1_observed_slot_recall (mean [95% CI]):
 
@@ -394,7 +394,7 @@ top1_observed_slot_recall (mean [95% CI]):
 | 5 | 1.0000 [1.0000,1.0000] | 1.0000 [1.0000,1.0000] | 0.8782 [0.8645,0.8916] | 0.8853 [0.8717,0.8987] |
 | 6 | 1.0000 [1.0000,1.0000] | 1.0000 [1.0000,1.0000] | 0.8831 [0.8695,0.8967] | 0.8918 [0.8778,0.9057] |
 
-top1_context_violation (mean [95% CI]):
+top1_edit_chance (mean [95% CI]):
 
 | mask | random | conditional | full | ultra |
 | ---: | :--- | :--- | :--- | :--- |
@@ -409,7 +409,9 @@ Key read:
 - `random` and `conditional` are perfect on these by construction: they start
   from the observed slot-items and only fill missing ones.
 - Models are not perfect here because they do not see exact slot-items (only
-  threshold tokens) and because reconstruction is constrained by legality.
+  threshold tokens), and because the full system can revise the set if it finds
+  something better (a useful emergent behavior, even though it hurts strict
+  reconstruction).
 
 ## Paired Comparisons (Highlights)
 
@@ -527,7 +529,7 @@ poetry run python -m splatnlp.eval.sendou_stats \
     tmp_results/sendou_compare_train2-3_eval1_masks4-5-6_limit0_seed42_beam3_steps8_top3_condfix.json \
   --metrics \
     top1_best_accuracy top1_completion_slot_acc top1_exact_hit \
-    top1_observed_slot_recall top1_context_violation \
+    top1_observed_slot_recall top1_edit_chance \
     tier1_set_best_accuracy_top1 tier1_set_completion_slot_acc_top1 \
   --bootstrap 10000 --ci 0.95 --seed 0 --split-overlap \
   --out tmp_results/sendou_stats_train2-3_eval1_masks1-6_seed0_boot10000_multirefTier1SlotBased_condfix.json
