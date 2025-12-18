@@ -448,6 +448,5 @@ This trace comparison supports the vertical hierarchy hypothesis:
 - **Interpretability**: Ultra features are easier to narrate as reasons during
   beam search because they correspond to coherent sub-decisions (role, death
   tolerance, special economy philosophy), not just "more SSU".
-- **Steering/ablation**: deeper features are better knobs; they change a build
-  along an intelligible axis instead of causing collateral changes from blended
-  detectors.
+- **Feature coherence**: deeper features align with intelligible build axes,
+  reducing collateral entanglement from blended detectors.

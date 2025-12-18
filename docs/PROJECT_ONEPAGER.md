@@ -13,7 +13,7 @@ Key numbers: ~83M params; pooled 512-D rep; Ultra SAE has 24,576 features.
 - Constraint-aware set completion: decode learned token probabilities into a
   legal build under hard rules (3 mains / 9 subs, 57 AP budget, slot rules).
 - MechInterp workflow + tooling: Sparse Autoencoder (SAE) on a pooled 512-D
-  representation with probe/edit hooks, anti-flanderization guidance (core vs
+  representation with probe hooks, anti-flanderization guidance (core vs
   tail), beam-trace attribution, and an activation server to avoid repeated
   cold loads.
 - Eval + baselines: reconstruction-from-partial-info harness with baselines and

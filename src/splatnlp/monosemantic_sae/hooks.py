@@ -201,11 +201,9 @@ class SetCompletionHook:
         logger.debug("[Hook %s]", self.mode_str)
 
     def clear_edit(self) -> None:
-        """Clears neuron editing parameters and ensures reconstruction mode."""
+        """Clears neuron editing parameters without changing hook mode."""
         self.idx = None
         self.value = None
-        self.bypass = False
-        self.no_change = False
         logger.debug("[Hook %s]", self.mode_str)
 
 
