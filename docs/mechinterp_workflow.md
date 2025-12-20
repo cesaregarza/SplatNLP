@@ -11,9 +11,10 @@ A detailed guide for investigating Sparse Autoencoder (SAE) features using Claud
 5. [Tier 1: Overview](#tier-1-overview)
 6. [Tier 2: Deep Dive](#tier-2-deep-dive)
 7. [Tier 3: Deeper Dive](#tier-3-deeper-dive)
-8. [Quick Reference](#quick-reference)
-9. [Common Pitfalls](#common-pitfalls)
-10. [Worked Example](#worked-example)
+8. [Advanced: Beam Trace Net Contribution Analysis](#advanced-beam-trace-net-contribution-analysis)
+9. [Quick Reference](#quick-reference)
+10. [Common Pitfalls](#common-pitfalls)
+11. [Worked Example](#worked-example)
 
 ---
 
@@ -121,6 +122,7 @@ This workflow analyzes gear builds in Splatoon 3. Key concepts:
 | CB | Comeback |
 | SJ | Stealth Jump |
 | LDE | Last-Ditch Effort |
+| RES | Ink Resistance Up |
 
 ---
 
@@ -728,6 +730,139 @@ state.update_hypothesis("h1", status="rejected")
 ```
 
 This creates an audit trail for revisiting later.
+
+---
+
+## Advanced: Beam Trace Net Contribution Analysis
+
+When you want to understand how features influence the model's actual token selections during generation, use **beam trace net contribution analysis**. This goes beyond understanding what activates a feature to understanding what the feature *does* to model outputs.
+
+### When to Use This
+
+- Understanding a feature's role in the generation process
+- Comparing how Full vs Ultra SAEs influence the same weapon's build
+- Finding which features drive specific ability selections
+- Identifying features that suppress certain abilities
+
+### Net Contribution Formula
+
+For each token selection, the **net contribution** of a feature measures how much it pushes (or suppresses) that token's logit:
+
+```
+contribution_f = activation_f × (d_f · W_out[t])
+```
+
+Where:
+- `activation_f` = the feature's activation value for this input
+- `d_f` = the feature's decoder direction (512-dimensional vector)
+- `W_out[t]` = the output layer weights for token t
+- `d_f · W_out[t]` = dot product giving the feature's "vote" direction for token t
+
+**Interpretation:**
+- **Positive contribution**: Feature pushes toward selecting this token
+- **Negative contribution**: Feature suppresses this token
+- **Magnitude**: Strength of influence
+
+### Running Beam Trace Analysis
+
+```python
+from splatnlp.mechinterp.beam_trace import run_beam_trace
+import json
+
+# Run beam trace for a weapon from NULL
+trace = run_beam_trace(
+    model_type="ultra",  # or "full"
+    weapon_id=8000,      # Splatana Stamper
+    initial_tokens=[],   # Empty = NULL start
+    max_steps=6
+)
+
+# Save for analysis
+with open("/tmp/trace.json", "w") as f:
+    json.dump(trace, f, indent=2)
+```
+
+### Computing Net Contributions
+
+```python
+import torch
+from splatnlp.mechinterp.skill_helpers import load_context
+
+ctx = load_context("ultra")
+
+# Load SAE decoder weights
+sae_path = '/mnt/e/dev_spillover/SplatNLP/sae_runs/run_20250704_191557/sae_model_final.pth'
+sae_ckpt = torch.load(sae_path, map_location='cpu', weights_only=True)
+decoder = sae_ckpt['decoder.weight']  # [512, num_features]
+
+# Load model output layer
+model_path = '/mnt/e/dev_spillover/SplatNLP/saved_models/dataset_v0_2_super/clean_slate.pth'
+model_ckpt = torch.load(model_path, map_location='cpu', weights_only=True)
+output_weight = model_ckpt['output_layer.weight']  # [vocab_size, 512]
+
+def compute_contributions(step, selected_token_id):
+    """Compute net contributions for a trace step."""
+    contributions = []
+
+    for feat in step['top_features']:
+        fid = feat['feature_id']
+        act = feat['activation']
+
+        # Get decoder direction for this feature
+        d_f = decoder[:, fid]
+
+        # Get output weight for selected token
+        w_t = output_weight[selected_token_id]
+
+        # Net contribution = activation × (decoder · output_weight)
+        contribution = act * torch.dot(d_f, w_t).item()
+
+        contributions.append({
+            'feature_id': fid,
+            'activation': act,
+            'contribution': contribution,
+            'label': get_label(fid)  # from consolidated labels
+        })
+
+    # Sort by absolute contribution
+    contributions.sort(key=lambda x: abs(x['contribution']), reverse=True)
+    return contributions
+```
+
+### Interpreting Contributions
+
+For each step in the trace, report contributions as `±X` values:
+
+| Contribution | Interpretation |
+|-------------|----------------|
+| > +0.5 | Strong driver of this selection |
+| +0.1 to +0.5 | Moderate driver |
+| -0.1 to +0.1 | Minimal influence |
+| -0.5 to -0.1 | Moderate suppressor |
+| < -0.5 | Strong suppressor |
+
+**Example output:**
+```
+Step 1: Selected swim_speed_up_12 (prob=0.847)
+  Top contributors:
+    [+0.82] Feature 1234: "SSU Stacker"
+    [+0.31] Feature 5678: "Mobility Build"
+  Top suppressors:
+    [-0.45] Feature 9012: "Ink Efficiency Focus"
+    [-0.22] Feature 3456: "Anchor Playstyle"
+```
+
+### Comparing Full vs Ultra Traces
+
+This analysis reveals architectural differences between SAE models:
+
+| Aspect | Full Model | Ultra Model |
+|--------|------------|-------------|
+| Per-feature strength | 30-50x stronger contributions | Distributed, weaker individual |
+| Archetype commitment | Early, decisive | Gradual, consensus-based |
+| Feature count | Fewer features active | More features voting |
+
+Use this to understand whether a model commits to an archetype early (Full) or builds consensus across many features (Ultra).
 
 ---
 
