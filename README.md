@@ -1,6 +1,6 @@
-# SplatNLP — SplatGPT + SAE interpretability for Splatoon 3 gear builds
+# SplatNLP - SplatGPT + SAE interpretability for Splatoon 3 gear builds
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cesaregarza/SplatNLP/blob/main/notebooks/colab_demo.ipynb)
+[![CI](https://github.com/cesaregarza/SplatNLP/actions/workflows/tests.yml/badge.svg)](https://github.com/cesaregarza/SplatNLP/actions/workflows/tests.yml) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cesaregarza/SplatNLP/blob/main/notebooks/colab_demo.ipynb)
 
 This repository contains the code for SplatNLP, an end-to-end ML + mech-interp
 project for predicting and analyzing optimal Splatoon 3 gear loadouts.
@@ -10,12 +10,65 @@ project for predicting and analyzing optimal Splatoon 3 gear loadouts.
 - Reviewer guide: `docs/START_HERE.md`
 - Showcase guide: `docs/SHOWCASE.md`
 - Project one-pager: `docs/PROJECT_ONEPAGER.md`
+- Resume bullets: `docs/RESUME_BULLETS.md`
 - Runnable demo: `notebooks/colab_demo.ipynb`
 - Canonical blog posts: `cegarza.com` (see below)
 
 **Model at a glance**
 
 ![SplatGPT architecture (simplified)](neural_network_themed.gv.png)
+
+## Results (Sendou Tier-1 reconstruction from partial info)
+
+Primary diagnostic: **Tier-1 set `completion_slot_acc` (Top-1)** (multi-
+reference; scores against the closest Tier-1 build consistent with the observed
+slot-items).
+
+Mask 6 (hardest setting, n=502):
+
+| method | score |
+| --- | ---: |
+| random | 0.236 |
+| conditional (weapon-scoped) | 0.630 |
+| full | 0.656 |
+| ultra | **0.673** |
+
+Notes:
+- No-overlap mask 6: Full 0.644 vs Ultra 0.657.
+- We also report overlap/no-overlap slices because ~21% of Tier-1 builds have
+  an identical (weapon, abilities) signature in tiers 2-3.
+- Full tables + stats: `docs/sendou_tier1_eval_report.md`.
+
+## Design note: strict completion vs coach mode edits
+
+Inputs are treated as a **set** (not a sequence), so the decoder/allocator is
+not obligated to preserve every observed slot-item. This is intentional:
+allowing edits enables a coach-mode behavior: given a suboptimal partial
+build, the system can propose a stronger legal build that's close in token-
+space but better in build-space.
+
+To keep this honest, the eval report includes context-preservation diagnostics
+(observed-slot recall / edit rate) alongside completion metrics; see
+`docs/sendou_tier1_eval_report.md`.
+
+## Mechanistic interpretability (SAE concepts)
+
+Example probe readout (Ultra + SAE, one forward pass):
+
+```text
+Top active SAE features:
+- f14822 (act=0.287): Enperry Dualies Build
+- f18136 (act=0.282): Stealth Jump QR Stacker
+- f22013 (act=0.259): Stamper Utility Build
+- f10848 (act=0.245): REEF-LUX ISM/SCU
+- f05616 (act=0.241): Painbrush/Blaster Build
+
+Example feature -> token influence (f18136):
+Top + tokens: stealth_jump, swim_speed_up_15, special_charge_up_6, quick_respawn_12, quick_super_jump_12, haunt
+Top - tokens: ink_saver_sub_51, quick_respawn_51, sub_power_up_51, respawn_punisher, ink_saver_sub_12, intensify_action_51
+```
+
+Reproduce in: `notebooks/colab_demo.ipynb` (Ultra + SAE section).
 
 ## Overview
 
@@ -48,7 +101,7 @@ can change discrete beam-search outcomes). This is based on Anthropic's work:
 
 **Start Here (Reviewer Guide)**
 
-If you’re reviewing this repo, start with:
+If you're reviewing this repo, start with:
 
 - `docs/START_HERE.md`
 - `notebooks/colab_demo.ipynb` (Colab-friendly demo)
@@ -119,7 +172,7 @@ You can also override the host/path using `DO_SPACES_ML_ENDPOINT` and
    `poetry install --with dev`\
    (For the Doc2Vec/embeddings workflow, also install `gensim` via
    `poetry install --with dev,embeddings`.)
-2. (Optional) Download artifacts if you don’t already have them:
+2. (Optional) Download artifacts if you don't already have them:
 
    ```bash
    poetry run python -m splatnlp.utils.download_artifacts \

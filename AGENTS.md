@@ -14,7 +14,7 @@ Follow these steps before submitting changes.
 ## Ultra model + SAE quickstart (avoid timeouts)
 
 Running the ultra model with the SAE is heavy; use the activation server so
-experiments don’t re-load Zarr each time.
+experiments don't re-load Zarr each time.
 
 1) Start the activation server (once per session):
 ```bash

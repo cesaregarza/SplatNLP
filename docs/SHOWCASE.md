@@ -1,12 +1,12 @@
-# Showcase — SplatNLP
+# Showcase - SplatNLP
 
 If you only have 5 minutes:
 
-1. Open the Colab demo and “Run all”:
+1. Open the Colab demo and "Run all":
    - `notebooks/colab_demo.ipynb`
    - https://colab.research.google.com/github/cesaregarza/SplatNLP/blob/main/notebooks/colab_demo.ipynb
 2. Skim the build visualization output (baseline vs completion).
-3. Skim the “Ultra + SAE” section (feature readouts).
+3. Skim the "Ultra + SAE" section (feature readouts).
 
 ## What to look for
 
@@ -15,7 +15,7 @@ If you only have 5 minutes:
 - **Hard constraints**: beam search + an exact allocator turn token
   probabilities into a **legal build** (slot rules + AP budget).
 - **MechInterp hooks**: an SAE trained on a pooled 512-D activation exposes a
-  sparse “feature space” you can read during inference.
+  sparse feature space you can read during inference.
 - **Feature influence**: the demo shows which tokens a feature most influences
   via decoder / output-layer geometry.
 
@@ -33,6 +33,6 @@ If you only have 5 minutes:
 ## Good discussion prompts
 
 - Why is this framed as multi-label set completion vs an autoregressive LM?
-- What’s the right way to evaluate a constraint-aware decoder (beyond accuracy)?
+- What's the right way to evaluate a constraint-aware decoder (beyond accuracy)?
 - If you had one more week, what experiment would you run to validate the SAE
   features as meaningful abstractions?

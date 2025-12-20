@@ -1,15 +1,15 @@
-# SplatNLP — Start Here
+# SplatNLP - Start Here
 
-This is a short “reviewer guide” to the repo: what it is, where the important
+This is a short reviewer guide to the repo: what it is, where the important
 code lives, and what you can run quickly.
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cesaregarza/SplatNLP/blob/main/notebooks/colab_demo.ipynb)
 
 If you want the fastest high-level skim: `docs/PROJECT_ONEPAGER.md`.
 
-If you want the fastest “wow” path: `docs/SHOWCASE.md`.
+If you want the fastest wow path: `docs/SHOWCASE.md`.
 
-If you only do one thing: open the Colab and “Run all”. It downloads pretrained
+If you only do one thing: open the Colab and "Run all". It downloads pretrained
 artifacts (model + vocabs + Ultra SAE) and walks through token-space inference,
 constraint-aware reconstruction, and SAE feature readouts.
 
@@ -17,7 +17,7 @@ constraint-aware reconstruction, and SAE feature readouts.
 
 - **A set-structured prediction problem** with hard constraints (Splatoon gear
   builds) framed as **multi-label set completion**.
-- A **SetTransformer-style model** (`SetCompletionModel` / “SplatGPT”) with
+- A **SetTransformer-style model** (`SetCompletionModel` / "SplatGPT") with
   weapon-conditioned embeddings and permutation-invariant aggregation.
 - **Constraint-aware reconstruction** (greedy closure + beam search + exact
   allocator) that turns token-space probabilities into legal build-space gear.
@@ -54,7 +54,7 @@ canonical published posts.
 
 ## 30-Minute Tour (With Local Artifacts)
 
-If you have local checkpoints/vocabs available, you can reproduce the “wow”
+If you have local checkpoints/vocabs available, you can reproduce the wow
 path on CPU:
 
 1. Download artifacts (or point at your local copies):

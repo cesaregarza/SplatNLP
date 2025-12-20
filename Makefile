@@ -59,7 +59,7 @@ python-deps:
 		if command -v nvidia-smi >/dev/null; then ACCEL=gpu; else ACCEL=cpu; fi
 	fi
 
-	# -------- steer Poetry’s pip via env var ----
+		# -------- steer Poetry's pip via env var ----
 	if [ "$$ACCEL" = "gpu" ]; then
 		export PIP_EXTRA_INDEX_URL="$(CUDA_INDEX)"
 	fi
