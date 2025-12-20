@@ -12,6 +12,8 @@ If you only have 5 minutes:
 
 - **Set-structured prediction**: the model is *multi-label* (predicts every
   token independently) rather than autoregressive next-token prediction.
+  However, output mirrors the input set structure so it can still be used
+  autoregressively.
 - **Hard constraints**: beam search + an exact allocator turn token
   probabilities into a **legal build** (slot rules + AP budget).
 - **MechInterp hooks**: an SAE trained on a pooled 512-D activation exposes a

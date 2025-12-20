@@ -14,6 +14,9 @@ top-3 beam outputs. This report also includes **Top-1** (non-oracle) metrics
 and a **multi-reference Tier-1 set** scoring view (see "Additional diagnostic
 metrics").
 
+## Sendou
+[sendou.ink](https://sendou.ink) is a community-driven website for competitive Splatoon 3 that offers a platform for multiple competitive services. Of particular interest for this project are the builds, where players can submit their gear builds freely for the community to use as a reference for their own builds. Top players that submit their builds are marked by the tier they are in, which is a measure of the player's skill level. Tier 1 players are the absolute top players in the west, and as a result likely have highly optimized builds for each weapon.
+
 ## Quick Method Overview
 
 - **Full model (`full`)**: Set-completion model trained on the same dataset as

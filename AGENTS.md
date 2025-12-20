@@ -11,6 +11,12 @@ When working on this project:
 
 Follow these steps before submitting changes.
 
+## Docs invariants (do not change)
+
+- Do not change the canonical blog link in `README.md`:
+  `https://cegarza.com/splatgpt-part-1/`
+  (If you think it should change, ask first.)
+
 ## Ultra model + SAE quickstart (avoid timeouts)
 
 Running the ultra model with the SAE is heavy; use the activation server so

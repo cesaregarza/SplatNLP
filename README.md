@@ -15,8 +15,8 @@ project for predicting and analyzing optimal Splatoon 3 gear loadouts.
 - Canonical blog posts: `cegarza.com` (see below)
 
 **Model at a glance**
-
-![SplatGPT architecture (simplified)](neural_network_themed.gv.png)
+![SplatGPT architecture (simplified)](docs/assets/model.svg)
+(Styled source: `docs/assets/model.html`)
 
 ## Results (Sendou Tier-1 reconstruction from partial info)
 
@@ -81,10 +81,12 @@ This project tackles this challenge through an end-to-end machine learning pipel
 The model is approximately **83 million parameters** in size and is available in two variants:
 
 - **Full:** Trained on a single H100 GPU for 62 hours, using 5 subset variants
-  per data point (each subset created via randomized masking).
+  per data point (each subset created via randomized masking) 
+  for 9 epochs for a total of 45 subsets per data point.
 - **Ultra:** Trained on four B200 GPUs for 35 hours, utilizing 20 subset variants
-  per data point. This is the checkpoint used by the Colab demo (along with an
-  Ultra SAE for interpretability/probing).
+  per data point for 20 epochs for a total of 400 subsets per data point.
+  This is the checkpoint used by the Colab demo (along with an Ultra SAE for
+  interpretability/probing).
 
 Both variants are referenced under `saved_models/` for offline inspection when
 you have local model artifacts available (see the quickstart below).
@@ -115,11 +117,7 @@ For a comprehensive deep-dive into the problem definition, the novel model
 architecture (`SplatGPT`), methodology, data processing techniques, results and
 insights, please read the canonical posts on `cegarza.com`:
 
-[SplatGPT: Set-Based Deep Learning for Splatoon 3 Gear Completion](https://cegarza.com/introducing-splatgpt/)
-
-Note: the `docs/splatgpt-blog-part-*.txt` / `docs/splatgpt-blog-part-*-draft.md`
-files are LLM-friendly extracts/drafts for tooling; they are not the canonical
-published/publishable versions.
+[SplatGPT: Set-Based Deep Learning for Splatoon 3 Gear Completion](https://cegarza.com/splatgpt-part-1/)
 
 ---
 ## Key Features
@@ -127,15 +125,15 @@ published/publishable versions.
 * **End-to-End Pipeline:** Covers data acquisition from stat.ink, sophisticated preprocessing, model training, evaluation, and API serving.
 * **Novel Architecture (`SetCompletionModel`):** Implements a custom model inspired by Set Transformer and GPT-2 principles, featuring attention mechanisms like Induced Set Attention and Pooling Multihead Attention to handle set-based inputs effectively (see `src/splatnlp/model/models.py`).
 * **Model Variants:** Two versions of the `SetCompletionModel` available:
-  - **Full (83M params):** Extensively tested with complete SAE interpretability.
-  - **Ultra (83M params):** Experimental, leveraging significantly more diverse subset variants per data point for richer context, SAE interpretability in progress.
-* **Embedding-Based Analysis:** Provides tools for training Doc2Vec models on gear sets, performing TF-IDF analysis, clustering builds using UMAP and DBSCAN, and visualizing embeddings (`src/splatnlp/embeddings/`).
-* **Advanced Preprocessing:** Includes domain-specific logic for ability bucketing based on Ability Point (AP) thresholds, tokenization, handling game patches, and targeted sampling to bias towards optimal configurations. Uses PyArrow for memory efficiency during partitioning (see `src/splatnlp/preprocessing/`).
-* **Interpretability via Sparse Autoencoders (SAEs):** Incorporates training of SAEs on the *activations* of the primary model for feature analysis and interpretability, following recent research trends (see `src/splatnlp/monosemantic_sae/`).
-* **API Serving:** Provides a FastAPI application (`src/splatnlp/serve/`) to serve the trained `SetCompletionModel` for real-time gear set completion predictions.
-* **Command-Line Tools:** Offers CLIs for orchestrating preprocessing (`src/splatnlp/preprocessing/pipeline.py`), training the main model (`src/splatnlp/model/cli.py`), training SAEs (`src/splatnlp/monosemantic_sae/sae_training/cli.py`), and running embedding experiments (`src/splatnlp/embeddings/cli.py`).
-* **Visualization Utilities:** Contains tools for dimensionality reduction (t-SNE via `embeddings` CLI) and fetching weapon images/abbreviations (`src/splatnlp/viz/`) to support analysis.
-* **Hyperparameter Optimization:** Includes utilities for grid search (`src/splatnlp/model/grid_search.py`).
+  - **Full (83M params):** Trained on of 45 subsets per data point. Features tend to be more specific to the weapon and kit, similar to a low level player's understanding of the game.
+  - **Ultra (83M params):** Trained on 400 subsets per data point. Features tend to be more general and abstract, similar to a higher level player's understanding of the game.
+* **Embedding-Based Analysis:** Provides tools for training Doc2Vec models on gear sets, performing TF-IDF analysis, clustering builds using UMAP and DBSCAN, and visualizing embeddings (`src/splatnlp/embeddings/`). This is a fossil of the early experimentation of NLP approaches to this problem. Future embedding work would use the Ultra model's understanding of the game to generate more meaningful embeddings, including support for partial builds which is not currently meaningfully supported by the Doc2Vec approach.
+* **Advanced Preprocessing:** Includes domain-specific logic for ability bucketing based on Ability Point (AP) thresholds, tokenization, handling game patches, and targeted sampling to bias towards optimal configurations. Uses PyArrow for memory efficiency during partitioning (see `src/splatnlp/preprocessing/`). Much of this work is built by subject matter expertise and is crafted specifically for this problem in this domain.
+* **Interpretability via Sparse Autoencoders (SAEs):** Incorporates training of SAEs on the *activations* of the primary model for feature analysis and interpretability, following recent research trends (see `src/splatnlp/monosemantic_sae/`). Mostly faithful recreation of Anthropic's work: [Towards Monosemanticity](https://transformer-circuits.pub/2023/monosemantic-features/index.html).
+* **API Serving:** Provides a FastAPI application (`src/splatnlp/serve/`) to serve the trained `SetCompletionModel` for real-time gear set completion predictions. This has zero security measures and is meant to be used in a local environment or siloed off in a containerized environment with strict networking policies. Use at your own risk.
+* **Command-Line Tools:** Offers CLIs for orchestrating preprocessing (`src/splatnlp/preprocessing/pipeline.py`), training the main model (`src/splatnlp/model/cli.py`), training SAEs (`src/splatnlp/monosemantic_sae/sae_training/cli.py`), and running embedding experiments (`src/splatnlp/embeddings/cli.py`). These were designed to minimize the amount of time spent setting up to train the model, reducing compute spend on rented machines.
+* **Visualization Utilities:** Contains tools for dimensionality reduction (t-SNE via `embeddings` CLI) and fetching weapon images/abbreviations (`src/splatnlp/viz/`) to support analysis. This was designed to support the early experimentation of NLP approaches to this problem. Future visualization work would use the Ultra model's understanding of the game to generate more meaningful visualizations, including support for partial builds which is not currently meaningfully supported by the Doc2Vec approach.
+* **Hyperparameter Optimization:** Includes utilities for grid search (`src/splatnlp/model/grid_search.py`). This was later superceded by the use of Weights and Biases for hyperparameter optimization but remains a useful tool for local experimentation.
 
 ## Project Structure
 
@@ -150,7 +148,7 @@ SplatNLP/
 │       ├── serve/                  # API serving via FastAPI
 │       └── viz/                    # Visualization utilities
 ├── data/                           # Raw and processed data storage
-├── models/                         # Trained model artifacts
+├── saved_models/                   # Trained model artifacts
 ├── LICENSE                         # GNU GPL-3.0 License
 ├── poetry.lock                     # Dependency lock file
 ├── pyproject.toml                  # Project dependencies and configuration
@@ -161,7 +159,7 @@ SplatNLP/
 This demo expects a local copy of pretrained artifacts under
 `saved_models/dataset_v2` (model checkpoint + `vocab.json` +
 `weapon_vocab.json` + `model_params.json`). Those large artifacts are not
-tracked in git. You can download them from the configured artifact host via:
+tracked in git, but are available on the colab demo notebook. You can download them from the configured artifact host via:
 
 `poetry run python -m splatnlp.utils.download_artifacts --dataset-dir dataset_v2`
 

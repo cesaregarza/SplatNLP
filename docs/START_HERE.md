@@ -72,13 +72,6 @@ path on CPU:
 
 - Workflow guide: `docs/mechinterp_workflow.md`
 
-## Local-Only Artifacts (Ignore)
-
-Depending on the workspace, you may see additional documents under `docs/`
-generated as part of an LLM-assisted resume-building workflow (e.g.
-`REPO_HIGHLIGHTS*.md`, `L4_MLE_REPORT.md`, `EVIDENCE_PACK.md`). These are not
-canonical project documentation and may not be present in all clones.
-
 ## Repo Map (Where To Look)
 
 - Model + training: `src/splatnlp/model/`

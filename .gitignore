@@ -89,3 +89,7 @@ sae_runs
 
 # Claude-specific documentation
 CLAUDE.md
+
+# Documentation assets (tracked)
+!docs/assets/
+!docs/assets/**
