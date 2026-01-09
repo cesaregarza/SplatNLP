@@ -156,3 +156,78 @@ PY
 ```
 2) If `/root/dev/SplatNLP/outputs` points to a read-only mount, write to `tmp_results/`.
 3) For faster repeated runs, start the activation server once (see above) so SAE hooks can fetch activations without reloading Zarr. Use `beam_size=5`, `max_steps=6–8` for speed.***
+
+## Ultra: unconstrained build generation (beam search)
+
+This is how to generate an unconstrained (start from `<NULL>`) build for a
+specific weapon using the ultra checkpoint.
+
+Example: Dapple Dualies is `weapon_id_5000` (see `docs/weapon_info.json` where
+`class == "Maneuver"` and `kit == "Short_00"`).
+
+```bash
+poetry run python - <<'PY'
+import json
+import torch
+from pathlib import Path
+
+from splatnlp.model.models import SetCompletionModel
+from splatnlp.utils.constants import NULL
+from splatnlp.utils.infer import build_predict_abilities
+from splatnlp.utils.reconstruct.allocator import Allocator
+from splatnlp.utils.reconstruct.beam_search import reconstruct_build
+
+root = Path("/root/dev/SplatNLP")
+vocab = json.loads((root / "saved_models/dataset_v0_2_full/vocab.json").read_text())
+weapon_vocab = json.loads(
+    (root / "saved_models/dataset_v0_2_full/weapon_vocab.json").read_text()
+)
+
+model = SetCompletionModel(
+    len(vocab),
+    len(weapon_vocab),
+    32,
+    512,
+    len(vocab),
+    num_layers=3,
+    num_heads=8,
+    num_inducing_points=32,
+    use_layer_norm=True,
+    dropout=0.0,
+    pad_token_id=vocab["<PAD>"],
+)
+model.load_state_dict(
+    torch.load(
+        root / "saved_models/dataset_v0_2_super/clean_slate.pth",
+        map_location="cpu",
+    )
+)
+model.eval()
+
+predict_factory = build_predict_abilities(
+    vocab,
+    weapon_vocab,
+    pad_token="<PAD>",
+    hook=None,
+    device=torch.device("cpu"),
+    output_type="dict",
+)
+
+def predict_fn(current_tokens: list[str], weapon_id: str) -> dict[str, float]:
+    return predict_factory(model, current_tokens, weapon_id)
+
+allocator = Allocator()
+weapon_id = "weapon_id_5000"  # Dapple Dualies
+builds = reconstruct_build(
+    predict_fn=predict_fn,
+    weapon_id=weapon_id,
+    initial_context=[NULL],
+    allocator=allocator,
+    beam_size=5,
+    max_steps=8,
+    top_k=1,
+)
+build = None if not builds else builds[0]
+print({"weapon_id": weapon_id, "build": None if build is None else build.to_dict()})
+PY
+```
