@@ -1,5 +1,6 @@
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -52,6 +53,9 @@ def train_model(
     ddp: bool = False,
     checkpoint_dir: str | Path | None = None,
     checkpoint_interval: int = 1,
+    epoch_callback: Callable[[int, dict[str, float], dict[str, float]], None]
+    | None = None,
+    step_callback: Callable[[int, dict[str, float]], None] | None = None,
 ) -> tuple[dict[str, dict[str, list[float]]], torch.nn.Module]:
     device = torch.device(config.device)
     model.to(device)
@@ -103,6 +107,7 @@ def train_model(
             checkpoint_path.mkdir(parents=True, exist_ok=True)
 
     start_time = time.time()
+    global_step = 0
     for epoch in range(config.num_epochs):
         # Re‑seed DistributedSampler for true shuffling each epoch
         if config.distributed and torch.distributed.is_initialized():
@@ -112,7 +117,7 @@ def train_model(
         if verbose:
             print(f"Epoch {epoch + 1}/{config.num_epochs}")
 
-        train_metrics = train_epoch(
+        train_metrics, global_step = train_epoch(
             model,
             train_dl,
             optimizer,
@@ -124,6 +129,8 @@ def train_model(
             scaler,
             metric_update_interval,
             ddp,
+            global_step=global_step,
+            step_callback=step_callback,
         )
         val_metrics = validate(
             model,
@@ -159,6 +166,9 @@ def train_model(
             print(
                 f"Estimated time left: {hours:.0f}h {minutes:.0f}m {seconds:.0f}s"
             )
+
+        if epoch_callback is not None:
+            epoch_callback(epoch + 1, train_metrics, val_metrics)
 
         if val_metrics["f1"] > best_val_f1:
             best_val_f1 = val_metrics["f1"]
@@ -201,7 +211,9 @@ def train_epoch(
     scaler: GradScaler = None,
     metric_update_interval: int = 1,
     ddp: bool = False,
-) -> dict[str, float]:
+    global_step: int = 0,
+    step_callback: Callable[[int, dict[str, float]], None] | None = None,
+) -> tuple[dict[str, float], int]:
     model.train()
     device = torch.device(config.device)
     epoch_metrics = {
@@ -265,7 +277,9 @@ def train_epoch(
             )
             optimizer.step()
 
-        epoch_metrics["loss"] += loss.item()
+        loss_value = loss.item()
+        epoch_metrics["loss"] += loss_value
+        global_step += 1
 
         if ((i + 1) % metric_update_interval == 0) or (i == len(train_dl) - 1):
             preds = (torch.sigmoid(outputs) >= 0.5).float()
@@ -274,6 +288,16 @@ def train_epoch(
 
             if verbose:
                 update_progress_bar(train_iter, epoch_metrics, i + 1)
+            if step_callback is not None:
+                step_callback(
+                    global_step,
+                    {
+                        "train/loss_step": loss_value,
+                        "train/loss_running": epoch_metrics["loss"]
+                        / float(i + 1),
+                        "train/lr": optimizer.param_groups[0]["lr"],
+                    },
+                )
 
     epoch_metrics["loss"] /= len(train_dl)
     update_epoch_metrics(
@@ -299,7 +323,7 @@ def train_epoch(
             epoch_metrics["hamming"],
         ) = tensor.tolist()
 
-    return epoch_metrics
+    return epoch_metrics, global_step
 
 
 def validate(

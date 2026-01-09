@@ -221,6 +221,35 @@ def run_basic_training(
     )
 
     scaler = torch.amp.GradScaler() if run_config.use_mixed_precision else None
+    epoch_logger = None
+    step_logger = None
+    if wandb_run:
+
+        def _epoch_logger(
+            epoch: int, train_metrics: dict[str, float], val_metrics: dict[str, float]
+        ) -> None:
+            wandb_run.log(
+                {
+                    "train/loss": train_metrics["loss"],
+                    "train/f1": train_metrics["f1"],
+                    "train/precision": train_metrics["precision"],
+                    "train/recall": train_metrics["recall"],
+                    "train/hamming": train_metrics["hamming"],
+                    "val/loss": val_metrics["loss"],
+                    "val/f1": val_metrics["f1"],
+                    "val/precision": val_metrics["precision"],
+                    "val/recall": val_metrics["recall"],
+                    "val/hamming": val_metrics["hamming"],
+                },
+                step=epoch,
+            )
+
+        def _step_logger(step: int, metrics: dict[str, float]) -> None:
+            wandb_run.log(metrics, step=step)
+
+        epoch_logger = _epoch_logger
+        step_logger = _step_logger
+
     logger.info(
         "Training on %s for %d epochs (batch_size=%d, masks_per_set=%d)",
         run_config.device,
@@ -247,6 +276,8 @@ def run_basic_training(
         ddp=run_config.distributed,
         checkpoint_dir=run_config.checkpoint_dir,
         checkpoint_interval=run_config.checkpoint_interval,
+        epoch_callback=epoch_logger,
+        step_callback=step_logger,
     )
     logger.info("Training completed in %.2fs", time.time() - train_start)
 
@@ -290,32 +321,7 @@ def run_basic_training(
         _write_json(output_dir / "run_config.json", asdict(run_config))
 
     if wandb_run:
-        for epoch_idx in range(len(metrics_history["train"]["loss"])):
-            wandb_run.log(
-                {
-                    "train/loss": metrics_history["train"]["loss"][epoch_idx],
-                    "train/f1": metrics_history["train"]["f1"][epoch_idx],
-                    "train/precision": metrics_history["train"]["precision"][
-                        epoch_idx
-                    ],
-                    "train/recall": metrics_history["train"]["recall"][
-                        epoch_idx
-                    ],
-                    "train/hamming": metrics_history["train"]["hamming"][
-                        epoch_idx
-                    ],
-                    "val/loss": metrics_history["val"]["loss"][epoch_idx],
-                    "val/f1": metrics_history["val"]["f1"][epoch_idx],
-                    "val/precision": metrics_history["val"]["precision"][
-                        epoch_idx
-                    ],
-                    "val/recall": metrics_history["val"]["recall"][epoch_idx],
-                    "val/hamming": metrics_history["val"]["hamming"][
-                        epoch_idx
-                    ],
-                },
-                step=epoch_idx + 1,
-            )
+        total_steps = len(train_dl) * len(metrics_history["train"]["loss"])
         wandb_run.log(
             {
                 "test/loss": test_metrics["loss"],
@@ -324,7 +330,7 @@ def run_basic_training(
                 "test/recall": test_metrics["recall"],
                 "test/hamming": test_metrics["hamming"],
             },
-            step=len(metrics_history["train"]["loss"]),
+            step=total_steps,
         )
         wandb_run.finish()
 
