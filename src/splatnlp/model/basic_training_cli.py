@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import orjson
 import torch
+import torch.distributed as dist
 
 from splatnlp.model.config import TrainingConfig
 from splatnlp.model.evaluation import test_model
@@ -62,6 +64,7 @@ class RunConfig:
     skew_factor: float = 1.2
     include_null: bool = False
     metric_update_interval: int = 1
+    distributed: bool = False
     device: str = "cpu"
     verbose: bool = True
 
@@ -124,6 +127,7 @@ def run_basic_training(
         num_instances_per_set=run_config.num_masks_per_set,
         skew_factor=run_config.skew_factor,
         null_token_id=null_token_id,
+        distributed=run_config.distributed,
         shuffle_train=True,
     )
 
@@ -150,7 +154,7 @@ def run_basic_training(
         scheduler_factor=run_config.scheduler_factor,
         scheduler_patience=run_config.scheduler_patience,
         device=run_config.device,
-        distributed=False,
+        distributed=run_config.distributed,
     )
 
     scaler = torch.amp.GradScaler() if run_config.use_mixed_precision else None
@@ -171,7 +175,7 @@ def run_basic_training(
         verbose=run_config.verbose,
         scaler=scaler,
         metric_update_interval=run_config.metric_update_interval,
-        ddp=False,
+        ddp=run_config.distributed,
     )
     logger.info("Training completed in %.2fs", time.time() - train_start)
 
@@ -183,27 +187,36 @@ def run_basic_training(
         vocab=vocab,
         pad_token=PAD,
         verbose=run_config.verbose,
-        ddp=False,
+        ddp=run_config.distributed,
     )
 
     output_dir = Path(data_config.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if (not run_config.distributed) or (
+        dist.is_initialized() and dist.get_rank() == 0
+    ):
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Saving artifacts to %s", output_dir)
-    torch.save(trained_model.state_dict(), output_dir / "model.pth")
-    _write_json(output_dir / "metrics_history.json", metrics_history)
-    _write_json(output_dir / "test_metrics.json", test_metrics)
+    if (not run_config.distributed) or (
+        dist.is_initialized() and dist.get_rank() == 0
+    ):
+        logger.info("Saving artifacts to %s", output_dir)
+    if (not run_config.distributed) or (
+        dist.is_initialized() and dist.get_rank() == 0
+    ):
+        torch.save(trained_model.state_dict(), output_dir / "model.pth")
+        _write_json(output_dir / "metrics_history.json", metrics_history)
+        _write_json(output_dir / "test_metrics.json", test_metrics)
 
-    model_params = {
-        "vocab_size": len(vocab),
-        "weapon_vocab_size": len(weapon_vocab),
-        **asdict(model_config),
-        "pad_token_id": pad_token_id,
-    }
-    _write_json(output_dir / "model_params.json", model_params)
+        model_params = {
+            "vocab_size": len(vocab),
+            "weapon_vocab_size": len(weapon_vocab),
+            **asdict(model_config),
+            "pad_token_id": pad_token_id,
+        }
+        _write_json(output_dir / "model_params.json", model_params)
 
-    _write_json(output_dir / "data_config.json", asdict(data_config))
-    _write_json(output_dir / "run_config.json", asdict(run_config))
+        _write_json(output_dir / "data_config.json", asdict(data_config))
+        _write_json(output_dir / "run_config.json", asdict(run_config))
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -249,6 +262,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skew-factor", type=float, default=1.2)
     parser.add_argument("--include-null", action="store_true")
     parser.add_argument("--metric-update-interval", type=int, default=1)
+    parser.add_argument("--distributed", action="store_true")
     parser.add_argument("--device", type=str)
     parser.add_argument(
         "--verbose", dest="verbose", action="store_true", default=True
@@ -264,14 +278,26 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
+    if args.distributed:
+        if not torch.cuda.is_available():
+            raise RuntimeError("Distributed training requires CUDA")
+        dist.init_process_group(backend="nccl", init_method="env://")
+        local_rank = int(os.environ["LOCAL_RANK"])
+        torch.cuda.set_device(local_rank)
+        if local_rank != 0:
+            args.verbose = False
+
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
-    device = args.device
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+    if args.distributed:
+        device = "cuda"
+    else:
+        device = args.device
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
 
     data_config = DataConfig(
         data_path=args.data_path,
@@ -309,6 +335,7 @@ def main() -> None:
         skew_factor=args.skew_factor,
         include_null=args.include_null,
         metric_update_interval=args.metric_update_interval,
+        distributed=args.distributed,
         device=device,
         verbose=args.verbose,
     )
