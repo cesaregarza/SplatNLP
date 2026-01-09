@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Iterable
 
@@ -13,6 +15,8 @@ from tqdm import tqdm
 
 from splatnlp.model.models import SetCompletionModel
 from splatnlp.monosemantic_sae.data_objects import ActivationHook
+
+ProgressCallback = Callable[[int, int, dict[str, float]], None]
 
 
 def _coerce_list(value: object) -> list:
@@ -128,6 +132,8 @@ def extract_embeddings(
     device: str = "cpu",
     normalize: bool = True,
     limit: int | None = None,
+    progress_callback: ProgressCallback | None = None,
+    log_interval: int = 50,
 ) -> dict[str, Path]:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -161,8 +167,12 @@ def extract_embeddings(
     )
 
     try:
+        log_every = max(1, log_interval)
+        start_time = time.time() if progress_callback else None
         with metadata_path.open("wb") as meta_handle:
+            batch_idx = 0
             for start in tqdm(range(0, total, batch_size), desc="Embedding"):
+                batch_idx += 1
                 end = min(start + batch_size, total)
                 batch_df = df.iloc[start:end]
 
@@ -182,6 +192,7 @@ def extract_embeddings(
                 )
 
                 hook.clear_activations()
+                batch_start = time.time() if progress_callback else None
                 with torch.inference_mode():
                     _ = model(
                         input_tokens,
@@ -193,6 +204,13 @@ def extract_embeddings(
                 if pooled is None:
                     raise RuntimeError("Failed to capture pooled embeddings")
 
+                should_log = progress_callback is not None and (
+                    (batch_idx % log_every == 0) or (end == total)
+                )
+                if should_log:
+                    norm_mean = float(
+                        pooled.norm(dim=-1).mean().item()
+                    )
                 if normalize:
                     pooled = F.normalize(pooled, p=2, dim=-1)
 
@@ -214,6 +232,19 @@ def extract_embeddings(
                         "ability_ids": ability_ids,
                     }
                     meta_handle.write(orjson.dumps(record) + b"\n")
+                if should_log:
+                    batch_time = time.time() - batch_start
+                    rows_per_sec = (end - start) / max(batch_time, 1e-12)
+                    progress_callback(
+                        batch_idx,
+                        end,
+                        {
+                            "rows_per_sec": rows_per_sec,
+                            "elapsed_sec": time.time() - start_time,
+                            "embedding_norm_mean": norm_mean,
+                            "batch_size": end - start,
+                        },
+                    )
     finally:
         handle.remove()
         embeddings.flush()
@@ -232,6 +263,8 @@ def extract_embeddings_from_dataloader(
     output_dir: Path | str,
     device: str = "cpu",
     normalize: bool = True,
+    progress_callback: ProgressCallback | None = None,
+    log_interval: int = 50,
 ) -> dict[str, Path]:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -257,8 +290,13 @@ def extract_embeddings_from_dataloader(
 
     row_id = 0
     try:
+        log_every = max(1, log_interval)
+        start_time = time.time() if progress_callback else None
         with metadata_path.open("wb") as meta_handle:
-            for batch in tqdm(dataloader, desc="Embedding"):
+            for batch_idx, batch in enumerate(
+                tqdm(dataloader, desc="Embedding"),
+                start=1,
+            ):
                 if len(batch) == 4:
                     inputs, weapons, targets, attention_masks = batch
                 else:
@@ -273,6 +311,7 @@ def extract_embeddings_from_dataloader(
                 key_padding_mask = ~attention_masks
 
                 hook.clear_activations()
+                batch_start = time.time() if progress_callback else None
                 with torch.inference_mode():
                     _ = model(
                         inputs,
@@ -284,6 +323,14 @@ def extract_embeddings_from_dataloader(
                 if pooled is None:
                     raise RuntimeError("Failed to capture pooled embeddings")
 
+                should_log = progress_callback is not None and (
+                    (batch_idx % log_every == 0)
+                    or (row_id + inputs.size(0) == total)
+                )
+                if should_log:
+                    norm_mean = float(
+                        pooled.norm(dim=-1).mean().item()
+                    )
                 if normalize:
                     pooled = F.normalize(pooled, p=2, dim=-1)
 
@@ -311,6 +358,19 @@ def extract_embeddings_from_dataloader(
                     meta_handle.write(orjson.dumps(record) + b"\n")
 
                 row_id += batch_size
+                if should_log:
+                    batch_time = time.time() - batch_start
+                    rows_per_sec = batch_size / max(batch_time, 1e-12)
+                    progress_callback(
+                        batch_idx,
+                        row_id,
+                        {
+                            "rows_per_sec": rows_per_sec,
+                            "elapsed_sec": time.time() - start_time,
+                            "embedding_norm_mean": norm_mean,
+                            "batch_size": batch_size,
+                        },
+                    )
 
         if row_id != total:
             raise RuntimeError(

@@ -6,8 +6,14 @@ import pandas as pd
 from torch.utils.data import DataLoader
 
 from splatnlp.model.models import SetCompletionModel
-from splatnlp.model_embeddings.extract import extract_embeddings_from_dataloader
-from splatnlp.preprocessing.datasets.dataset import SetDataset, create_collate_fn
+from splatnlp.model_embeddings.extract import (
+    ProgressCallback,
+    extract_embeddings_from_dataloader,
+)
+from splatnlp.preprocessing.datasets.dataset import (
+    SetDataset,
+    create_collate_fn,
+)
 
 
 def build_embedding_dataloader(
@@ -50,6 +56,8 @@ def extract_training_embeddings(
     output_dir: str,
     device: str = "cpu",
     normalize: bool = True,
+    progress_callback: ProgressCallback | None = None,
+    log_interval: int = 50,
 ) -> dict[str, Path]:
     return extract_embeddings_from_dataloader(
         model,
@@ -58,4 +66,6 @@ def extract_training_embeddings(
         output_dir=output_dir,
         device=device,
         normalize=normalize,
+        progress_callback=progress_callback,
+        log_interval=log_interval,
     )
