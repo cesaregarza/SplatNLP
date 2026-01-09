@@ -8,7 +8,11 @@ import torch
 
 from splatnlp.model_embeddings.extract import extract_embeddings
 from splatnlp.model_embeddings.io import load_json, load_tokenized_data
-from splatnlp.model_embeddings.model_loader import build_model, resolve_model_params
+from splatnlp.model_embeddings.model_loader import (
+    build_model,
+    load_checkpoint,
+    resolve_model_params,
+)
 
 
 def main() -> None:
@@ -60,9 +64,8 @@ def main() -> None:
     if pad_token_id is None:
         raise ValueError("'<PAD>' token missing from vocabulary")
 
-    checkpoint_path = Path(args.model_checkpoint)
     params = resolve_model_params(
-        checkpoint_path,
+        args.model_checkpoint,
         args.model_params,
         {
             "embedding_dim": args.embedding_dim,
@@ -81,9 +84,8 @@ def main() -> None:
         weapon_vocab_size=len(weapon_vocab),
         pad_token_id=pad_token_id,
     )
-    model.load_state_dict(
-        torch.load(checkpoint_path, map_location="cpu")
-    )
+    state_dict = load_checkpoint(args.model_checkpoint, map_location="cpu")
+    model.load_state_dict(state_dict)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -115,7 +117,9 @@ def main() -> None:
         "outputs": {k: str(v) for k, v in outputs.items()},
     }
     config_path = output_dir / "run_config.json"
-    config_path.write_bytes(orjson.dumps(run_config, option=orjson.OPT_INDENT_2))
+    config_path.write_bytes(
+        orjson.dumps(run_config, option=orjson.OPT_INDENT_2)
+    )
 
 
 if __name__ == "__main__":

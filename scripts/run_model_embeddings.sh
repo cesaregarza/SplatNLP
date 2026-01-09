@@ -6,7 +6,7 @@ set -euo pipefail
 DATA_PATH="${DATA_PATH:-https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/tokenized_data.csv}"
 VOCAB_PATH="${VOCAB_PATH:-https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/vocab.json}"
 WEAPON_VOCAB_PATH="${WEAPON_VOCAB_PATH:-https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/weapon_vocab.json}"
-MODEL_CHECKPOINT="${MODEL_CHECKPOINT:-saved_models/dataset_v0_2_super/clean_slate.pth}"
+MODEL_CHECKPOINT="${MODEL_CHECKPOINT:-https://splat-nlp.nyc3.cdn.digitaloceanspaces.com/dataset_v2/model_ultra.pth}"
 MODEL_PARAMS="${MODEL_PARAMS:-}"
 OUTPUT_DIR="${OUTPUT_DIR:-tmp_results/model_embeddings}"
 

@@ -3,23 +3,29 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import torch
+
 from splatnlp.model.models import SetCompletionModel
 from splatnlp.model_embeddings.io import load_json
 
 ModelParams = dict[str, int | float | bool]
 
+def _is_url(path: str) -> bool:
+    return path.startswith(("http://", "https://"))
 
 def resolve_model_params(
-    checkpoint_path: Path,
+    checkpoint_path: str | Path,
     model_params_path: str | None,
     overrides: dict[str, int | float | bool | None],
 ) -> ModelParams:
     if model_params_path:
         return load_json(model_params_path)
 
-    candidate = checkpoint_path.with_name("model_params.json")
-    if candidate.is_file():
-        return load_json(str(candidate))
+    checkpoint_str = str(checkpoint_path)
+    if not _is_url(checkpoint_str):
+        candidate = Path(checkpoint_path).with_name("model_params.json")
+        if candidate.is_file():
+            return load_json(str(candidate))
 
     required = [
         "embedding_dim",
@@ -60,3 +66,15 @@ def build_model(
         dropout=float(params["dropout"]),
         pad_token_id=pad_token_id,
     )
+
+
+def load_checkpoint(
+    checkpoint_path: str,
+    *,
+    map_location: str = "cpu",
+) -> dict[str, torch.Tensor]:
+    if _is_url(checkpoint_path):
+        return torch.hub.load_state_dict_from_url(
+            checkpoint_path, map_location=map_location
+        )
+    return torch.load(checkpoint_path, map_location=map_location)

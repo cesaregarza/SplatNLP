@@ -7,7 +7,11 @@ import orjson
 import torch
 
 from splatnlp.model_embeddings.io import load_json, load_tokenized_data
-from splatnlp.model_embeddings.model_loader import build_model, resolve_model_params
+from splatnlp.model_embeddings.model_loader import (
+    build_model,
+    load_checkpoint,
+    resolve_model_params,
+)
 from splatnlp.model_embeddings.verify import verify_embeddings_vs_logits
 
 
@@ -54,9 +58,8 @@ def main() -> None:
     if pad_token_id is None:
         raise ValueError("'<PAD>' token missing from vocabulary")
 
-    checkpoint_path = Path(args.model_checkpoint)
     params = resolve_model_params(
-        checkpoint_path,
+        args.model_checkpoint,
         args.model_params,
         {
             "embedding_dim": args.embedding_dim,
@@ -75,9 +78,8 @@ def main() -> None:
         weapon_vocab_size=len(weapon_vocab),
         pad_token_id=pad_token_id,
     )
-    model.load_state_dict(
-        torch.load(checkpoint_path, map_location="cpu")
-    )
+    state_dict = load_checkpoint(args.model_checkpoint, map_location="cpu")
+    model.load_state_dict(state_dict)
 
     metrics = verify_embeddings_vs_logits(
         model,

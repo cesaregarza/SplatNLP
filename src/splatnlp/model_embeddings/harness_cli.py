@@ -16,6 +16,7 @@ from splatnlp.model_embeddings.harness import (
 from splatnlp.model_embeddings.io import load_json, load_tokenized_data
 from splatnlp.model_embeddings.model_loader import (
     build_model,
+    load_checkpoint,
     resolve_model_params,
 )
 
@@ -114,9 +115,8 @@ def main() -> None:
         raise ValueError("'<PAD>' token missing from vocabulary")
     null_token_id = vocab.get("<NULL>") if args.include_null else None
 
-    checkpoint_path = Path(args.model_checkpoint)
     params = resolve_model_params(
-        checkpoint_path,
+        args.model_checkpoint,
         args.model_params,
         {
             "embedding_dim": args.embedding_dim,
@@ -135,9 +135,8 @@ def main() -> None:
         weapon_vocab_size=len(weapon_vocab),
         pad_token_id=pad_token_id,
     )
-    model.load_state_dict(
-        torch.load(checkpoint_path, map_location="cpu")
-    )
+    state_dict = load_checkpoint(args.model_checkpoint, map_location="cpu")
+    model.load_state_dict(state_dict)
 
     dataloader = build_embedding_dataloader(
         df,
