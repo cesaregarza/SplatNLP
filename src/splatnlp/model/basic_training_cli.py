@@ -65,6 +65,11 @@ class RunConfig:
     include_null: bool = False
     metric_update_interval: int = 1
     distributed: bool = False
+    wandb_log: bool = False
+    wandb_project: str = "splatnlp-model"
+    wandb_entity: str | None = None
+    wandb_run_name: str | None = None
+    wandb_tags: list[str] | None = None
     device: str = "cpu"
     verbose: bool = True
 
@@ -79,6 +84,55 @@ def run_basic_training(
     run_config: RunConfig,
 ) -> None:
     logger = logging.getLogger(__name__)
+    wandb_run = None
+
+    if run_config.wandb_log:
+        try:
+            import wandb
+            from wandb.util import generate_id
+        except Exception as exc:  # pragma: no cover - optional dep runtime
+            raise RuntimeError(
+                "Weights & Biases logging requested but wandb is unavailable."
+            ) from exc
+
+        if run_config.distributed and dist.is_initialized():
+            if dist.get_rank() != 0:
+                wandb_run = None
+            else:
+                run_name = (
+                    run_config.wandb_run_name
+                    or f"basic_{generate_id()}"
+                )
+                wandb_run = wandb.init(
+                    project=run_config.wandb_project,
+                    entity=run_config.wandb_entity,
+                    config={
+                        **asdict(data_config),
+                        **asdict(model_config),
+                        **asdict(run_config),
+                    },
+                    name=run_name,
+                    tags=run_config.wandb_tags,
+                    dir=str(Path(data_config.output_dir)),
+                )
+                logger.info(
+                    "Weights & Biases run initialised: %s", wandb.run.url
+                )
+        else:
+            run_name = run_config.wandb_run_name or f"basic_{generate_id()}"
+            wandb_run = wandb.init(
+                project=run_config.wandb_project,
+                entity=run_config.wandb_entity,
+                config={
+                    **asdict(data_config),
+                    **asdict(model_config),
+                    **asdict(run_config),
+                },
+                name=run_name,
+                tags=run_config.wandb_tags,
+                dir=str(Path(data_config.output_dir)),
+            )
+            logger.info("Weights & Biases run initialised: %s", wandb.run.url)
     vocab = load_json(data_config.vocab_path)
     weapon_vocab = load_json(data_config.weapon_vocab_path)
 
@@ -218,6 +272,45 @@ def run_basic_training(
         _write_json(output_dir / "data_config.json", asdict(data_config))
         _write_json(output_dir / "run_config.json", asdict(run_config))
 
+    if wandb_run:
+        for epoch_idx in range(len(metrics_history["train"]["loss"])):
+            wandb_run.log(
+                {
+                    "train/loss": metrics_history["train"]["loss"][epoch_idx],
+                    "train/f1": metrics_history["train"]["f1"][epoch_idx],
+                    "train/precision": metrics_history["train"]["precision"][
+                        epoch_idx
+                    ],
+                    "train/recall": metrics_history["train"]["recall"][
+                        epoch_idx
+                    ],
+                    "train/hamming": metrics_history["train"]["hamming"][
+                        epoch_idx
+                    ],
+                    "val/loss": metrics_history["val"]["loss"][epoch_idx],
+                    "val/f1": metrics_history["val"]["f1"][epoch_idx],
+                    "val/precision": metrics_history["val"]["precision"][
+                        epoch_idx
+                    ],
+                    "val/recall": metrics_history["val"]["recall"][epoch_idx],
+                    "val/hamming": metrics_history["val"]["hamming"][
+                        epoch_idx
+                    ],
+                },
+                step=epoch_idx + 1,
+            )
+        wandb_run.log(
+            {
+                "test/loss": test_metrics["loss"],
+                "test/f1": test_metrics["f1"],
+                "test/precision": test_metrics["precision"],
+                "test/recall": test_metrics["recall"],
+                "test/hamming": test_metrics["hamming"],
+            },
+            step=len(metrics_history["train"]["loss"]),
+        )
+        wandb_run.finish()
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -263,6 +356,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-null", action="store_true")
     parser.add_argument("--metric-update-interval", type=int, default=1)
     parser.add_argument("--distributed", action="store_true")
+    parser.add_argument(
+        "--wandb-log",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    parser.add_argument("--wandb-project", type=str, default="splatnlp-model")
+    parser.add_argument("--wandb-entity", type=str, default=None)
+    parser.add_argument("--wandb-run-name", type=str, default=None)
+    parser.add_argument("--wandb-tags", type=str, nargs="*")
     parser.add_argument("--device", type=str)
     parser.add_argument(
         "--verbose", dest="verbose", action="store_true", default=True
@@ -336,6 +438,11 @@ def main() -> None:
         include_null=args.include_null,
         metric_update_interval=args.metric_update_interval,
         distributed=args.distributed,
+        wandb_log=args.wandb_log,
+        wandb_project=args.wandb_project,
+        wandb_entity=args.wandb_entity,
+        wandb_run_name=args.wandb_run_name,
+        wandb_tags=args.wandb_tags,
         device=device,
         verbose=args.verbose,
     )

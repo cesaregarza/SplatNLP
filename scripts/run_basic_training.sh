@@ -39,6 +39,13 @@ DDP_NPROC_PER_NODE="${DDP_NPROC_PER_NODE:-4}"
 DDP_NNODES="${DDP_NNODES:-1}"
 DDP_NODE_RANK="${DDP_NODE_RANK:-0}"
 
+# Weights & Biases (set WANDB_LOG=1 to enable).
+WANDB_LOG="${WANDB_LOG:-}"
+WANDB_PROJECT="${WANDB_PROJECT:-splatnlp-model}"
+WANDB_ENTITY="${WANDB_ENTITY:-}"
+WANDB_RUN_NAME="${WANDB_RUN_NAME:-}"
+WANDB_TAGS="${WANDB_TAGS:-}"
+
 CMD=(
   --data-path "${DATA_PATH}"
   --vocab-path "${VOCAB_PATH}"
@@ -73,6 +80,21 @@ fi
 
 if [[ -n "${DEVICE}" ]]; then
   CMD+=(--device "${DEVICE}")
+fi
+
+if [[ -n "${WANDB_LOG}" ]]; then
+  CMD+=(--wandb-log)
+  CMD+=(--wandb-project "${WANDB_PROJECT}")
+  if [[ -n "${WANDB_ENTITY}" ]]; then
+    CMD+=(--wandb-entity "${WANDB_ENTITY}")
+  fi
+  if [[ -n "${WANDB_RUN_NAME}" ]]; then
+    CMD+=(--wandb-run-name "${WANDB_RUN_NAME}")
+  fi
+  if [[ -n "${WANDB_TAGS}" ]]; then
+    # shellcheck disable=SC2206
+    CMD+=(--wandb-tags ${WANDB_TAGS})
+  fi
 fi
 
 if [[ -n "${USE_DDP}" ]]; then
