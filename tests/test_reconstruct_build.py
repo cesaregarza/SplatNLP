@@ -1,7 +1,11 @@
 import pytest
 
+from splatnlp.utils.constants import NULL
 from splatnlp.utils.reconstruct.allocator import Allocator
-from splatnlp.utils.reconstruct.beam_search import reconstruct_build
+from splatnlp.utils.reconstruct.beam_search import (
+    reconstruct_build,
+    reconstruct_builds_batched,
+)
 from splatnlp.utils.reconstruct.classes import AbilityToken
 
 
@@ -102,9 +106,7 @@ def test_allocator_prefers_high_ap_over_priority_bias():
         "run_speed_up_21": AbilityToken.from_vocab_entry("run_speed_up_21"),
         "ink_saver_sub_21": AbilityToken.from_vocab_entry("ink_saver_sub_21"),
         "swim_speed_up_6": AbilityToken.from_vocab_entry("swim_speed_up_6"),
-        "ink_recovery_up_3": AbilityToken.from_vocab_entry(
-            "ink_recovery_up_3"
-        ),
+        "ink_recovery_up_3": AbilityToken.from_vocab_entry("ink_recovery_up_3"),
     }
     allocator = Allocator()
 
@@ -115,3 +117,109 @@ def test_allocator_prefers_high_ap_over_priority_bias():
     assert "ink_recovery_up" not in build.mains.values()
     assert "run_speed_up" in build.mains.values()
     assert "ink_saver_sub" in build.mains.values()
+
+
+def test_reconstruct_build_uses_predict_batch_fn():
+    single_calls: list[list[str]] = []
+    batch_calls: list[int] = []
+
+    def logic(tokens: list[str]) -> dict[str, float]:
+        key = tuple(tok for tok in tokens if tok != NULL)
+        if not key:
+            return {"ink_saver_main_3": 0.6}
+        if key == ("ink_saver_main_3",):
+            return {"run_speed_up_3": 0.2, "swim_speed_up_3": 0.19}
+        if "run_speed_up_3" in key and "swim_speed_up_3" not in key:
+            return {"swim_speed_up_3": 0.18}
+        if "swim_speed_up_3" in key and "run_speed_up_3" not in key:
+            return {"run_speed_up_3": 0.17}
+        return {}
+
+    def predict_fn(tokens, weapon_id):
+        single_calls.append(list(tokens))
+        return logic(tokens)
+
+    def predict_batch_fn(token_batches, weapon_id):
+        batch_calls.append(len(token_batches))
+        return [logic(tokens) for tokens in token_batches]
+
+    allocator = Allocator()
+    builds = reconstruct_build(
+        predict_fn=predict_fn,
+        predict_batch_fn=predict_batch_fn,
+        weapon_id="w",
+        initial_context=[],
+        allocator=allocator,
+        beam_size=2,
+        max_steps=2,
+        top_k=1,
+    )
+    assert builds
+    assert len(single_calls) == 2  # greedy closure only
+    assert any(n > 1 for n in batch_calls)
+
+
+def test_reconstruct_builds_batched_matches_individual_calls():
+    def predict_single(tokens: list[str], weapon_id: str) -> dict[str, float]:
+        key = tuple(tok for tok in tokens if tok != NULL)
+        if weapon_id == "w1":
+            if not key:
+                return {"ink_saver_main_3": 0.6}
+            if key == ("ink_saver_main_3",):
+                return {"run_speed_up_6": 0.7}
+            return {}
+        if weapon_id == "w2":
+            if not key:
+                return {"swim_speed_up_6": 0.6}
+            if key == ("swim_speed_up_6",):
+                return {"stealth_jump": 0.7}
+            return {}
+        return {}
+
+    def predict_fn(tokens: list[str], weapon_id: str) -> dict[str, float]:
+        return predict_single(tokens, weapon_id)
+
+    def predict_batch_fn(
+        token_batches: list[list[str]],
+        weapon_id: str,
+    ) -> list[dict[str, float]]:
+        return [predict_single(tokens, weapon_id) for tokens in token_batches]
+
+    def predict_batch_multi_fn(
+        token_batches: list[list[str]],
+        weapon_ids: list[str],
+    ) -> list[dict[str, float]]:
+        return [
+            predict_single(tokens, wid)
+            for tokens, wid in zip(token_batches, weapon_ids)
+        ]
+
+    allocator = Allocator()
+    weapon_ids = ["w1", "w2", "w3"]
+    contexts = [[], [], ["comeback", "last_ditch_effort"]]
+
+    expected = [
+        reconstruct_build(
+            predict_fn=predict_fn,
+            predict_batch_fn=predict_batch_fn,
+            weapon_id=wid,
+            initial_context=ctx,
+            allocator=allocator,
+            beam_size=2,
+            max_steps=2,
+            top_k=1,
+        )
+        for wid, ctx in zip(weapon_ids, contexts)
+    ]
+
+    got = reconstruct_builds_batched(
+        predict_batch_fn=predict_batch_multi_fn,
+        weapon_ids=weapon_ids,
+        initial_contexts=contexts,
+        allocator=allocator,
+        beam_size=2,
+        max_steps=2,
+        top_k=1,
+    )
+
+    assert got == expected

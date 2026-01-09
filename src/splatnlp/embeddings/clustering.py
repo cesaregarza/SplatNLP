@@ -1,10 +1,30 @@
+from __future__ import annotations
+
 import logging
+import os
+import tempfile
+from pathlib import Path
 
 import numpy as np
-import umap
 from sklearn.cluster import DBSCAN
 
 logger = logging.getLogger(__name__)
+
+_NUMBA_CACHE_DIR_ENV = "NUMBA_CACHE_DIR"
+
+
+def _ensure_numba_cache_dir() -> None:
+    """Ensure Numba has a writable cache directory.
+
+    In some sandboxed environments, Numba/UMAP can't cache compiled functions
+    alongside the installed package, which causes `import umap` to fail.
+    """
+    if os.environ.get(_NUMBA_CACHE_DIR_ENV):
+        return
+
+    cache_dir = Path(tempfile.gettempdir()) / "splatnlp_numba_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    os.environ[_NUMBA_CACHE_DIR_ENV] = str(cache_dir)
 
 
 def cluster_vectors(
@@ -40,6 +60,10 @@ def cluster_vectors(
     Raises:
         ValueError: If input array is empty or not 2D.
     """
+    _ensure_numba_cache_dir()
+
+    import umap
+
     logger.info("Starting cluster_vectors function")
     if vector_array.ndim != 2 or vector_array.shape[0] == 0:
         raise ValueError(

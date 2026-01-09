@@ -61,7 +61,9 @@ MODEL_PATHS = {
 }
 
 # Shared vocab paths
-VOCAB_PATH = Path("/root/dev/SplatNLP/saved_models/dataset_v0_2_full/vocab.json")
+VOCAB_PATH = Path(
+    "/root/dev/SplatNLP/saved_models/dataset_v0_2_full/vocab.json"
+)
 WEAPON_VOCAB_PATH = Path(
     "/root/dev/SplatNLP/saved_models/dataset_v0_2_full/weapon_vocab.json"
 )
@@ -106,7 +108,9 @@ def load_model(
         pad_token_id=vocab["<PAD>"],
     )
 
-    state_dict = torch.load(paths["model"], map_location=device, weights_only=True)
+    state_dict = torch.load(
+        paths["model"], map_location=device, weights_only=True
+    )
     model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
@@ -127,7 +131,9 @@ def load_sae(
         expansion_factor=paths["expansion_factor"],
     )
 
-    checkpoint = torch.load(paths["sae"], map_location=device, weights_only=True)
+    checkpoint = torch.load(
+        paths["sae"], map_location=device, weights_only=True
+    )
 
     # Load weights directly to handle extra keys in checkpoint
     sae.encoder.weight.data = checkpoint["encoder.weight"]
@@ -182,14 +188,16 @@ def create_predict_fn_with_sae(
     weapon_vocab: dict[str, int],
     device: torch.device,
 ):
-    """Create a predict function that returns (probs_dict, activations_array).
+    """Create predict functions that return probabilities and SAE activations.
 
-    This is compatible with beam_search's record_traces feature.
+    Returns a single-example ``predict_fn`` and a batched ``predict_batch_fn``.
+    Both are compatible with ``beam_search``'s ``record_traces`` feature.
     """
     # Register hook to capture SAE activations
     hook, handle = register_hooks(model, sae, bypass=False, no_change=True)
 
     inv_vocab = {v: k for k, v in vocab.items()}
+    pad_id = vocab["<PAD>"]
 
     def predict_fn(tokens: list[str], weapon_id: str):
         """Predict probabilities and return SAE activations."""
@@ -216,7 +224,58 @@ def create_predict_fn_with_sae(
 
         return probs_dict, activations
 
-    return predict_fn, handle
+    def predict_batch_fn(token_batches: list[list[str]], weapon_id: str):
+        """Predict probabilities and activations for a batch of contexts."""
+        if not token_batches:
+            return [], []
+
+        batch_size = len(token_batches)
+        max_len = max(len(toks) for toks in token_batches)
+        input_tokens = torch.full(
+            (batch_size, max_len),
+            pad_id,
+            device=device,
+            dtype=torch.long,
+        )
+        for row_idx, toks in enumerate(token_batches):
+            if not toks:
+                continue
+            token_ids = [vocab[t] for t in toks]
+            input_tokens[row_idx, : len(token_ids)] = torch.tensor(
+                token_ids,
+                device=device,
+                dtype=torch.long,
+            )
+
+        weapon_tensor = torch.full(
+            (batch_size, 1),
+            weapon_vocab[weapon_id],
+            device=device,
+            dtype=torch.long,
+        )
+        key_padding_mask = input_tokens == pad_id
+
+        with torch.no_grad():
+            outputs = model(
+                input_tokens,
+                weapon_tensor,
+                key_padding_mask=key_padding_mask,
+            )
+            probs = torch.sigmoid(outputs).detach().cpu().numpy()
+
+        probs_batch = [
+            {inv_vocab[i]: float(row[i]) for i in range(row.shape[0])}
+            for row in probs
+        ]
+
+        activations_batch = [None] * batch_size
+        if hook.last_h_post is not None:
+            acts = hook.last_h_post.detach().cpu().numpy()
+            activations_batch = [acts[i] for i in range(batch_size)]
+
+        return probs_batch, activations_batch
+
+    return predict_fn, predict_batch_fn, handle
 
 
 def format_trace_summary(
@@ -230,9 +289,9 @@ def format_trace_summary(
 
     for frame in traces:
         # Get top predictions
-        sorted_preds = sorted(
-            frame.logits.items(), key=lambda x: -x[1]
-        )[:top_k_preds]
+        sorted_preds = sorted(frame.logits.items(), key=lambda x: -x[1])[
+            :top_k_preds
+        ]
         top_preds = [[tok, prob] for tok, prob in sorted_preds]
 
         # Get top features
@@ -244,11 +303,13 @@ def format_trace_summary(
                 fid = int(idx)
                 activation = float(acts[idx])
                 label = labels.get(fid, f"Feature {fid}")
-                top_features.append({
-                    "feature_id": fid,
-                    "activation": activation,
-                    "label": label,
-                })
+                top_features.append(
+                    {
+                        "feature_id": fid,
+                        "activation": activation,
+                        "label": label,
+                    }
+                )
 
         # Get capstones (sorted for consistency)
         capstones = sorted(frame.partial_caps.keys())
@@ -260,14 +321,16 @@ def format_trace_summary(
         else:
             added = capstones
 
-        summary.append({
-            "step": frame.step,
-            "beam_rank": frame.beam_rank,
-            "capstones": capstones,
-            "added_this_step": added,
-            "top_preds": top_preds,
-            "top_features": top_features,
-        })
+        summary.append(
+            {
+                "step": frame.step,
+                "beam_rank": frame.beam_rank,
+                "capstones": capstones,
+                "added_this_step": added,
+                "top_preds": top_preds,
+                "top_features": top_features,
+            }
+        )
 
     return summary
 
@@ -354,7 +417,7 @@ def main():
 
     # Create predict function
     logger.info("Creating prediction function with SAE hooks...")
-    predict_fn, handle = create_predict_fn_with_sae(
+    predict_fn, predict_batch_fn, handle = create_predict_fn_with_sae(
         model, sae, vocab, weapon_vocab, device
     )
 
@@ -373,6 +436,7 @@ def main():
 
     result = reconstruct_build(
         predict_fn=predict_fn,
+        predict_batch_fn=predict_batch_fn,
         weapon_id=args.weapon_id,
         initial_context=initial_context,
         allocator=allocator,

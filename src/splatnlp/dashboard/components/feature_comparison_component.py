@@ -82,8 +82,12 @@ class AggregateInfluence:
     """Aggregated net influence for a token across all shared examples."""
 
     token: str
-    total_net_a: float  # Sum of (activation_a × raw_influence_a) across examples
-    total_net_b: float  # Sum of (activation_b × raw_influence_b) across examples
+    total_net_a: (
+        float  # Sum of (activation_a × raw_influence_a) across examples
+    )
+    total_net_b: (
+        float  # Sum of (activation_b × raw_influence_b) across examples
+    )
     raw_influence_a: float  # Raw per-unit influence for feature A
     raw_influence_b: float  # Raw per-unit influence for feature B
     example_count: int  # Number of shared examples contributing

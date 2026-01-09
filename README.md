@@ -1,30 +1,76 @@
-# SplatNLP - SplatGPT + SAE interpretability for Splatoon 3 gear builds
+# SplatNLP: constraint-aware set completion + SAE interpretability (Splatoon 3)
 
 [![CI](https://github.com/cesaregarza/SplatNLP/actions/workflows/tests.yml/badge.svg)](https://github.com/cesaregarza/SplatNLP/actions/workflows/tests.yml) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cesaregarza/SplatNLP/blob/main/notebooks/colab_demo.ipynb)
 
-This repository contains the code for SplatNLP, an end-to-end ML + mech-interp
-project for predicting and analyzing optimal Splatoon 3 gear loadouts.
+SplatNLP frames Splatoon 3 gear building as a public, structured proxy for a
+common ML task: **set completion under hard constraints from partial
+observation**.
+
+**TL;DR (2-minute skim)**
+- Problem: **set completion under constraints from partial observation** (many
+  valid solutions, strict legality rules).
+- Model: **SplatGPT** — an ~83M parameter Transformer-style
+  **`SetCompletionModel`** conditioned on weapon/context.
+- Decoding: greedy closure + beam search + exact allocator → **legal**
+  build-space outputs.
+- Interpretability: **Sparse Autoencoder (SAE)** on a pooled 512‑D activation →
+  concept readout + feature→token influence.
+- Headline result: **0.673** `completion_slot_acc` on Sendou Tier‑1 **Mask‑6**
+  (Top‑1, multi-reference). Full report:
+  [`docs/sendou_tier1_eval_report.md`](docs/sendou_tier1_eval_report.md).
+- Try it in ~2 minutes: [`notebooks/colab_demo.ipynb`](notebooks/colab_demo.ipynb)
+  (Run all).
 
 **Quick links**
-
-- Reviewer guide: `docs/START_HERE.md`
-- Showcase guide: `docs/SHOWCASE.md`
-- Project one-pager: `docs/PROJECT_ONEPAGER.md`
-- Resume bullets: `docs/RESUME_BULLETS.md`
-- Runnable demo: `notebooks/colab_demo.ipynb`
-- Canonical blog posts: `cegarza.com` (see below)
+- Canonical blog post: [SplatGPT: Set-Based Deep Learning for Splatoon 3 Gear Completion](https://cegarza.com/splatgpt-part-1/)
+- Colab demo (recommended): [`notebooks/colab_demo.ipynb`](notebooks/colab_demo.ipynb)
+- Eval report: [`docs/sendou_tier1_eval_report.md`](docs/sendou_tier1_eval_report.md)
+- Docs index: [`docs/README.md`](docs/README.md)
+- Reviewer guide: [`docs/START_HERE.md`](docs/START_HERE.md)
+- Showcase path: [`docs/SHOWCASE.md`](docs/SHOWCASE.md)
+- Mechinterp workflow: [`docs/mechinterp_workflow.md`](docs/mechinterp_workflow.md)
+- Usage / CLI recipes: [`docs/USAGE.md`](docs/USAGE.md)
+- Security notes: [`docs/SECURITY.md`](docs/SECURITY.md)
+- Training notes (optional): [`docs/TRAINING.md`](docs/TRAINING.md)
+- Project one-pager: [`docs/PROJECT_ONEPAGER.md`](docs/PROJECT_ONEPAGER.md)
+- Resume bullets: [`docs/RESUME_BULLETS.md`](docs/RESUME_BULLETS.md)
 
 **Model at a glance**
 ![SplatGPT architecture (simplified)](docs/assets/model.svg)
 (Styled source: `docs/assets/model.html`)
 
-## Results (Sendou Tier-1 reconstruction from partial info)
+## Main contributions
 
-Primary diagnostic: **Tier-1 set `completion_slot_acc` (Top-1)** (multi-
-reference; scores against the closest Tier-1 build consistent with the observed
-slot-items).
+- **SplatGPT (`SetCompletionModel`)**: a permutation-invariant, SetTransformer-
+  style architecture with weapon-conditioned embeddings and a multi-label
+  output head, trained with aggressive randomized masking (Full/Ultra
+  checkpoints) (`src/splatnlp/model/models.py`).
+- **Constraint-aware decoding**: greedy closure + beam search + an exact
+  allocator that converts token probabilities into legal builds under slot/AP
+  constraints (`src/splatnlp/utils/reconstruct/`).
+- **Evaluation that matches reality**: multi-reference scoring for
+  many-valid-answer settings plus diagnostics for “coach-mode edits” vs strict
+  completion (`docs/sendou_tier1_eval_report.md`).
+- **SAE interpretability**: an SAE trained on pooled activations, probe-mode
+  hooks (read features without changing outputs), and feature→token influence
+  readouts (`src/splatnlp/monosemantic_sae/`).
+- **Reproducibility**: CI tests, a Colab demo, and an artifact downloader for
+  pretrained checkpoints (`src/splatnlp/utils/download_artifacts.py`).
 
-Mask 6 (hardest setting, n=502):
+## Results: Sendou Tier‑1 reconstruction from partial info
+
+**Tier‑1** = curated expert builds from sendou.ink (top competitive players).
+
+**Mask 6** = hardest partial-observation setting: drop 6 of the 12 gear
+slot-items (mains/subs) at random, then ask the system to complete a full legal
+build.
+
+`completion_slot_acc` = fraction of the **missing** slot-items recovered by the
+decoded Top‑1 build. Because many completions are valid, we also report a
+**multi-reference** variant that scores against the closest Tier‑1 build
+consistent with the observed slot-items.
+
+Mask 6 (n=502):
 
 | method | score |
 | --- | ---: |
@@ -33,156 +79,53 @@ Mask 6 (hardest setting, n=502):
 | full | 0.656 |
 | ultra | **0.673** |
 
-Notes:
-- No-overlap mask 6: Full 0.644 vs Ultra 0.657.
-- We also report overlap/no-overlap slices because ~21% of Tier-1 builds have
-  an identical (weapon, abilities) signature in tiers 2-3.
-- Full tables + stats: `docs/sendou_tier1_eval_report.md`.
+Full tables, overlap/no-overlap slices, and edit behavior diagnostics:
+[`docs/sendou_tier1_eval_report.md`](docs/sendou_tier1_eval_report.md).
 
-## Design note: strict completion vs coach mode edits
+## Interpretability highlight: SAE concepts → token influence
 
-Inputs are treated as a **set** (not a sequence), so the decoder/allocator is
-not obligated to preserve every observed slot-item. This is intentional:
-allowing edits enables a coach-mode behavior: given a suboptimal partial
-build, the system can propose a stronger legal build that's close in token-
-space but better in build-space.
+The Ultra SAE is trained on SplatGPT’s pooled 512‑D representation. In probe
+mode we can read sparse feature activations during inference, then translate a
+feature into “what tokens it pushes toward/away from” using decoder/output-layer
+geometry.
 
-To keep this honest, the eval report includes context-preservation diagnostics
-(observed-slot recall / edit rate) alongside completion metrics; see
-`docs/sendou_tier1_eval_report.md`.
+Reproduce in [`notebooks/colab_demo.ipynb`](notebooks/colab_demo.ipynb)
+(Ultra + SAE section). For deeper feature investigation workflows, see
+[`docs/mechinterp_workflow.md`](docs/mechinterp_workflow.md).
 
-## Mechanistic interpretability (SAE concepts)
+## Product analog: workflow / dashboard recommendation (private-data domain)
 
-Example probe readout (Ultra + SAE, one forward pass):
+Although this repo is framed around Splatoon gear builds, the core problem is
+**set completion under constraints from partial observations**.
 
-```text
-Top active SAE features:
-- f14822 (act=0.287): Enperry Dualies Build
-- f18136 (act=0.282): Stealth Jump QR Stacker
-- f22013 (act=0.259): Stamper Utility Build
-- f10848 (act=0.245): REEF-LUX ISM/SCU
-- f05616 (act=0.241): Painbrush/Blaster Build
+A close product analog is **workflow/dashboard recommendation**:
+- Tokens ↔ dashboard widgets (with discrete size/bucket tokens)
+- Context ↔ user type / role / task (“weapon id” here)
+- Input ↔ a partial dashboard (some widgets chosen, some missing, some suboptimal)
+- Output ↔ a completed (or improved) full dashboard configuration
+- Data ↔ noisy usage logs; many valid solutions per context (multi-reference)
 
-Example feature -> token influence (f18136):
-Top + tokens: stealth_jump, swim_speed_up_15, special_charge_up_6, quick_respawn_12, quick_super_jump_12, haunt
-Top - tokens: ink_saver_sub_51, quick_respawn_51, sub_power_up_51, respawn_punisher, ink_saver_sub_12, intensify_action_51
-```
+This project uses a fully public dataset as a proxy: constrained vocabulary,
+compositional structure, and real-world noise. The “coach-mode” behavior
+(allowing limited edits rather than strict preservation) maps to proposing a
+better dashboard close to the user’s intent.
 
-Reproduce in: `notebooks/colab_demo.ipynb` (Ultra + SAE section).
+## Reproducibility
 
-## Overview
+**Colab (recommended)**
+- Open [`notebooks/colab_demo.ipynb`](notebooks/colab_demo.ipynb) and Run all.
 
-Optimizing gear loadouts in Splatoon 3 presents a unique challenge due to intricate ability stacking mechanics, weapon-specific synergies, context-dependent effectiveness and noisy real-world data. Traditional ML approaches often struggle with the set-based nature of gear and the complex interactions involved.
+**Local CPU quickstart**
 
-This project tackles this challenge through an end-to-end machine learning pipeline. It explores multiple approaches, including representing gear sets using **Doc2Vec embeddings** for analysis and clustering (see the `embeddings` module) and developing the core **`SetCompletionModel` (`SplatGPT`)**, a novel architecture designed specifically for set-based prediction tasks.
-
-**Core Model (`SplatGPT`):** The primary model (`SetCompletionModel`) leverages principles from Set Transformers and GPT-2, incorporating unique attention mechanisms to process gear sets effectively while considering weapon context.
-
-The model is approximately **83 million parameters** in size and is available in two variants:
-
-- **Full:** Trained on a single H100 GPU for 62 hours, using 5 subset variants
-  per data point (each subset created via randomized masking) 
-  for 9 epochs for a total of 45 subsets per data point.
-- **Ultra:** Trained on four B200 GPUs for 35 hours, utilizing 20 subset variants
-  per data point for 20 epochs for a total of 400 subsets per data point.
-  This is the checkpoint used by the Colab demo (along with an Ultra SAE for
-  interpretability/probing).
-
-Both variants are referenced under `saved_models/` for offline inspection when
-you have local model artifacts available (see the quickstart below).
-
-**Sparse Autoencoder (SAE):** The SAE is trained on the activations of the
-primary model to provide a sparse feature representation for interpretability
-and analysis (see `src/splatnlp/monosemantic_sae/`). The `SetCompletionHook`
-supports a passthrough/probe mode (capture feature activations without changing
-model outputs) and a reconstruction mode (insert the SAE reconstruction, which
-can change discrete beam-search outcomes). This is based on Anthropic's work:
-[Towards Monosemanticity](https://transformer-circuits.pub/2023/monosemantic-features/index.html)
-
----
-
-**Start Here (Reviewer Guide)**
-
-If you're reviewing this repo, start with:
-
-- `docs/START_HERE.md`
-- `notebooks/colab_demo.ipynb` (Colab-friendly demo)
-  - https://colab.research.google.com/github/cesaregarza/SplatNLP/blob/main/notebooks/colab_demo.ipynb
-
----
-
-**Blog Series (Canonical)**
-
-For a comprehensive deep-dive into the problem definition, the novel model
-architecture (`SplatGPT`), methodology, data processing techniques, results and
-insights, please read the canonical posts on `cegarza.com`:
-
-[SplatGPT: Set-Based Deep Learning for Splatoon 3 Gear Completion](https://cegarza.com/splatgpt-part-1/)
-
----
-## Key Features
-
-* **End-to-End Pipeline:** Covers data acquisition from stat.ink, sophisticated preprocessing, model training, evaluation, and API serving.
-* **Novel Architecture (`SetCompletionModel`):** Implements a custom model inspired by Set Transformer and GPT-2 principles, featuring attention mechanisms like Induced Set Attention and Pooling Multihead Attention to handle set-based inputs effectively (see `src/splatnlp/model/models.py`).
-* **Model Variants:** Two versions of the `SetCompletionModel` available:
-  - **Full (83M params):** Trained on of 45 subsets per data point. Features tend to be more specific to the weapon and kit, similar to a low level player's understanding of the game.
-  - **Ultra (83M params):** Trained on 400 subsets per data point. Features tend to be more general and abstract, similar to a higher level player's understanding of the game.
-* **Embedding-Based Analysis:** Provides tools for training Doc2Vec models on gear sets, performing TF-IDF analysis, clustering builds using UMAP and DBSCAN, and visualizing embeddings (`src/splatnlp/embeddings/`). This is a fossil of the early experimentation of NLP approaches to this problem. Future embedding work would use the Ultra model's understanding of the game to generate more meaningful embeddings, including support for partial builds which is not currently meaningfully supported by the Doc2Vec approach.
-* **Advanced Preprocessing:** Includes domain-specific logic for ability bucketing based on Ability Point (AP) thresholds, tokenization, handling game patches, and targeted sampling to bias towards optimal configurations. Uses PyArrow for memory efficiency during partitioning (see `src/splatnlp/preprocessing/`). Much of this work is built by subject matter expertise and is crafted specifically for this problem in this domain.
-* **Interpretability via Sparse Autoencoders (SAEs):** Incorporates training of SAEs on the *activations* of the primary model for feature analysis and interpretability, following recent research trends (see `src/splatnlp/monosemantic_sae/`). Mostly faithful recreation of Anthropic's work: [Towards Monosemanticity](https://transformer-circuits.pub/2023/monosemantic-features/index.html).
-* **API Serving:** Provides a FastAPI application (`src/splatnlp/serve/`) to serve the trained `SetCompletionModel` for real-time gear set completion predictions. This has zero security measures and is meant to be used in a local environment or siloed off in a containerized environment with strict networking policies. Use at your own risk.
-* **Command-Line Tools:** Offers CLIs for orchestrating preprocessing (`src/splatnlp/preprocessing/pipeline.py`), training the main model (`src/splatnlp/model/cli.py`), training SAEs (`src/splatnlp/monosemantic_sae/sae_training/cli.py`), and running embedding experiments (`src/splatnlp/embeddings/cli.py`). These were designed to minimize the amount of time spent setting up to train the model, reducing compute spend on rented machines.
-* **Visualization Utilities:** Contains tools for dimensionality reduction (t-SNE via `embeddings` CLI) and fetching weapon images/abbreviations (`src/splatnlp/viz/`) to support analysis. This was designed to support the early experimentation of NLP approaches to this problem. Future visualization work would use the Ultra model's understanding of the game to generate more meaningful visualizations, including support for partial builds which is not currently meaningfully supported by the Doc2Vec approach.
-* **Hyperparameter Optimization:** Includes utilities for grid search (`src/splatnlp/model/grid_search.py`). This was later superceded by the use of Weights and Biases for hyperparameter optimization but remains a useful tool for local experimentation.
-
-## Project Structure
-
-```
-SplatNLP/
-├── src/
-│   └── splatnlp/
-│       ├── embeddings/             # Embeddings, TF-IDF analysis, clustering
-│       ├── model/                  # SplatGPT model, training, evaluation, CLI
-│       ├── monosemantic_sae/       # Sparse Autoencoder tools and training
-│       ├── preprocessing/          # Data preprocessing, sampling, tokenization
-│       ├── serve/                  # API serving via FastAPI
-│       └── viz/                    # Visualization utilities
-├── data/                           # Raw and processed data storage
-├── saved_models/                   # Trained model artifacts
-├── LICENSE                         # GNU GPL-3.0 License
-├── poetry.lock                     # Dependency lock file
-├── pyproject.toml                  # Project dependencies and configuration
-└── README.md                       # Project overview
-```
-## Quickstart (local CPU demo)
-
-This demo expects a local copy of pretrained artifacts under
-`saved_models/dataset_v2` (model checkpoint + `vocab.json` +
-`weapon_vocab.json` + `model_params.json`). Those large artifacts are not
-tracked in git, but are available on the colab demo notebook. You can download them from the configured artifact host via:
-
-`poetry run python -m splatnlp.utils.download_artifacts --dataset-dir dataset_v2`
-
-You can also override the host/path using `DO_SPACES_ML_ENDPOINT` and
-`DO_SPACES_ML_DIR`.
-
-1. Install dependencies (dev extras include formatting/testing):\
-   `poetry install --with dev`\
-   (For the Doc2Vec/embeddings workflow, also install `gensim` via
-   `poetry install --with dev,embeddings`.)
-2. (Optional) Download artifacts if you don't already have them:
+1. Install deps and download pretrained artifacts:
 
    ```bash
+   poetry install --with dev
    poetry run python -m splatnlp.utils.download_artifacts \
-     --base-url https://splat-nlp.nyc3.cdn.digitaloceanspaces.com \
-     --dataset-dir dataset_v2
+     --dataset-dir dataset_v2 --include-ultra-sae
    ```
 
-   To also download Ultra + Ultra SAE artifacts (and optional Ultra feature
-   labels, if hosted), add `--include-ultra-sae`. To fetch labels only, add
-   `--include-ultra-labels`.
-
-3. Run a one-off inference:
+2. Run a one-off inference:
 
    ```bash
    poetry run python - <<'PY'
@@ -190,244 +133,56 @@ You can also override the host/path using `DO_SPACES_ML_ENDPOINT` and
    from pathlib import Path
    from splatnlp.model.models import SetCompletionModel
    from splatnlp.serve.tokenize import tokenize_build
-
+   from splatnlp.utils.constants import NULL, PAD
+   
    base = Path("saved_models/dataset_v2")
-   if not base.exists():
-       base = Path("saved_models/dataset_v0_2")
-   params = json.loads(base.joinpath("model_params.json").read_text())
-   vocab = json.loads(base.joinpath("vocab.json").read_text())
-   weapon_vocab = json.loads(base.joinpath("weapon_vocab.json").read_text())
-
+   params = json.loads((base / "model_params.json").read_text())
+   vocab = json.loads((base / "vocab.json").read_text())
+   weapon_vocab = json.loads((base / "weapon_vocab.json").read_text())
+   
    model = SetCompletionModel(**params)
-   model.load_state_dict(torch.load(base / "model.pth", map_location="cpu"))
+   model.load_state_dict(torch.load(base / "model_ultra.pth", map_location="cpu"))
    model.eval()
-
-   tokens = tokenize_build({"ink_saver_main": 6, "run_speed_up": 12, "intensify_action": 10})
-   weapon_id = "weapon_id_1001"
-   input_tokens = torch.tensor([[vocab[t] for t in tokens]])
-   input_weapons = torch.tensor([[weapon_vocab[weapon_id]]])
-   key_padding_mask = input_tokens == params["pad_token_id"]
-
+   
+   weapon_id = "weapon_id_8000"
+   tokens = tokenize_build(
+       {"ink_saver_main": 6, "run_speed_up": 12, "intensify_action": 12}
+   )
+   x = torch.tensor([[vocab[t] for t in tokens]])
+   w = torch.tensor([[weapon_vocab[weapon_id]]])
+   mask = x == params.get("pad_token_id", vocab[PAD])
+   
    with torch.no_grad():
-       preds = torch.sigmoid(
-           model(input_tokens, input_weapons, key_padding_mask=key_padding_mask)
-       ).squeeze()
-
-   skip = {vocab["<PAD>"], vocab["<NULL>"]}
+       probs = torch.sigmoid(model(x, w, key_padding_mask=mask)).squeeze(0)
+   
    inv_vocab = {v: k for k, v in vocab.items()}
-   scores = [(i, float(p)) for i, p in enumerate(preds.tolist()) if i not in skip]
-   top5 = sorted(scores, key=lambda x: x[1], reverse=True)[:5]
-   print("tokens:", tokens)
-   print("top-5:", [(inv_vocab[i], p) for i, p in top5])
+   skip = {vocab.get(PAD), vocab.get(NULL)}
+   top = torch.topk(probs, k=12)
+   rows = [
+       (inv_vocab[i], float(p))
+       for i, p in zip(top.indices.tolist(), top.values.tolist())
+       if i not in skip
+   ]
+   print("context tokens:", tokens)
+   print("top preds:", rows[:8])
    PY
    ```
 
-4. (Optional) Run the test suite:\
-   `poetry run pytest -q`
+**Training (optional)**
+- Full training notes: [`docs/TRAINING.md`](docs/TRAINING.md)
+- Longer recipes (serving, eval scripts, CLI examples):
+  [`docs/USAGE.md`](docs/USAGE.md)
 
-## Setup
+**Tests**
+- `poetry run pytest -q`
 
-1.  **Clone the repository:**
-    ```bash
-    git clone [https://github.com/cesaregarza/SplatNLP](https://github.com/cesaregarza/SplatNLP)
-    cd SplatNLP
-    ```
-2.  **Create and activate a virtual environment (recommended):**
-    ```bash
-    python -m venv venv
-    # On Linux/macOS:
-    source venv/bin/activate
-    # On Windows:
-    # venv\Scripts\activate
-    ```
-3.  **Install dependencies using Poetry (includes dev/test tools):**
-    ```bash
-    pip install poetry # If you don't have poetry installed
-    poetry install --with dev
-    # Optional (Doc2Vec/embeddings):
-    poetry install --with dev,embeddings
-    ```
-4.  **(Optional) Set environment variables for serving:**
-    The API server (`src/splatnlp/serve/app.py`) loads model artifacts from URLs specified by environment variables. See `src/splatnlp/serve/load_model.py` for details (e.g., `VOCAB_URL`, `MODEL_URL`, `PARAMS_URL`, `WEAPON_VOCAB_URL`, `INFO_URL` or `DO_SPACES_ML_ENDPOINT`/`DO_SPACES_ML_DIR`).
+## Security note
 
-## Development workflow
-
-- Format: `poetry run isort .` then `poetry run black .` (line length 80)
-- Test: `poetry run pytest -q` (uses fixtures under `test_data/`)
-
-## Usage Examples
-
-*(Note: Adjust paths and parameters according to your setup. Data paths often expect TSV/CSV files where the `ability_tags` column contains JSON-parseable lists of integers/strings depending on the context.)*
-
-**1. Run the Preprocessing Pipeline:**
-*(Downloads data from stat.ink, processes it including ability bucketing and sampling, and saves partitioned output. Final output is `weapon_partitioned.csv` in the base path.)*
-```bash
-# Example: Persist raw downloads, process, save result to data/weapon_partitioned.csv
-python -m splatnlp.preprocessing.pipeline --base_path data/ --persist
-```
-
-**2. Train/Use Doc2Vec Embeddings:**
-
-```bash
-# Example: Train a Doc2Vec model with clustering
-python -m splatnlp.embeddings.cli \
-    --data_path path/to/your/tokenized_data.csv \
-    --vocab_path path/to/your/vocab.json \
-    --weapon_vocab_path path/to/your/weapon_vocab.json \
-    --output_dir ./embeddings_output \
-    --vector_size 100 \
-    --window 25 \
-    --min_count 1 \
-    --epochs 10 \
-    --dm 0 \
-    --workers 16 \
-    --n_components 2 \
-    --perplexity 30.0 \
-    --n_iter 1000 \
-    --eps 0.5 \
-    --min_samples 5 \
-    --umap_neighbors 15 \
-    --umap_min_dist 0.1 \
-    --random_state 42 \
-    --verbose True
-> **Note:** The pretrained `doc2vec.model` is not included in the repository. Download it from the project releases and place it in `./embeddings_output/` before running inference or clustering.
-
-
-# Example: Run inference with trained model
-python -m splatnlp.embeddings.cli \
-    --mode infer \
-    --model_path ./embeddings_output/doc2vec.model \
-    # ... (same paths as above) ...
-
-# Example: Run dimensionality reduction
-python -m splatnlp.embeddings.cli \
-    --mode reduce \
-    --model_path ./embeddings_output/doc2vec.model \
-    # ... (same paths as above) ...
-
-# Example: Run clustering
-python -m splatnlp.embeddings.cli \
-    --mode cluster \
-    --model_path ./embeddings_output/doc2vec.model \
-    # ... (same paths as above) ...
-```
-
-**3. Train the Main `SetCompletionModel` (`SplatGPT`):**
-
-```bash
-# Example: Train using a tokenized CSV file
-python -m splatnlp.model.cli \
-    --data_path path/to/your/tokenized_data.csv \
-    --vocab_path path/to/your/vocab.json \
-    --weapon_vocab_path path/to/your/weapon_vocab.json \
-    --output_dir ./trained_splatgpt_model \
-    --embedding_dim 32 \
-    --hidden_dim 512 \
-    --num_layers 3 \
-    --use_layer_norm True \
-    --dropout 0.3 \
-    --learning_rate 0.0001 \
-    --fraction 1 \
-    --verbose True \
-    --num_epochs 20 \
-    --batch_size 1024 \
-    --use_mixed_precision True \
-    --num_workers 16 \
-    --metric_update_interval 1000
-```
-
-**4. Train a Sparse Autoencoder (SAE) on Model Activations:**
-
-> NOTE: This is currently experimental and may require significant tuning.
-
-```bash
-# Example: Train an SAE on masked_mean activations from a pretrained SetCompletionModel
-python -m scripts.train_sae \
-    --model-checkpoint path/to/your/model.pth \
-    --data-csv path/to/your/tokenized_data.csv \
-    --save-dir ./trained_sae \
-    --vocab-path path/to/your/vocab.json \
-    --weapon-vocab-path path/to/your/weapon_vocab.json \
-    --primary-embedding-dim 32 \
-    --primary-hidden-dim 512 \
-    --primary-num-layers 3 \
-    --primary-num-heads 8 \
-    --primary-num-inducing 32 \
-    --epochs 10 \
-    --expansion-factor 4 \
-    --lr 1e-4 \
-    --l1-coeff 1e-4 \
-    --target-usage 7e-3 \
-    --usage-coeff 0.0 \
-    --gradient-clip-val 1.0 \
-    --buffer-size 100000 \
-    --sae-batch-size 1024 \
-    --steps-before-train 50000 \
-    --sae-train-steps 4 \
-    --primary-data-fraction 0.005 \
-    --resample-weight 0.01 \
-    --resample-bias -1.0 \
-    --dead-neuron-threshold 1e-6 \
-    --kl-floor 0.0 \
-    --resample-steps 7000 14000 21000 28000 \
-    --device cuda \
-    --num-workers 16 \
-    --verbose
-```
-
-**5. Run the API Server (Serves `SetCompletionModel`):**
-*(Requires model artifacts accessible via URLs configured through environment variables)*
-
-> NOTE: THIS HAS NO SECURITY MEASURES, IT IS DESIGNED TO BE USED IN A LOCAL ENVIRONMENT OR SILOED OFF IN A CONTAINERIZED ENVIRONMENT WITH STRICT NETWORKING POLICIES. DO NOT DEPLOY THIS IN A PRODUCTION ENVIRONMENT WITHOUT ADDING THE APPROPRIATE SECURITY MEASURES. Artifacts are fetched over HTTP and deserialized with `torch.load` (pickle), so only point the env vars at trusted, integrity-checked endpoints.
-
-```bash
-# Ensure environment variables for model URLs are set (see src/splatnlp/serve/load_model.py)
-# Example: uvicorn module.path:app --host <host> --port <port>
-uvicorn splatnlp.serve.app:app --host 0.0.0.0 --port 9000 --reload
-```
-
-**6. Query the API Endpoint:**
-
-```bash
-# Example: Get predictions for a partial build (Splattershot Pro - ID 310)
-# Note: Provide AP values as integers (e.g., 1 main = 10, 1 sub = 3)
-curl -X POST "http://localhost:9000/infer" \
-     -H "Content-Type: application/json" \
-     -d '{
-          "target": {
-            "ink_saver_main": 6,
-            "run_speed_up": 12,
-            "intensify_action": 10
-          },
-          "weapon_id": 310
-        }'
-
-# Example: Get baseline build for a weapon (using NULL token logic)
-curl -X POST "http://localhost:9000/infer" \
-     -H "Content-Type: application/json" \
-     -d '{
-          "target": {},
-          "weapon_id": 310
-        }'
-# Expected response structure (values are examples):
-# {
-#   "predictions": [
-#     ["ability_tag_1", 0.95],
-#     ["ability_tag_2", 0.88],
-#     ...
-#   ],
-#   "splatgpt_info": { ... model metadata ... },
-#   "api_version": "0.2.0",
-#   "inference_time": 0.05
-# }
-
-# Example Test GET request (uses hardcoded input)
-curl "http://localhost:9000/infer"
-```
-
-## Architecture
-
-(A diagram and detailed explanation of the `SetCompletionModel` architecture can be found in the blog post linked above.)
+- Checkpoints are loaded with `torch.load` (pickle); only load artifacts you
+  trust.
+- The FastAPI server is intended for local demos; if you expose it, add auth,
+  rate limiting, and restrict artifact sources. Details:
+  [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## License
 

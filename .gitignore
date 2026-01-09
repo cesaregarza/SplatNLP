@@ -51,6 +51,7 @@ sae_grid_search_outputs/
 test_data/
 test_data
 dashboard_outputs/
+tmp_results/
 bench/
 decomp_models/
 decomp_models
@@ -89,6 +90,10 @@ sae_runs
 
 # Claude-specific documentation
 CLAUDE.md
+
+# Private/local-only docs
+INTERVIEW_CHEAT_SHEET*
+INTERVIEW_CARD*
 
 # Documentation assets (tracked)
 !docs/assets/

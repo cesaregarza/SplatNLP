@@ -12,13 +12,18 @@ def predict(tokens, weapon_id):
     return {}
 
 
+def predict_batch(token_batches, weapon_id):
+    return [predict(tokens, weapon_id) for tokens in token_batches]
+
+
 def test_reconstruct_build_returns_traces():
     allocator = Allocator()
     result_builds, traces = reconstruct_build(
-        predict,
-        "w",
-        [],
-        allocator,
+        predict_fn=predict,
+        predict_batch_fn=predict_batch,
+        weapon_id="w",
+        initial_context=[],
+        allocator=allocator,
         beam_size=1,
         max_steps=1,
         record_traces=True,

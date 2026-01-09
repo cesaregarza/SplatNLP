@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import math
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from itertools import combinations
 from pathlib import Path
 from typing import Any
 
@@ -14,13 +16,19 @@ from splatnlp.eval.sendou_baseline import (
     ap_to_slot_items,
     load_sendou_builds,
     split_builds_by_tier,
+    tokens_to_capstones,
 )
+from splatnlp.serve.tokenize import tokenize_build
+from splatnlp.utils.constants import BUCKET_THRESHOLDS, NULL
+from splatnlp.utils.reconstruct import Allocator
 
 MAX_TOTAL_AP = 57
 MAX_AP_L1 = MAX_TOTAL_AP * 2
 
 RefBuild = tuple[dict[str, int], Counter[str]]
 RefByWeapon = dict[str, list[RefBuild]]
+
+_THRESHOLD_TO_INDEX = {int(t): int(i) for i, t in enumerate(BUCKET_THRESHOLDS)}
 
 
 def _normalize_ap_dict(ap: dict[str, int] | None) -> dict[str, int] | None:
@@ -78,6 +86,91 @@ def _context_violation_from_counters(
     if pred is None:
         return 1.0 if sum(observed.values()) > 0 else 0.0
     return 0.0 if _multiset_is_subset(observed, pred) else 1.0
+
+
+def _token_multiset(tokens: list[str]) -> Counter[str]:
+    return Counter(str(t) for t in tokens if str(t) != NULL)
+
+
+def _canonicalize_context_tokens(
+    tokens: list[str],
+    *,
+    allocator: Allocator,
+) -> list[str]:
+    capstones = tokens_to_capstones(tokens)
+    build, _ = allocator.allocate(capstones, priority={})
+    if build is None:
+        return list(tokens) if tokens else [NULL]
+    return tokenize_build(build.achieved_ap)
+
+
+def _edit_cost_against_lock(
+    *,
+    lock_tokens: list[str],
+    pred_tokens: list[str],
+) -> tuple[float, float]:
+    """
+    Measures how much a prediction *violates* an immutable lock context.
+
+    This is intentionally asymmetric: additions are free (completion), while
+    removals or tier downshifts of locked abilities incur cost.
+    """
+    lock_caps = tokens_to_capstones(lock_tokens)
+    pred_caps = tokens_to_capstones(pred_tokens)
+
+    lock_main_only = {c.family for c in lock_caps.values() if c.main_only}
+    pred_main_only = {c.family for c in pred_caps.values() if c.main_only}
+
+    lock_standard = {
+        c.family: c.min_ap for c in lock_caps.values() if not c.main_only
+    }
+    pred_standard = {
+        c.family: c.min_ap for c in pred_caps.values() if not c.main_only
+    }
+
+    removed_main_only = lock_main_only - pred_main_only
+    removed_standard = set(lock_standard) - set(pred_standard)
+
+    swap_cost = 0.0
+    for a, b in [("run_speed_up", "swim_speed_up")]:
+        if (
+            a in removed_standard
+            and b in pred_standard
+            and b not in lock_standard
+        ):
+            removed_standard.remove(a)
+            swap_cost += 3.0
+        if (
+            b in removed_standard
+            and a in pred_standard
+            and a not in lock_standard
+        ):
+            removed_standard.remove(b)
+            swap_cost += 3.0
+
+    tier_cost = 0.0
+    for family in set(lock_standard) & set(pred_standard):
+        lock_min = int(lock_standard[family])
+        pred_min = int(pred_standard[family])
+        if pred_min >= lock_min:
+            continue
+        lock_idx = _THRESHOLD_TO_INDEX.get(lock_min)
+        pred_idx = _THRESHOLD_TO_INDEX.get(pred_min)
+        if lock_idx is None or pred_idx is None:
+            continue
+        delta = abs(int(pred_idx) - int(lock_idx))
+        tier_cost += float(delta) * 2.0
+
+    cross_family = (
+        1.0 if (removed_main_only or removed_standard or swap_cost > 0) else 0.0
+    )
+
+    cost = 0.0
+    cost += float(len(removed_main_only)) * 5.0
+    cost += float(len(removed_standard)) * 5.0
+    cost += swap_cost
+    cost += tier_cost
+    return cost, cross_family
 
 
 def _load_json(path: Path) -> Any:
@@ -222,6 +315,7 @@ def analyze_compare_file(
         raise ValueError(f"Unexpected file shape for {path}")
 
     case_by_id = {int(c["case_id"]): c for c in cases}
+    allocator = Allocator()
     case_cache: dict[int, dict[str, Any]] = {}
     for cid, c in case_by_id.items():
         truth_ap = _normalize_ap_dict(dict(c["truth_abilities_ap"])) or {}
@@ -230,17 +324,37 @@ def analyze_compare_file(
         observed_ap = _normalize_ap_dict(dict(c["masked_abilities_ap"])) or {}
         observed_slots = _slot_counter(observed_ap)
 
+        context_tokens = list(c.get("context_tokens") or [])
+        context_tokens_canon = _canonicalize_context_tokens(
+            context_tokens,
+            allocator=allocator,
+        )
+
         case_cache[cid] = {
             "weapon_token": str(c["weapon_token"]),
             "truth_ap": truth_ap,
             "truth_slots": truth_slots,
             "observed_slots": observed_slots,
+            "context_tokens": context_tokens,
+            "context_tokens_canon": context_tokens_canon,
+            "rt_token_violation": float(
+                _token_multiset(context_tokens)
+                != _token_multiset(context_tokens_canon)
+            ),
         }
 
     overlap_by_case_id: dict[int, bool] | None = None
     ref_by_weapon: RefByWeapon | None = None
     needs_ref_set = any(m.startswith("tier1_set_") for m in metric_names)
-    needs_builds = split_overlap or needs_ref_set
+    needs_coherence = any(
+        m
+        in (
+            "top1_pmi_frankenstein_penalty",
+            "top1_nn_jaccard_family",
+        )
+        for m in metric_names
+    )
+    needs_builds = split_overlap or needs_ref_set or needs_coherence
 
     train_builds = []
     eval_builds = []
@@ -284,6 +398,58 @@ def analyze_compare_file(
             ap = _normalize_ap_dict(dict(row.abilities_ap)) or {}
             slots = _slot_counter(ap)
             ref_by_weapon[str(row.weapon_token)].append((ap, slots))
+
+    ref_family_sets_by_weapon: dict[str, list[set[str]]] | None = None
+    pmi_cooccur_by_weapon: dict[str, dict[str, Any]] | None = None
+    if needs_coherence:
+        ref_family_sets_by_weapon = defaultdict(list)
+        for row in eval_builds:
+            ref_family_sets_by_weapon[str(row.weapon_token)].append(
+                {
+                    str(k)
+                    for k, v in dict(row.abilities_ap).items()
+                    if int(v) != 0
+                }
+            )
+
+        eps = 1e-12
+        n_by_weapon: Counter[str] = Counter()
+        fam_counts_by_weapon: dict[str, Counter[str]] = defaultdict(Counter)
+        pair_counts_by_weapon: dict[str, Counter[tuple[str, str]]] = (
+            defaultdict(Counter)
+        )
+
+        for row in train_builds:
+            weapon = str(row.weapon_token)
+            fams = sorted(
+                {
+                    str(k)
+                    for k, v in dict(row.abilities_ap).items()
+                    if int(v) != 0
+                }
+            )
+            if not fams:
+                continue
+            n_by_weapon[weapon] += 1
+            fam_counts_by_weapon[weapon].update(fams)
+            pair_counts_by_weapon[weapon].update(combinations(fams, 2))
+
+        pmi_cooccur_by_weapon = {}
+        for weapon, n in n_by_weapon.items():
+            denom = float(n)
+            p_a = {
+                fam: float(cnt) / denom
+                for fam, cnt in fam_counts_by_weapon[weapon].items()
+            }
+            p_ab = {
+                pair: float(cnt) / denom
+                for pair, cnt in pair_counts_by_weapon[weapon].items()
+            }
+            pmi_cooccur_by_weapon[weapon] = {
+                "p_a": p_a,
+                "p_ab": p_ab,
+                "eps": eps,
+            }
 
     rng = np.random.default_rng(seed)
 
@@ -458,6 +624,104 @@ def analyze_compare_file(
                                     pred=pred_top1_slots,
                                 )
                             )
+                        elif metric == "rt_token_violation":
+                            arr.append(
+                                float(cache.get("rt_token_violation", 0.0))
+                            )
+                        elif metric in (
+                            "top1_edit_cost",
+                            "top1_cross_family_edit",
+                        ):
+                            lock_tokens = list(
+                                cache.get("context_tokens_canon") or []
+                            )
+                            if pred_top1_ap is None:
+                                pred_tokens = [NULL]
+                            else:
+                                pred_tokens = tokenize_build(pred_top1_ap)
+
+                            cost, cross = _edit_cost_against_lock(
+                                lock_tokens=lock_tokens,
+                                pred_tokens=pred_tokens,
+                            )
+                            arr.append(
+                                float(
+                                    cost
+                                    if metric == "top1_edit_cost"
+                                    else cross
+                                )
+                            )
+                        elif metric == "top1_nn_jaccard_family":
+                            if ref_family_sets_by_weapon is None:
+                                raise ValueError(
+                                    "top1_nn_jaccard_family requires eval builds."
+                                )
+                            if pred_top1_ap is None:
+                                arr.append(0.0)
+                                continue
+                            refs = ref_family_sets_by_weapon.get(
+                                cache["weapon_token"], []
+                            )
+                            if not refs:
+                                arr.append(0.0)
+                                continue
+
+                            fams_pred = {
+                                str(k)
+                                for k, v in pred_top1_ap.items()
+                                if int(v) != 0
+                            }
+                            if not fams_pred:
+                                arr.append(0.0)
+                                continue
+                            best = 0.0
+                            for fams_ref in refs:
+                                inter = len(fams_pred & fams_ref)
+                                union = len(fams_pred | fams_ref)
+                                if union <= 0:
+                                    continue
+                                best = max(best, float(inter) / float(union))
+                            arr.append(float(best))
+                        elif metric == "top1_pmi_frankenstein_penalty":
+                            if pmi_cooccur_by_weapon is None:
+                                raise ValueError(
+                                    "top1_pmi_frankenstein_penalty requires train builds."
+                                )
+                            if pred_top1_ap is None:
+                                arr.append(0.0)
+                                continue
+                            fams = sorted(
+                                {
+                                    str(k)
+                                    for k, v in pred_top1_ap.items()
+                                    if int(v) != 0
+                                }
+                            )
+                            if len(fams) < 2:
+                                arr.append(0.0)
+                                continue
+
+                            stats_w = pmi_cooccur_by_weapon.get(
+                                cache["weapon_token"]
+                            )
+                            if stats_w is None:
+                                arr.append(0.0)
+                                continue
+                            p_a = stats_w["p_a"]
+                            p_ab = stats_w["p_ab"]
+                            eps = float(stats_w["eps"])
+                            penalty = 0.0
+                            for a, b in combinations(fams, 2):
+                                pa = float(p_a.get(a, 0.0))
+                                pb = float(p_a.get(b, 0.0))
+                                pab = float(p_ab.get((a, b), 0.0))
+                                denom = (pa + eps) * (pb + eps)
+                                if denom <= 0:
+                                    continue
+                                pmi = math.log((pab + eps) / denom)
+                                if pmi < 0:
+                                    penalty += -pmi
+                            arr.append(float(penalty))
                         elif metric.startswith("tier1_set_"):
                             if ref_by_weapon is None:
                                 raise ValueError(
@@ -691,6 +955,11 @@ def main() -> None:
             "top1_observed_slot_recall",
             "top1_context_violation",
             "top1_edit_chance",
+            "rt_token_violation",
+            "top1_edit_cost",
+            "top1_cross_family_edit",
+            "top1_pmi_frankenstein_penalty",
+            "top1_nn_jaccard_family",
             "tier1_set_best_accuracy",
             "tier1_set_best_accuracy_top1",
             "tier1_set_completion_slot_acc",

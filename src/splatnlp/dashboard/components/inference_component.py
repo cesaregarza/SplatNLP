@@ -546,7 +546,10 @@ def run_inference(
 
     from splatnlp.dashboard.app import DASHBOARD_CONTEXT
     from splatnlp.serve.tokenize import tokenize_build
-    from splatnlp.utils.infer import build_predict_abilities
+    from splatnlp.utils.infer import (
+        build_predict_abilities,
+        build_predict_abilities_batch,
+    )
     from splatnlp.utils.reconstruct.allocator import Allocator
     from splatnlp.utils.reconstruct.beam_search import reconstruct_build
 
@@ -587,6 +590,7 @@ def run_inference(
     vocab = DASHBOARD_CONTEXT.vocab
     weapon_vocab = DASHBOARD_CONTEXT.weapon_vocab
     sae_model = getattr(DASHBOARD_CONTEXT, "sae_model", None)
+    device = next(model.parameters()).device
 
     try:
         abilities_data = abilities_data or []
@@ -600,12 +604,24 @@ def run_inference(
             weapon_vocab=weapon_vocab,
             pad_token="<PAD>",
             hook=None,
+            device=device,
+            output_type="dict",
+        )
+        predict_batch_fn_factory = build_predict_abilities_batch(
+            vocab=vocab,
+            weapon_vocab=weapon_vocab,
+            pad_token="<PAD>",
+            hook=None,
+            device=device,
             output_type="dict",
         )
 
         # Create callable that predict_fn expects
         def predict_fn(current_tokens, wpn_id):
             return predict_fn_factory(model, current_tokens, wpn_id)
+
+        def predict_batch_fn(token_batches, wpn_id):
+            return predict_batch_fn_factory(model, list(token_batches), wpn_id)
 
         # Get raw predictions for display
         raw_preds = predict_fn(tokens, weapon_id)
@@ -638,8 +654,6 @@ def run_inference(
         if sae_model is not None:
             try:
                 from splatnlp.monosemantic_sae.hooks import register_hooks
-
-                device = next(model.parameters()).device
 
                 # Register hook on the model
                 hook, handle = register_hooks(
@@ -693,6 +707,7 @@ def run_inference(
         allocator = Allocator()
         builds = reconstruct_build(
             predict_fn=predict_fn,
+            predict_batch_fn=predict_batch_fn,
             weapon_id=weapon_id,
             initial_context=tokens,
             allocator=allocator,

@@ -356,9 +356,9 @@ def evaluate_top_k(
             out["num_correct_best"], metrics["correct"]
         )
         out["best_accuracy"] = max(out["best_accuracy"], metrics["accuracy"])
-        out["accuracy"] = metrics["accuracy"]
         if i == 0:
             out["num_correct_out"] = metrics["correct"]
+            out["accuracy"] = metrics["accuracy"]
         if out["num_correct_best"] == metrics["correct"]:
             out["num_missing"] = metrics["missing"]
             out["num_extra"] = metrics["extra"]

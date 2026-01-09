@@ -8,6 +8,223 @@ from splatnlp.model.models import SetCompletionModel
 from splatnlp.monosemantic_sae.hooks import SetCompletionHook
 
 
+def build_predict_abilities_batch(
+    vocab: dict[str, int],
+    weapon_vocab: dict[str, int],
+    pad_token: str = "<PAD>",
+    hook: SetCompletionHook | None = None,
+    device: torch.device | None = None,
+    output_type: Literal["df", "dict", "list"] = "dict",
+) -> Callable[
+    [
+        SetCompletionModel,
+        list[list[str]],
+        str,
+        bool,
+        bool,
+    ],
+    list[pd.DataFrame] | list[dict[str, float]] | list[list[str]],
+]:
+    """Builds a function that predicts abilities for a batch of targets and a
+    single weapon using a SetCompletionModel.
+
+    The returned function mirrors :func:`build_predict_abilities`, but accepts
+    a list of token lists and returns a list of outputs of the requested type.
+    """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    inv_vocab = {v: k for k, v in vocab.items()}
+    labels = [inv_vocab[i] for i in range(len(inv_vocab))]
+    pad_id = vocab[pad_token]
+
+    def predict_abilities_batch(
+        model: SetCompletionModel,
+        targets: list[list[str]],
+        weapon_id: str,
+        bypass: bool = False,
+        no_change: bool = False,
+    ) -> list[pd.DataFrame] | list[dict[str, float]] | list[list[str]]:
+        model.eval()
+        if hook is not None:
+            hook.bypass = bypass
+            hook.no_change = no_change
+
+        if not targets:
+            return []
+
+        batch_size = len(targets)
+        max_len = max(len(t) for t in targets)
+        input_tokens = torch.full(
+            (batch_size, max_len),
+            pad_id,
+            device=device,
+            dtype=torch.long,
+        )
+        for row_idx, target in enumerate(targets):
+            if not target:
+                continue
+            token_ids = [vocab[token] for token in target]
+            input_tokens[row_idx, : len(token_ids)] = torch.tensor(
+                token_ids,
+                device=device,
+                dtype=torch.long,
+            )
+
+        input_weapons = torch.full(
+            (batch_size, 1),
+            weapon_vocab[weapon_id],
+            device=device,
+            dtype=torch.long,
+        )
+        key_padding_mask = input_tokens == pad_id
+
+        with torch.no_grad():
+            outputs = model(
+                input_tokens,
+                input_weapons,
+                key_padding_mask=key_padding_mask,
+            )
+            probs = torch.sigmoid(outputs)
+
+        probs_np = probs.detach().cpu().numpy()
+        if probs_np.ndim == 1:
+            probs_np = probs_np.reshape(1, -1)
+
+        if output_type == "dict":
+            return [
+                {labels[i]: float(row[i]) for i in range(len(labels))}
+                for row in probs_np
+            ]
+
+        if output_type == "list":
+            return [list(labels) for _ in range(len(probs_np))]
+
+        # output_type == "df"
+        out: list[pd.DataFrame] = []
+        for row in probs_np:
+            df = pd.DataFrame({"label": labels, "probability": row})
+            out.append(
+                df.sort_values("probability", ascending=False).set_index(
+                    "label"
+                )
+            )
+        return out
+
+    return predict_abilities_batch
+
+
+def build_predict_abilities_batch_multiweapon(
+    vocab: dict[str, int],
+    weapon_vocab: dict[str, int],
+    pad_token: str = "<PAD>",
+    hook: SetCompletionHook | None = None,
+    device: torch.device | None = None,
+    output_type: Literal["df", "dict", "list"] = "dict",
+) -> Callable[
+    [
+        SetCompletionModel,
+        list[list[str]],
+        list[str],
+        bool,
+        bool,
+    ],
+    list[pd.DataFrame] | list[dict[str, float]] | list[list[str]],
+]:
+    """Builds a function that predicts abilities for a batch of targets with
+    per-example weapons using a SetCompletionModel.
+
+    This is similar to :func:`build_predict_abilities_batch`, but accepts one
+    weapon id per row.
+    """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    inv_vocab = {v: k for k, v in vocab.items()}
+    labels = [inv_vocab[i] for i in range(len(inv_vocab))]
+    pad_id = vocab[pad_token]
+
+    def predict_abilities_batch_multiweapon(
+        model: SetCompletionModel,
+        targets: list[list[str]],
+        weapon_ids: list[str],
+        bypass: bool = False,
+        no_change: bool = False,
+    ) -> list[pd.DataFrame] | list[dict[str, float]] | list[list[str]]:
+        model.eval()
+        if hook is not None:
+            hook.bypass = bypass
+            hook.no_change = no_change
+
+        if not targets:
+            return []
+        if len(targets) != len(weapon_ids):
+            raise ValueError(
+                "targets and weapon_ids must have the same length "
+                f"(got {len(targets)} and {len(weapon_ids)})"
+            )
+
+        batch_size = len(targets)
+        max_len = max(len(t) for t in targets)
+        input_tokens = torch.full(
+            (batch_size, max_len),
+            pad_id,
+            device=device,
+            dtype=torch.long,
+        )
+        for row_idx, target in enumerate(targets):
+            if not target:
+                continue
+            token_ids = [vocab[token] for token in target]
+            input_tokens[row_idx, : len(token_ids)] = torch.tensor(
+                token_ids,
+                device=device,
+                dtype=torch.long,
+            )
+
+        weapon_ids_idx = [weapon_vocab[wid] for wid in weapon_ids]
+        input_weapons = torch.tensor(
+            weapon_ids_idx,
+            device=device,
+            dtype=torch.long,
+        ).unsqueeze(1)
+        key_padding_mask = input_tokens == pad_id
+
+        with torch.no_grad():
+            outputs = model(
+                input_tokens,
+                input_weapons,
+                key_padding_mask=key_padding_mask,
+            )
+            probs = torch.sigmoid(outputs)
+
+        probs_np = probs.detach().cpu().numpy()
+        if probs_np.ndim == 1:
+            probs_np = probs_np.reshape(1, -1)
+
+        if output_type == "dict":
+            return [
+                {labels[i]: float(row[i]) for i in range(len(labels))}
+                for row in probs_np
+            ]
+
+        if output_type == "list":
+            return [list(labels) for _ in range(len(probs_np))]
+
+        # output_type == "df"
+        out: list[pd.DataFrame] = []
+        for row in probs_np:
+            df = pd.DataFrame({"label": labels, "probability": row})
+            out.append(
+                df.sort_values("probability", ascending=False).set_index(
+                    "label"
+                )
+            )
+        return out
+
+    return predict_abilities_batch_multiweapon
+
+
 def build_predict_abilities(
     vocab: dict[str, int],
     weapon_vocab: dict[str, int],

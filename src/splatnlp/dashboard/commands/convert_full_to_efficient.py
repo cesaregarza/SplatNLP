@@ -12,8 +12,8 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import gc
+import json
 from pathlib import Path
 from typing import Any
 
@@ -33,8 +33,8 @@ TARGET_DIR = Path("/mnt/e/activations_full_efficient")
 
 # Conversion settings
 BATCH_SIZE = 500_000  # Samples per batch
-CHUNK_SIZE = 1000     # Rows per zarr chunk
-N_FEATURES = 2048     # Full model has 2048 SAE features
+CHUNK_SIZE = 1000  # Rows per zarr chunk
+N_FEATURES = 2048  # Full model has 2048 SAE features
 COMPRESSION = "zstd"
 COMPRESSION_LEVEL = 3
 
@@ -88,7 +88,9 @@ def convert_batch(
     print(f"\n=== Batch {batch_idx} (samples {start_idx:,} - {end_idx:,}) ===")
 
     # Build dense activation matrix for this batch
-    print(f"  Building dense activation matrix ({batch_size} x {N_FEATURES})...")
+    print(
+        f"  Building dense activation matrix ({batch_size} x {N_FEATURES})..."
+    )
     acts_matrix = np.zeros((batch_size, N_FEATURES), dtype=np.float32)
 
     for feature_id in tqdm(range(N_FEATURES), desc="  Loading features"):
@@ -129,13 +131,15 @@ def convert_batch(
     batch_df = analysis_df.slice(start_idx, batch_size)
 
     # Build clean metadata DataFrame
-    clean_df = pl.DataFrame({
-        "batch_id": [batch_idx] * batch_size,
-        "sample_id": list(range(batch_size)),
-        "ability_tokens": batch_df["ability_input_tokens"].to_list(),
-        "weapon_id_token": batch_df["weapon_id_token"].to_list(),
-        "global_index": list(range(start_idx, end_idx)),
-    })
+    clean_df = pl.DataFrame(
+        {
+            "batch_id": [batch_idx] * batch_size,
+            "sample_id": list(range(batch_size)),
+            "ability_tokens": batch_df["ability_input_tokens"].to_list(),
+            "weapon_id_token": batch_df["weapon_id_token"].to_list(),
+            "global_index": list(range(start_idx, end_idx)),
+        }
+    )
 
     parquet_path = metadata_dir / f"batch_{batch_idx:04d}.parquet"
     clean_df.write_parquet(
@@ -182,7 +186,9 @@ def main():
 
     # Verify we have the expected number of samples
     if len(analysis_df) != n_samples:
-        print(f"  WARNING: DataFrame has {len(analysis_df)} rows, expected {n_samples}")
+        print(
+            f"  WARNING: DataFrame has {len(analysis_df)} rows, expected {n_samples}"
+        )
         n_samples = len(analysis_df)
 
     # Create output directories

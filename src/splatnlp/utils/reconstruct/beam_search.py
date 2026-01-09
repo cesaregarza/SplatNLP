@@ -1,5 +1,6 @@
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping, Optional, Sequence, overload
+from typing import Any, Callable, Literal, Mapping, Optional, Sequence, overload
 
 from splatnlp.utils.constants import BUCKET_THRESHOLDS, NULL, TOKEN_BONUS
 from splatnlp.utils.reconstruct.allocator import Allocator
@@ -82,6 +83,32 @@ class TraceFrame:
             ),
             build=self.build.to_dict() if self.build is not None else None,
         )
+
+
+def _unpack_batch_predictions(
+    raw_predictions: Any,
+    *,
+    batch_size: int,
+) -> tuple[list[Mapping[str, float]], list[Optional[Sequence[float]]]]:
+    if isinstance(raw_predictions, tuple) and len(raw_predictions) == 2:
+        probs_batch, activations_batch = raw_predictions
+    else:
+        probs_batch = raw_predictions
+        activations_batch = [None] * batch_size
+
+    probs_list = list(probs_batch)
+    activations_list = list(activations_batch)
+    if len(probs_list) != batch_size:
+        raise ValueError(
+            "predict_batch_fn returned mismatched batch size: "
+            f"expected {batch_size}, got {len(probs_list)}"
+        )
+    if len(activations_list) != batch_size:
+        raise ValueError(
+            "predict_batch_fn returned mismatched activations batch size: "
+            f"expected {batch_size}, got {len(activations_list)}"
+        )
+    return probs_list, activations_list
 
 
 def greedy_closure(
@@ -213,6 +240,8 @@ def reconstruct_build(
     top_k: int = 1,
     record_traces: Literal[False] = False,
     min_new_token_prob: float = 0.01,
+    predict_batch_fn: Callable | None = None,
+    greedy_threshold: float = 0.5,
 ) -> Optional[list[Build]]: ...
 
 
@@ -229,6 +258,8 @@ def reconstruct_build(
     top_k: int = 1,
     record_traces: Literal[True] = True,
     min_new_token_prob: float = 0.01,
+    predict_batch_fn: Callable | None = None,
+    greedy_threshold: float = 0.5,
 ) -> tuple[Optional[list[Build]], Optional[list[list[TraceFrame]]]]: ...
 
 
@@ -244,6 +275,8 @@ def reconstruct_build(
     top_k: int = 1,
     record_traces: bool = False,
     min_new_token_prob: float = 0.01,
+    predict_batch_fn: Callable | None = None,
+    greedy_threshold: float = 0.5,
 ) -> (
     Optional[list[Build]]
     | tuple[Optional[list[Build]], Optional[list[list[TraceFrame]]]]
@@ -280,6 +313,14 @@ def reconstruct_build(
         Number of top predictions to return.
     record_traces : bool
         Whether to record the trace of the beam search.
+    greedy_threshold : float
+        Probability threshold for greedy closure token acceptance.
+    predict_batch_fn : Callable | None
+        Optional batched predictor. When provided, the beam-search phase will
+        call this once per step with a list of token contexts instead of
+        calling ``predict_fn`` per beam state. The return value should be
+        either a list of ``dict[token, prob]`` or a tuple of
+        ``(probs_batch, activations_batch)``.
 
     Notes
     -----
@@ -296,6 +337,7 @@ def reconstruct_build(
     Optional[list[list[TraceFrame]]]
         Traces for each returned build, or None if tracing is disabled.
     """
+
     # 1) Convert initial_context into an initial set of capstones
     initial_capstones: dict[str, AbilityToken] = {}
     for tok in initial_context:
@@ -347,6 +389,7 @@ def reconstruct_build(
             allocator,
             record_traces=True,
             start_step=0,
+            threshold=greedy_threshold,
             token_bonus=token_bonus,
         )
     else:
@@ -355,6 +398,7 @@ def reconstruct_build(
             weapon_id,
             initial_capstones,
             allocator,
+            threshold=greedy_threshold,
             token_bonus=token_bonus,
         )
         step = 0
@@ -403,17 +447,35 @@ def reconstruct_build(
     for _ in range(max_iterations):
         candidates: list[BeamState] = []
 
-        for rank, state in enumerate(beam):
-            # Get predictions (expanded to include prerequisite tiers)
-            current_tokens = expand_capstones_to_context(state.capstones)
-            raw_predictions = predict_fn(current_tokens, weapon_id)
+        if predict_batch_fn is not None:
+            tokens_batch = [
+                expand_capstones_to_context(state.capstones) for state in beam
+            ]
+            raw_batch = predict_batch_fn(tokens_batch, weapon_id)
+            probs_batch, activations_batch = _unpack_batch_predictions(
+                raw_batch,
+                batch_size=len(beam),
+            )
+            beam_predictions = list(zip(probs_batch, activations_batch))
+        else:
+            beam_predictions = []
+            for state in beam:
+                current_tokens = expand_capstones_to_context(state.capstones)
+                raw_predictions = predict_fn(current_tokens, weapon_id)
 
-            # Handle case where predict_fn returns (predictions, activations)
-            if isinstance(raw_predictions, tuple) and len(raw_predictions) == 2:
-                probs, activations = raw_predictions
-            else:
-                probs = raw_predictions
-                activations = None
+                if (
+                    isinstance(raw_predictions, tuple)
+                    and len(raw_predictions) == 2
+                ):
+                    probs, activations = raw_predictions
+                else:
+                    probs = raw_predictions
+                    activations = None
+                beam_predictions.append((probs, activations))
+
+        for rank, (state, (probs, activations)) in enumerate(
+            zip(beam, beam_predictions)
+        ):
 
             frame = None
 
@@ -534,19 +596,35 @@ def reconstruct_build(
 
         # Create a final frame for each state in the beam to record the end of this step
         if record_traces:
-            for state in beam:
-                current_tokens = expand_capstones_to_context(state.capstones)
-                raw_predictions = predict_fn(current_tokens, weapon_id)
-                if (
-                    isinstance(raw_predictions, tuple)
-                    and len(raw_predictions) == 2
-                ):
-                    probs, activations = raw_predictions
-                else:
-                    probs = raw_predictions
-                    activations = None
+            if predict_batch_fn is not None:
+                tokens_batch = [
+                    expand_capstones_to_context(state.capstones)
+                    for state in beam
+                ]
+                raw_batch = predict_batch_fn(tokens_batch, weapon_id)
+                probs_batch, activations_batch = _unpack_batch_predictions(
+                    raw_batch,
+                    batch_size=len(beam),
+                )
+                end_step_predictions = list(zip(probs_batch, activations_batch))
+            else:
+                end_step_predictions = []
+                for state in beam:
+                    current_tokens = expand_capstones_to_context(
+                        state.capstones
+                    )
+                    raw_predictions = predict_fn(current_tokens, weapon_id)
+                    if (
+                        isinstance(raw_predictions, tuple)
+                        and len(raw_predictions) == 2
+                    ):
+                        probs, activations = raw_predictions
+                    else:
+                        probs = raw_predictions
+                        activations = None
+                    end_step_predictions.append((probs, activations))
 
-                # Try to allocate a build for this state
+            for state, (probs, activations) in zip(beam, end_step_predictions):
                 build, _ = allocator.allocate(
                     state.capstones, priority=state.family_logp
                 )
@@ -557,7 +635,7 @@ def reconstruct_build(
                     partial_caps=dict(state.capstones),
                     logits=dict(probs),
                     activations=activations,
-                    beam_rank=0,  # Use 0 since we don't know the rank at this point
+                    beam_rank=0,  # Unknown after re-sorting
                     build=build,
                 )
                 state.trace.append(final_frame)
@@ -605,3 +683,317 @@ def reconstruct_build(
     result_builds = [cand["build"] for cand in top_k_candidates]
     traces_out = [cand["trace"] for cand in top_k_candidates]
     return (result_builds, traces_out) if record_traces else result_builds
+
+
+def reconstruct_builds_batched(
+    predict_batch_fn: Callable,
+    weapon_ids: list[str],
+    initial_contexts: list[list[str]],
+    allocator: Allocator,
+    beam_size: int = 5,
+    max_steps: int | None = 6,
+    token_bonus: float = TOKEN_BONUS,
+    greedy_threshold: float = 0.5,
+    alpha: float = 0.1,
+    top_k: int = 1,
+    min_new_token_prob: float = 0.01,
+) -> list[Optional[list[Build]]]:
+    """Run ``reconstruct_build`` for many cases with batched inference.
+
+    This helper runs multiple independent beam searches in lockstep and calls
+    ``predict_batch_fn`` once per global step over all active beam states.
+    The predictor must accept ``(token_batches, weapon_ids)``.
+    """
+    _ = alpha, min_new_token_prob
+
+    if len(weapon_ids) != len(initial_contexts):
+        raise ValueError(
+            "weapon_ids and initial_contexts must have the same length "
+            f"(got {len(weapon_ids)} and {len(initial_contexts)})"
+        )
+    if not weapon_ids:
+        return []
+
+    num_cases = len(weapon_ids)
+    capstones_per_case: list[dict[str, AbilityToken]] = []
+    family_logp_per_case: list[dict[str, float]] = []
+    log_prob_per_case: list[float] = [0.0] * num_cases
+    top_candidates_per_case: list[list[dict[str, Any]]] = [
+        [] for _ in range(num_cases)
+    ]
+
+    def already_seen(case_idx: int, build: Build) -> bool:
+        return any(
+            cand["build"] == build for cand in top_candidates_per_case[case_idx]
+        )
+
+    # Initialize capstones and add the raw user build (if valid) as a candidate.
+    for case_idx, context in enumerate(initial_contexts):
+        capstones: dict[str, AbilityToken] = {}
+        for tok in context:
+            if tok == "<NULL>":
+                continue
+            capstones[tok] = AbilityToken.from_vocab_entry(tok)
+        capstones_per_case.append(capstones)
+        family_logp_per_case.append({})
+
+        has_real_user_tokens = any(tok != "<NULL>" for tok in context)
+        if has_real_user_tokens:
+            build, penalty = allocator.allocate(capstones, priority={})
+            if build is not None and not already_seen(case_idx, build):
+                top_candidates_per_case[case_idx].append(
+                    {
+                        "score": 0.0,
+                        "penalty": (
+                            penalty if penalty is not None else float("inf")
+                        ),
+                        "build": build,
+                    }
+                )
+
+    # Greedy closure phase (batched over cases).
+    active_cases = list(range(num_cases))
+    while active_cases:
+        token_batches = [
+            expand_capstones_to_context(capstones_per_case[i])
+            for i in active_cases
+        ]
+        weapon_batch = [weapon_ids[i] for i in active_cases]
+        raw_batch = predict_batch_fn(token_batches, weapon_batch)
+        probs_batch, _ = _unpack_batch_predictions(
+            raw_batch, batch_size=len(active_cases)
+        )
+
+        next_active: list[int] = []
+        for local_idx, case_idx in enumerate(active_cases):
+            probs = probs_batch[local_idx]
+            capstones = capstones_per_case[case_idx]
+            family_logp = family_logp_per_case[case_idx]
+
+            to_add: list[str] = []
+            for tok, p in probs.items():
+                if p < greedy_threshold:
+                    continue
+                try:
+                    next_cap = AbilityToken.from_vocab_entry(tok)
+                except ValueError:
+                    continue
+
+                if next_cap.main_only:
+                    if tok not in capstones:
+                        to_add.append(tok)
+                else:
+                    existing_tokens = [
+                        k
+                        for k, v in capstones.items()
+                        if v.family == next_cap.family
+                    ]
+                    if not existing_tokens:
+                        to_add.append(tok)
+                    else:
+                        should_add = any(
+                            next_cap.min_ap > capstones[old_tok].min_ap
+                            for old_tok in existing_tokens
+                        )
+                        if should_add:
+                            to_add.append(tok)
+
+            if not to_add:
+                continue
+
+            for tok in to_add:
+                cap = AbilityToken.from_vocab_entry(tok)
+                if cap.main_only:
+                    capstones[tok] = cap
+                else:
+                    existing_lower = [
+                        k
+                        for k, v in capstones.items()
+                        if v.family == cap.family and v.min_ap < cap.min_ap
+                    ]
+                    for old_tok in existing_lower:
+                        del capstones[old_tok]
+                    capstones[tok] = cap
+
+                p = float(probs.get(tok, 0.0))
+                if p > 0:
+                    log_prob_per_case[case_idx] += p + token_bonus
+                    prev = family_logp.get(cap.family, float("-inf"))
+                    family_logp[cap.family] = max(prev, p)
+
+            next_active.append(case_idx)
+
+        active_cases = next_active
+
+    beams: list[list[BeamState]] = []
+    prev_signatures_per_case: list[set[tuple[str, ...]]] = []
+    for case_idx in range(num_cases):
+        capstones = capstones_per_case[case_idx]
+        family_logp = family_logp_per_case[case_idx]
+        beams.append(
+            [
+                BeamState(
+                    capstones=capstones,
+                    log_prob=log_prob_per_case[case_idx],
+                    family_logp=family_logp,
+                    trace=[],
+                )
+            ]
+        )
+        prev_signatures_per_case.append({tuple(sorted(capstones.keys()))})
+
+        build, penalty = allocator.allocate(capstones, priority=family_logp)
+        if build is not None and not already_seen(case_idx, build):
+            top_candidates_per_case[case_idx].append(
+                {
+                    "score": log_prob_per_case[case_idx],
+                    "penalty": penalty if penalty is not None else float("inf"),
+                    "build": build,
+                }
+            )
+
+    adaptive_cap = 30
+    max_iterations = max_steps if max_steps is not None else adaptive_cap
+    active_set = set(range(num_cases))
+
+    for _ in range(max_iterations):
+        if not active_set:
+            break
+
+        state_refs: list[tuple[int, BeamState]] = []
+        tokens_batch: list[list[str]] = []
+        weapons_batch: list[str] = []
+        for case_idx in active_set:
+            for state in beams[case_idx]:
+                state_refs.append((case_idx, state))
+                tokens_batch.append(
+                    expand_capstones_to_context(state.capstones)
+                )
+                weapons_batch.append(weapon_ids[case_idx])
+
+        raw_batch = predict_batch_fn(tokens_batch, weapons_batch)
+        probs_batch, _ = _unpack_batch_predictions(
+            raw_batch, batch_size=len(state_refs)
+        )
+
+        by_case: dict[int, list[tuple[BeamState, Mapping[str, float]]]] = (
+            defaultdict(list)
+        )
+        for (case_idx, state), probs in zip(state_refs, probs_batch):
+            by_case[case_idx].append((state, probs))
+
+        next_active_set = set(active_set)
+        for case_idx in list(active_set):
+            candidates: list[BeamState] = []
+
+            for state, probs in by_case.get(case_idx, []):
+                for next_token, lp in sorted(
+                    probs.items(),
+                    key=lambda kv: kv[1],
+                    reverse=True,
+                ):
+                    try:
+                        next_cap = AbilityToken.from_vocab_entry(next_token)
+                    except ValueError:
+                        continue
+
+                    new_caps = dict(state.capstones)
+                    if next_cap.main_only:
+                        if next_token in new_caps:
+                            continue
+                        new_caps[next_token] = next_cap
+                    else:
+                        existing_tokens_for_family = [
+                            k
+                            for k, v in new_caps.items()
+                            if v.family == next_cap.family
+                        ]
+                        if not existing_tokens_for_family:
+                            new_caps[next_token] = next_cap
+                        else:
+                            can_replace = False
+                            for old_token_key in existing_tokens_for_family:
+                                old_cap = new_caps[old_token_key]
+                                if next_cap.min_ap > old_cap.min_ap:
+                                    del new_caps[old_token_key]
+                                    can_replace = True
+                            if can_replace:
+                                new_caps[next_token] = next_cap
+                            else:
+                                continue
+
+                    new_log_prob = state.log_prob + lp + token_bonus
+                    new_family_logp = dict(state.family_logp)
+                    if lp > 0:
+                        prev_lp = new_family_logp.get(
+                            next_cap.family, float("-inf")
+                        )
+                        new_family_logp[next_cap.family] = max(
+                            prev_lp, float(lp)
+                        )
+
+                    candidates.append(
+                        BeamState(
+                            capstones=new_caps,
+                            log_prob=new_log_prob,
+                            family_logp=new_family_logp,
+                            trace=[],
+                        )
+                    )
+
+                candidates.append(
+                    BeamState(
+                        capstones=dict(state.capstones),
+                        log_prob=state.log_prob,
+                        family_logp=dict(state.family_logp),
+                        trace=[],
+                    )
+                )
+
+            candidates.sort(key=lambda s: s.log_prob, reverse=True)
+            beams[case_idx] = candidates[:beam_size]
+
+            for st in beams[case_idx]:
+                build, penalty = allocator.allocate(
+                    st.capstones, priority=st.family_logp
+                )
+                if build is None or already_seen(case_idx, build):
+                    continue
+                top_candidates_per_case[case_idx].append(
+                    {
+                        "score": st.log_prob,
+                        "penalty": (
+                            penalty if penalty is not None else float("inf")
+                        ),
+                        "build": build,
+                    }
+                )
+
+            current_signatures = {
+                tuple(sorted(st.capstones.keys())) for st in beams[case_idx]
+            }
+            prev_sigs = prev_signatures_per_case[case_idx]
+            any_new = any(sig not in prev_sigs for sig in current_signatures)
+            prev_sigs.update(current_signatures)
+            if not any_new:
+                next_active_set.discard(case_idx)
+
+        active_set = next_active_set
+
+    results: list[Optional[list[Build]]] = []
+    for case_idx in range(num_cases):
+        candidates = top_candidates_per_case[case_idx]
+        if not candidates:
+            results.append(None)
+            continue
+
+        candidates.sort(
+            key=lambda c: (
+                -c["build"].total_ap,
+                c["penalty"],
+                -c["score"],
+            )
+        )
+        results.append([c["build"] for c in candidates[:top_k]])
+
+    return results
