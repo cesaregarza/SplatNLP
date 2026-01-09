@@ -1,5 +1,6 @@
 import os
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -49,6 +50,8 @@ def train_model(
     scaler: GradScaler | None = None,
     metric_update_interval: int = 1,
     ddp: bool = False,
+    checkpoint_dir: str | Path | None = None,
+    checkpoint_interval: int = 1,
 ) -> tuple[dict[str, dict[str, list[float]]], torch.nn.Module]:
     device = torch.device(config.device)
     model.to(device)
@@ -90,6 +93,14 @@ def train_model(
 
     best_model = None
     best_val_f1 = 0
+    checkpoint_path = Path(checkpoint_dir) if checkpoint_dir else None
+    if checkpoint_path is not None:
+        if (
+            (not ddp)
+            or (not torch.distributed.is_initialized())
+            or (torch.distributed.get_rank() == 0)
+        ):
+            checkpoint_path.mkdir(parents=True, exist_ok=True)
 
     start_time = time.time()
     for epoch in range(config.num_epochs):
@@ -154,6 +165,18 @@ def train_model(
             best_model = model.state_dict()
 
         scheduler.step(val_metrics["loss"])
+        if (
+            checkpoint_path is not None
+            and (epoch + 1) % max(1, checkpoint_interval) == 0
+        ):
+            if (
+                (not ddp)
+                or (not torch.distributed.is_initialized())
+                or (torch.distributed.get_rank() == 0)
+            ):
+                checkpoint_file = checkpoint_path / f"epoch_{epoch + 1:03d}.pth"
+                torch.save(model.state_dict(), checkpoint_file)
+
         if early_stopping(val_metrics["loss"]):
             if verbose:
                 print("Early stopping triggered")

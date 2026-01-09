@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import os
 import time
@@ -70,6 +71,9 @@ class RunConfig:
     wandb_entity: str | None = None
     wandb_run_name: str | None = None
     wandb_tags: list[str] | None = None
+    checkpoint_dir: str | None = None
+    checkpoint_interval: int = 1
+    run_id: str = ""
     device: str = "cpu"
     verbose: bool = True
 
@@ -101,6 +105,7 @@ def run_basic_training(
             else:
                 run_name = (
                     run_config.wandb_run_name
+                    or run_config.run_id
                     or f"basic_{generate_id()}"
                 )
                 wandb_run = wandb.init(
@@ -119,7 +124,11 @@ def run_basic_training(
                     "Weights & Biases run initialised: %s", wandb.run.url
                 )
         else:
-            run_name = run_config.wandb_run_name or f"basic_{generate_id()}"
+            run_name = (
+                run_config.wandb_run_name
+                or run_config.run_id
+                or f"basic_{generate_id()}"
+            )
             wandb_run = wandb.init(
                 project=run_config.wandb_project,
                 entity=run_config.wandb_entity,
@@ -219,6 +228,12 @@ def run_basic_training(
         run_config.batch_size,
         run_config.num_masks_per_set,
     )
+    if run_config.checkpoint_dir:
+        logger.info(
+            "Checkpointing every %d epoch(s) to %s",
+            run_config.checkpoint_interval,
+            run_config.checkpoint_dir,
+        )
     train_start = time.time()
     metrics_history, trained_model = train_model(
         model,
@@ -230,6 +245,8 @@ def run_basic_training(
         scaler=scaler,
         metric_update_interval=run_config.metric_update_interval,
         ddp=run_config.distributed,
+        checkpoint_dir=run_config.checkpoint_dir,
+        checkpoint_interval=run_config.checkpoint_interval,
     )
     logger.info("Training completed in %.2fs", time.time() - train_start)
 
@@ -356,6 +373,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-null", action="store_true")
     parser.add_argument("--metric-update-interval", type=int, default=1)
     parser.add_argument("--distributed", action="store_true")
+    parser.add_argument("--run-id", type=str)
+    parser.add_argument("--checkpoint-dir", type=str)
+    parser.add_argument("--checkpoint-interval", type=int, default=1)
+    parser.add_argument("--no-checkpoints", action="store_true")
     parser.add_argument(
         "--wandb-log",
         action=argparse.BooleanOptionalAction,
@@ -401,11 +422,18 @@ def main() -> None:
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    run_id = args.run_id or _compute_run_id(args)
+    output_root = Path(args.output_dir)
+    output_dir = output_root / f"run_{run_id}"
+    logging.getLogger(__name__).info(
+        "Run ID: %s (output dir: %s)", run_id, output_dir
+    )
+
     data_config = DataConfig(
         data_path=args.data_path,
         vocab_path=args.vocab_path,
         weapon_vocab_path=args.weapon_vocab_path,
-        output_dir=args.output_dir,
+        output_dir=str(output_dir),
         table_name=args.table_name,
         max_rows=args.max_rows,
         fraction=args.fraction,
@@ -422,6 +450,12 @@ def main() -> None:
         use_layer_norm=args.use_layer_norm,
         dropout=args.dropout,
     )
+    checkpoint_dir = None
+    if not args.no_checkpoints:
+        checkpoint_dir = args.checkpoint_dir or str(
+            output_dir / "checkpoints"
+        )
+
     run_config = RunConfig(
         num_epochs=args.num_epochs,
         batch_size=args.batch_size,
@@ -443,11 +477,51 @@ def main() -> None:
         wandb_entity=args.wandb_entity,
         wandb_run_name=args.wandb_run_name,
         wandb_tags=args.wandb_tags,
+        checkpoint_dir=checkpoint_dir,
+        checkpoint_interval=args.checkpoint_interval,
+        run_id=run_id,
         device=device,
         verbose=args.verbose,
     )
 
     run_basic_training(data_config, model_config, run_config)
+
+
+def _compute_run_id(args: argparse.Namespace) -> str:
+    payload = {
+        "data_path": args.data_path,
+        "vocab_path": args.vocab_path,
+        "weapon_vocab_path": args.weapon_vocab_path,
+        "table_name": args.table_name,
+        "max_rows": args.max_rows,
+        "fraction": args.fraction,
+        "validation_size": args.validation_size,
+        "test_size": args.test_size,
+        "embedding_dim": args.embedding_dim,
+        "hidden_dim": args.hidden_dim,
+        "num_layers": args.num_layers,
+        "num_heads": args.num_heads,
+        "num_inducing_points": args.num_inducing_points,
+        "use_layer_norm": args.use_layer_norm,
+        "dropout": args.dropout,
+        "num_epochs": args.num_epochs,
+        "batch_size": args.batch_size,
+        "num_workers": args.num_workers,
+        "learning_rate": args.learning_rate,
+        "weight_decay": args.weight_decay,
+        "clip_grad_norm": args.clip_grad_norm,
+        "scheduler_factor": args.scheduler_factor,
+        "scheduler_patience": args.scheduler_patience,
+        "patience": args.patience,
+        "use_mixed_precision": args.use_mixed_precision,
+        "num_masks_per_set": args.num_masks_per_set,
+        "skew_factor": args.skew_factor,
+        "include_null": args.include_null,
+        "metric_update_interval": args.metric_update_interval,
+        "distributed": args.distributed,
+    }
+    payload_bytes = orjson.dumps(payload, option=orjson.OPT_SORT_KEYS)
+    return hashlib.sha1(payload_bytes).hexdigest()[:12]
 
 
 if __name__ == "__main__":

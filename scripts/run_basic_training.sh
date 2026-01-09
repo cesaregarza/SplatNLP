@@ -32,6 +32,10 @@ SKEW_FACTOR="${SKEW_FACTOR:-1.2}"
 INCLUDE_NULL="${INCLUDE_NULL:-}"
 METRIC_UPDATE_INTERVAL="${METRIC_UPDATE_INTERVAL:-50}"
 DEVICE="${DEVICE:-}"
+CHECKPOINT_DIR="${CHECKPOINT_DIR:-}"
+CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-1}"
+NO_CHECKPOINTS="${NO_CHECKPOINTS:-}"
+RUN_ID="${RUN_ID:-}"
 
 # DDP settings (set USE_DDP=1 to enable).
 USE_DDP="${USE_DDP:-}"
@@ -72,6 +76,7 @@ CMD=(
   --num-masks-per-set "${NUM_MASKS_PER_SET}"
   --skew-factor "${SKEW_FACTOR}"
   --metric-update-interval "${METRIC_UPDATE_INTERVAL}"
+  --checkpoint-interval "${CHECKPOINT_INTERVAL}"
 )
 
 if [[ -n "${INCLUDE_NULL}" ]]; then
@@ -80,6 +85,16 @@ fi
 
 if [[ -n "${DEVICE}" ]]; then
   CMD+=(--device "${DEVICE}")
+fi
+
+if [[ -n "${NO_CHECKPOINTS}" ]]; then
+  CMD+=(--no-checkpoints)
+elif [[ -n "${CHECKPOINT_DIR}" ]]; then
+  CMD+=(--checkpoint-dir "${CHECKPOINT_DIR}")
+fi
+
+if [[ -n "${RUN_ID}" ]]; then
+  CMD+=(--run-id "${RUN_ID}")
 fi
 
 if [[ -n "${WANDB_LOG}" ]]; then
