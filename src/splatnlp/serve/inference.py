@@ -1,3 +1,5 @@
+"""Utility functions for running inference with ``SetCompletionModel``."""
+
 import logging
 import time
 
@@ -17,6 +19,8 @@ def inference(
     weapon_vocab: dict[str, int],
     pad_token_id: int,
 ) -> tuple[list[tuple[str, float]], float]:
+    """Generate predictions for a tokenized build."""
+
     start_time = time.time()
     logging.info("Starting inference")
     logging.info(f"Target: {target}")
@@ -46,6 +50,8 @@ def inference(
 
 
 def normalized_entropy(preds: np.ndarray) -> float:
+    """Return the entropy normalized to ``[0, 1]`` for a distribution."""
+
     probs = preds / np.sum(preds)
     entropy = -np.sum(probs * np.log2(probs + 1e-10))
     max_entropy = np.log2(len(preds))
